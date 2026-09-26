@@ -1,1 +1,0 @@
-GW-DBG: bytes_len=132 body_json_is_some=true in_fmt=anthropic bytes_head={"model": "claude-opus-5", "max_tokens": 256, "messages": [{"role": "user", "content": "What is 2+2? Reply only with the

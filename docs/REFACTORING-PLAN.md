@@ -139,16 +139,24 @@
 
 **為何可安全刪除**：那 9 個腳本是**編碼災難（mojibake）時期**用來批次改字串的臨時工具，腳本內還留著 `濡?flatkey`、`鐢ㄩ噯鎺у埗` 這類**本身就是壞字串**的比對目標。我已掃描 `src/` 與 `src-tauri/src/` 全部 `.rs/.ts/.tsx/.css`，**確認 mojibake 已完全修復、無殘留**，故這些工具已無用途。
 
-### 2.3 仍待你決定的殘留
+### 2.3 殘留清理（已依確認執行）
 
-| 項目 | 大小 | 我的建議 |
-|---|---:|---|
-| `tauri-dev.log`（根目錄） | 32 KB | **可刪**。內容是一堆帶 ANSI 色碼的 Rust 編譯錯誤（開發期迭代痕跡），無 runtime 證據。已被 `*.log` 忽略，不影響 git。 |
-| `gen_icons.py`（根目錄） | 559 B | **可刪**。輸出目錄 `icon-candidates/` 已不存在，是死碼；正式版在 `icon-lab/gen_icons.py`。 |
-| `gw_init.txt`、`gw_req_debug.txt`（根目錄 + `token-gateway/` 各一份） | 15 + 194 B | **建議刪除 `token-gateway/` 內的兩份**；根目錄的 `gw_req_debug.txt` 內容已保全到 `docs/evidence/`。 |
-| `token-gateway/check_mapping.py`、`test_anthropic.py`、`test_body.json` | 271 + 639 + 125 B | **建議保留並整理進 `scripts/`**。這三個是手動 E2E 驗證工具，對 §5 的驗證工作有直接價值（`test_anthropic.py` 就是產生 §5.1 證據的腳本）。 |
+| 項目 | 處置 |
+|---|---|
+| `tauri-dev.log`（32 KB） | ✅ 已刪除。內容僅為帶 ANSI 色碼的開發期 Rust 編譯錯誤，無 runtime 證據 |
+| `gen_icons.py`（根目錄） | ✅ 已刪除。輸出目錄 `icon-candidates/` 已不存在，是死碼 |
+| `gw_init.txt`、`gw_req_debug.txt`（根目錄 + `token-gateway/` 共 4 份） | ✅ 已刪除。全部是「已移除的 debug 版本」殘留輸出；其中兩份**內容不同**且具診斷價值，已先保全至 `docs/evidence/` |
+| `check_mapping.py`、`test_anthropic.py`、`test_body.json` | ✅ 已移至 `scripts/`。這三個是手動 E2E 驗證工具，對 §5 的驗證工作有直接價值 |
 
-> 以上皆未刪除，等你指示。**注意 `test_anthropic.py` 內硬編了一把 `sk-local-…` 金鑰**——雖然是本地 Key，仍建議改用環境變數讀取。
+**證據保全結果**（`docs/evidence/`）——原本看似重複，實為三筆獨立樣本，且**互相矛盾**，這正是 §5.2 推論的基礎：
+
+| 檔案 | 來源 | 價值 |
+|---|---|---|
+| `2026-09-26-body-parse-OK.txt` | 根目錄 `gw_req_debug.txt` | 成功案例（`bytes_len=132` ＝ 原始長度） |
+| `2026-09-26-body-parse-FAILED.log` | `token-gateway/gw_debug.log` | 失敗案例一（`bytes_len=107` ＝ 去引號長度） |
+| `2026-09-26-body-parse-FAILED-openai.log` | `token-gateway/gw_req_debug.txt` | 失敗案例二（`bytes_len=69` ＝ 去引號長度） |
+
+> ⚠️ **`scripts/test_anthropic.py` 內硬編了一把 `sk-local-…` 金鑰**。雖是本地 Key 且已被 `.gitignore` 之外的規則納入追蹤，仍**建議改為從環境變數讀取**（列入 Phase 1 順手處理）。
 
 ---
 
@@ -527,24 +535,32 @@ client: Client::builder()
 | 4 | **重複成本** | 第一次請求已經完整送到上游（可能已計費、已進入推理），失敗後再送一次 → 雙倍延遲 |
 | 5 | **不可觀測** | 剝離了什麼只存在記憶體、沒有落庫。事後無法回答「這個 400 到底剝了什麼、剝完成功了沒」 |
 
-**另外，`gw_debug.log` 那個 400 我到現在仍無法確定根因 —— 這正好證明了第 5 點。** 讓我把這件事說清楚，因為它是一個重要的方法論教訓：
+**另外，「body 解析失敗」這條線索經細算後，我判定它極可能是假警報 —— 而不是真 bug。** 這個推理過程值得完整記錄，因為它示範了為什麼第 0 層必須先做。
 
-我起初以為這份日誌是「body 解析失敗」的鐵證：
+我手上有**三份**目測矛盾的 debug 輸出：
 
-```
-GW-DBG: bytes_len=107 body_json_is_some=false in_fmt=anthropic bytes_head={model:claude-opus-5,...}
-GW-DBG: translated but fwd_value=None!
-```
+| 檔案 | `in_fmt` | `body_json_is_some` | 日誌中的 `bytes_len` | 該 body 的**真實**長度 |
+|---|---|---|---:|---:|
+| `...-body-parse-OK.txt` | `anthropic` | **true** | **132** | 132 ✅ 吻合 |
+| `...-body-parse-FAILED.log` | `anthropic` | false | **107** | 123 ✗ |
+| `...-body-parse-FAILED-openai.log` | `openai` | false | **69** | 83 ✗ |
 
-但我細算後發現：`test_body.json` 的內容扣掉 16 個雙引號字元，**長度正好是 107**——也就是說日誌印出的 `bytes_head` 是**被剝掉引號的版本**，而 `bytes_len=107` 也是剝掉後算的。所以那個 body **本來是合法 JSON**，只是那段（現已移除的）debug 程式碼把它「美化」掉了。
+**關鍵在於：三者的 `bytes_len` 用了兩套不同的算法。**
 
-**結論：這份日誌無法區分兩種可能**——
-- **(a)** 合法 JSON 真的被 `parse_body_json` 拒絕（真 bug）；
-- **(b)** 是那段已被刪除的 debug 程式碼自己弄壞了 body（假警報）。
+- **成功案例**：`test_anthropic.py` 經 `json.dumps` 產生的 body，我把每個 token 逐一加總（含 `": "` 與 `", "` 分隔符）＝ **正好 132** → 與日誌吻合 ⇒ 這個 `bytes_len` 是**原始位元組長度**。
+- **失敗案例一**：`test_body.json` 為 123 bytes；扣掉 16 個雙引號字元 ＝ **正好 107** → 與日誌吻合 ⇒ 這個 `bytes_len` 是**剝掉引號後的長度**。
+- **失敗案例二**：`{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"What is 2+2?"}]}` 為 83 bytes；扣掉 14 個引號 ＝ **正好 69** → 與日誌吻合 ⇒ 同樣是**剝掉引號後的長度**。
 
-**兩者都可能，而我沒有足夠資訊判斷。** 修法不是「猜一個改上去」，而是：**下次失敗時，把原始位元組以 hex/base64 記下來**。這直接推導出 §5.3 的第 0 層。
+**兩個獨立的失敗樣本都呈現「`bytes_len` ＝ 去引號後長度」，而唯一的成功樣本用的是原始長度。** 這強烈指向：**產生那兩筆失敗日誌的 debug 版本，是在剝掉引號之後（或直接對被剝掉的緩衝區）才做 JSON 解析判定** —— 也就是說，**是那段已被刪除的 debug 程式碼自己把 body 弄壞的，不是 `parse_body_json` 有 bug。**
 
-> 📎 證據已保全在 `docs/evidence/2026-09-26-body-parse-FAILED.log`（107 bytes 的失敗案例，`body_json_is_some=false`）與 `docs/evidence/2026-09-26-body-parse-OK.txt`（132 bytes 的成功案例，`body_json_is_some=true`）。兩者對照可看出 debug 輸出格式不一致，這是判定「日誌本身不可信」的依據。
+**結論修正**：
+- ❌ 我**不再**把這個 400 列為「已證實的 body 解析 bug」。
+- ✅ 它極可能是**已被移除的 debug instrumentation 造成的假警報**。
+- ⚠️ 但這仍是**推論而非證明**（也有可能那段 debug 碼只影響輸出、而真 body 另有問題，例如後半段含非法 UTF-8 —— 前 130 字的預覽看不出來）。
+
+**因此修法不變，而且更有必要**：不要猜，**下次失敗時把原始位元組以 hex/base64 落庫**。這正是 §5.3 第 0 層的核心。**在拿到 hex 之前，我不會針對這個 400 改任何程式碼。**
+
+> 📎 三份證據已全部保全於 `docs/evidence/`。**注意**：這些是「已刪除的 debug 版本」的產物，**不代表當前程式碼有 bug** —— 現行程式碼已無這些 `GW-DBG` 輸出。
 
 ### 5.3 我的建議：四層處理，由外而內
 
@@ -661,8 +677,9 @@ GW-DBG: translated but fwd_value=None!
 - [x] 完整架構與 bug 診斷（本文件）
 - [x] zip 離線快照 + Git 基準線（`38f060a`）
 - [x] 垃圾清理、`.gitignore` / `.gitattributes`
-- [x] 保全診斷證據到 `docs/evidence/`
-- [ ] **待你決定**：§2.3 的殘留清理、`target/` 釋放（見 §6.1）
+- [x] 保全診斷證據到 `docs/evidence/`（3 份，含推導出 §5.2 結論的關鍵矛盾）
+- [x] 殘留清理（§2.3）＋ 驗證腳本整理進 `scripts/`
+- [x] 決策：`target/` 保留（理由見 §6.1）
 
 ### Phase 1：低風險命中 + 觀測設施（建議先做）
 
@@ -708,13 +725,12 @@ GW-DBG: translated but fwd_value=None!
 
 ---
 
-### 6.1 待你決定的兩件事
+### 6.1 已決定的兩件事（✅ 已結案）
 
-1. **`src-tauri/target/`（29 GB）是否現在釋放？**
-   - ✅ 好處：省 29 GB
-   - ⚠️ 代價：下次 `cargo test` 需完整重建（Tauri + reqwest + tokio，估計數分鐘至十餘分鐘）
-   - 💡 我的建議：**若你打算近期就開始 Phase 1，先保留**；若要先擱置一段時間，則清理。
-2. **§2.3 的殘留是否一併清理？**（`tauri-dev.log`、根目錄 `gen_icons.py`、重複的 `gw_init.txt`／`gw_req_debug.txt`）
+1. **`src-tauri/target/`（29 GB）→ 決定保留。** 因為要立即進入 Phase 1，而 Phase 1 第一步就是 `cargo test`；清掉 target 會白花一次 10 分鐘以上的完整重建。**待 Phase 1 完成、進入穩定期後再釋放。**
+2. **§2.3 殘留清理 → 決定全部執行**（`tauri-dev.log`、根目錄 `gen_icons.py`、4 份重複 debug 檔），並把 3 個驗證腳本整理進 `scripts/`。**已於本次完成**，其中兩份 debug 檔的差異內容已先保全至 `docs/evidence/`（見 §2.3）。
+
+**當前狀態**：Phase 0 全部結案 → **進入 Phase 1**。
 
 ---
 
@@ -746,8 +762,11 @@ tar -xf '_backup\token-counter-snapshot-20260926-195436.zip' './token-gateway/sr
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/evidence/2026-09-26-body-parse-FAILED.log` | `bytes_len=107`、`body_json_is_some=false`、`translated but fwd_value=None!` → 400 失敗案例 |
-| `docs/evidence/2026-09-26-body-parse-OK.txt` | `bytes_len=132`、`body_json_is_some=true` → 成功對照組 |
+| `docs/evidence/2026-09-26-body-parse-OK.txt` | `bytes_len=132`（＝原始長度）、`body_json_is_some=true` → 成功對照組 |
+| `docs/evidence/2026-09-26-body-parse-FAILED.log` | `bytes_len=107`（＝去引號長度）、`body_json_is_some=false`、`translated but fwd_value=None!` → 失敗案例一 |
+| `docs/evidence/2026-09-26-body-parse-FAILED-openai.log` | `bytes_len=69`（＝去引號長度）、`body_json_is_some=false`、`in_fmt=openai` → 失敗案例二 |
+
+> 三者的 `bytes_len` 用了兩套算法（成功＝原始、失敗＝去引號），此矛盾是 §5.2 判定「假警報」的依據。
 
 ### 8.2 重現指令
 
@@ -761,8 +780,8 @@ cd 'D:\token counter\token-gateway'; npx tsc --noEmit
 # live 測試（會寫入真實工具設定，請先確認備份）
 cd 'D:\token counter\token-gateway\src-tauri'; cargo test live_ -- --ignored --test-threads=1
 
-# 手動 E2E（Anthropic 格式）
-cd 'D:\token counter\token-gateway'; python test_anthropic.py
+# 手動 E2E（Anthropic 格式；需先啟動網關並設定 TOKEN_GATEWAY_KEY）
+cd 'D:\token counter\scripts'; python test_anthropic.py
 ```
 
 ### 8.3 關鍵座標速查
