@@ -1,0 +1,43 @@
+# 正規化行尾：倉庫內一律 LF，避免 Windows / CI 之間整檔 diff 噪音
+* text=auto eol=lf
+
+# Windows 專用腳本保留 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二進位（禁止行尾轉換與 diff）
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.webp binary
+*.zip  binary
+*.exe  binary
+*.dll  binary
+*.lib  binary
+*.pdb  binary
+*.rlib binary
+*.so   binary
+*.dylib binary
+*.woff binary
+*.woff2 binary
+
+# 語言標註（讓 GitHub 統計與 diff 更準確）
+*.rs   text diff=rust
+*.ts   text
+*.tsx  text
+*.css  text
+*.html text
+*.json text
+*.toml text
+*.md   text
+*.yml  text
+*.yaml text
+Cargo.toml text
+
+# 鎖定檔不要產生巨型 diff
+pnpm-lock.yaml -diff linguist-generated
+Cargo.lock     -diff linguist-generated

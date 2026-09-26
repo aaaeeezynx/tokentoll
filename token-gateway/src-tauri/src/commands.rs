@@ -1,0 +1,894 @@
+//! Tauri 命令層（M1）：只讀狀態查詢。M2 起陸續接入增刪改查。
+
+use serde::Serialize;
+use tauri::{AppHandle, Manager, State};
+
+use crate::db::{self, DbState, SCHEMA_VERSION};
+use crate::history;
+use crate::keys;
+use crate::proxy::{self, ProxyState};
+use crate::tools;
+use crate::usage;
+
+#[derive(Serialize)]
+pub struct DbStatus {
+    pub path: String,
+    pub schema_version: i32,
+    pub provider_count: i64,
+    pub key_count: i64,
+    pub log_count: i64,
+}
+
+#[tauri::command]
+pub fn db_status(db: State<DbState>) -> Result<DbStatus, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
+    Ok(DbStatus {
+        path: db.path.to_string_lossy().to_string(),
+        schema_version: SCHEMA_VERSION,
+        provider_count: count("SELECT COUNT(*) FROM providers"),
+        key_count: count("SELECT COUNT(*) FROM local_keys"),
+        log_count: count("SELECT COUNT(*) FROM request_logs"),
+    })
+}
+
+#[derive(Serialize)]
+pub struct ProxyStatus {
+    pub running: bool,
+    pub listen: String,
+    pub port: u16,
+    pub started_at: Option<i64>,
+}
+
+/// 真實狀態：讀 ProxyState（M1 存根已替換）。
+#[tauri::command]
+pub fn proxy_status(proxy: State<ProxyState>) -> ProxyStatus {
+    let inner = proxy.inner.lock().unwrap_or_else(|e| e.into_inner());
+    match inner.as_ref() {
+        Some(r) => ProxyStatus {
+            running: true,
+            listen: "127.0.0.1".to_string(),
+            port: r.port,
+            started_at: Some(r.started_at),
+        },
+        None => ProxyStatus {
+            running: false,
+            listen: "127.0.0.1".to_string(),
+            port: 0,
+            started_at: None,
+        },
+    }
+}
+
+/// C 方案：僅檢測連接埠是否可用，不啟動。
+#[tauri::command]
+pub fn proxy_check_port(port: u16) -> Result<(), String> {
+    proxy::check_port(port)
+}
+
+#[tauri::command]
+pub async fn proxy_start(
+    db: State<'_, DbState>,
+    proxy: State<'_, ProxyState>,
+    port: u16,
+) -> Result<ProxyStatus, String> {
+    if !(1..=65535).contains(&port) {
+        return Err("連接埠範圍應為 1–65535".to_string());
+    }
+    {
+        let inner = proxy.inner.lock().map_err(|e| e.to_string())?;
+        if let Some(r) = inner.as_ref() {
+            if r.port == port {
+                return Ok(ProxyStatus {
+                    running: true,
+                    listen: "127.0.0.1".to_string(),
+                    port,
+                    started_at: Some(r.started_at),
+                });
+            }
+            return Err(format!(
+                "網關已在連接埠 {} 執行，請先停止再切換連接埠",
+                r.port
+            ));
+        }
+    }
+    proxy::check_port(port)?;
+    let db_path = db.path.clone();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                format!("連接埠 {port} 已被佔用（本機可能有 cc-switch 或其他代理在執行）")
+            } else {
+                format!("連接埠 {port} 綁定失敗：{e}")
+            }
+        })?;
+    let handle = tokio::spawn(async move {
+        if let Err(e) = proxy::serve(db_path, listener).await {
+            eprintln!("gateway error: {e}");
+        }
+    });
+    {
+        let mut inner = proxy.inner.lock().map_err(|e| e.to_string())?;
+        *inner = Some(proxy::RunningProxy {
+            port,
+            started_at: crate::fsutil::now_ms(),
+            handle,
+        });
+    }
+    Ok(ProxyStatus {
+        running: true,
+        listen: "127.0.0.1".to_string(),
+        port,
+        started_at: None,
+    })
+}
+
+#[tauri::command]
+pub fn proxy_stop(proxy: State<ProxyState>) -> Result<(), String> {
+    let mut inner = proxy.inner.lock().map_err(|e| e.to_string())?;
+    if let Some(r) = inner.take() {
+        r.handle.abort();
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- 設定 ---
+
+#[derive(Serialize)]
+pub struct AppSettings {
+    pub gateway_port: u16,
+    pub auto_start_proxy: bool,
+    pub accent: String,
+}
+
+const ACCENT_IDS: &[&str] = &["blue", "green", "purple", "pink"];
+
+#[tauri::command]
+pub fn settings_get(db: State<DbState>) -> Result<AppSettings, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let port = db::get_setting(&conn, "gateway_port")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(db::DEFAULT_GATEWAY_PORT);
+    let auto = db::get_setting(&conn, "auto_start_proxy")
+        .is_some_and(|v| v == "1");
+    let accent = db::get_setting(&conn, "accent")
+        .filter(|v| ACCENT_IDS.contains(&v.as_str()))
+        .unwrap_or_else(|| "blue".to_string());
+    Ok(AppSettings {
+        gateway_port: port,
+        auto_start_proxy: auto,
+        accent,
+    })
+}
+
+/// 外觀強調色持久化（白名單校驗；SQLite 提交即落盤，不受 WebView 儲存刷盤時機影響）
+#[tauri::command]
+pub fn settings_set_accent(db: State<DbState>, accent: String) -> Result<String, String> {
+    if !ACCENT_IDS.contains(&accent.as_str()) {
+        return Err(format!("未知的強調色：{accent}"));
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    db::set_setting(&conn, "accent", &accent).map_err(|e| e.to_string())?;
+    Ok(accent)
+}
+
+#[tauri::command]
+pub fn settings_set(
+    db: State<DbState>,
+    proxy: State<ProxyState>,
+    gateway_port: u16,
+    auto_start_proxy: bool,
+) -> Result<AppSettings, String> {
+    if !(1..=65535).contains(&gateway_port) {
+        return Err("連接埠範圍應為 1–65535".to_string());
+    }
+    {
+        let inner = proxy.inner.lock().map_err(|e| e.to_string())?;
+        if let Some(r) = inner.as_ref() {
+            if r.port != gateway_port {
+                return Err(format!(
+                    "網關正在連接埠 {} 執行，請先停止再修改連接埠",
+                    r.port
+                ));
+            }
+        }
+    }
+    proxy::check_port(gateway_port)?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    db::set_setting(&conn, "gateway_port", &gateway_port.to_string())
+        .map_err(|e| e.to_string())?;
+    db::set_setting(
+        &conn,
+        "auto_start_proxy",
+        if auto_start_proxy { "1" } else { "0" },
+    )
+    .map_err(|e| e.to_string())?;
+    drop(conn);
+    settings_get(db)
+}
+
+// ---------------------------------------------------------------- Key ---
+
+#[tauri::command]
+pub fn keys_list(db: State<DbState>) -> Result<Vec<keys::LocalKey>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    keys::list_keys(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn key_create(
+    db: State<DbState>,
+    input: keys::KeyInput,
+) -> Result<keys::KeyCreated, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    keys::create_key(&conn, &input)
+}
+
+#[tauri::command]
+pub fn key_update(
+    db: State<DbState>,
+    id: i64,
+    input: keys::KeyInput,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    keys::update_key(&conn, id, &input)
+}
+
+#[tauri::command]
+pub fn key_set_enabled(
+    db: State<DbState>,
+    id: i64,
+    enabled: bool,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    keys::set_key_enabled(&conn, id, enabled)
+}
+
+#[tauri::command]
+pub fn key_delete(db: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    keys::delete_key(&conn, id)
+}
+
+#[tauri::command]
+pub fn key_rotate(db: State<DbState>, id: i64) -> Result<keys::KeyCreated, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    keys::rotate_key(&conn, id)
+}
+
+#[tauri::command]
+pub fn key_reveal(db: State<DbState>, id: i64) -> Result<String, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    keys::reveal_key(&conn, id)
+}
+
+// ---------------------------------------------------------------- 用量 ---
+
+/// 範圍換算為起始毫秒時間戳（本地時區；today 取當地 0 點）。
+fn range_start(range: &str) -> i64 {
+    let now = chrono::Local::now();
+    match range {
+        "today" => now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .and_then(|d| d.and_local_timezone(chrono::Local).single())
+            .map(|d| d.timestamp_millis())
+            .unwrap_or(0),
+        "7d" => now.timestamp_millis() - 7 * 86400 * 1000,
+        "30d" => now.timestamp_millis() - 30 * 86400 * 1000,
+        "90d" => now.timestamp_millis() - 90 * 86400 * 1000,
+        "180d" => now.timestamp_millis() - 180 * 86400 * 1000,
+        "365d" => now.timestamp_millis() - 365 * 86400 * 1000,
+        _ => 0,
+    }
+}
+
+/// 自訂期間（range="custom"）必須帶起止；起必須早於止，跨度上限 365 天，止不能是未來。
+pub(crate) fn resolve_filter(
+    range: &str,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<usage::UsageFilter, String> {
+    let now = chrono::Local::now().timestamp_millis();
+    let start = start_ts.unwrap_or_else(|| range_start(range));
+    let end = end_ts.unwrap_or(now);
+    if range == "custom" && (start_ts.is_none() || end_ts.is_none()) {
+        return Err("自訂期間需指定起止時間".to_string());
+    }
+    if start >= end {
+        return Err("起始時間必須早於結束時間".to_string());
+    }
+    if end - start > 366 * 86400 * 1000 {
+        return Err("自訂期間跨度上限 365 天".to_string());
+    }
+    if end > now + 60 * 1000 {
+        return Err("結束時間不能是未來".to_string());
+    }
+    Ok(usage::UsageFilter {
+        start_ts: start,
+        end_ts: if end_ts.is_some() { Some(end) } else { None },
+        app: app.filter(|s| !s.is_empty()),
+        provider_id,
+        model: model.filter(|s| !s.is_empty()),
+    })
+}
+
+/// bucket 粒度按實際跨度切（自訂長跨度按週）。
+fn range_bucket_span(start_ts: i64, end_ts: Option<i64>) -> i64 {
+    let now = chrono::Local::now().timestamp_millis();
+    let span = end_ts.unwrap_or(now) - start_ts;
+    if span <= 2 * 86400 * 1000 {
+        3600
+    } else if span <= 186 * 86400 * 1000 {
+        86400
+    } else {
+        7 * 86400
+    }
+}
+
+#[tauri::command]
+pub fn usage_summary(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<usage::UsageSummary, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    usage::summary(&conn, &f).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn usage_trend(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<Vec<usage::TrendBucket>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    let bucket = range_bucket_span(f.start_ts, f.end_ts);
+    usage::trend(&conn, &f, bucket).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn usage_trend_by_app(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<Vec<usage::TrendAppRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    let bucket = range_bucket_span(f.start_ts, f.end_ts);
+    usage::trend_by_app(&conn, &f, bucket).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn usage_export_csv(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<String, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    usage::export_csv(&conn, &f).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn usage_by_provider(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<Vec<usage::ProviderStat>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    usage::by_provider(&conn, &f).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn usage_by_model(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<Vec<usage::ModelStat>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    usage::by_model(&conn, &f).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn usage_hourly(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<Vec<usage::HourlyBucket>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    usage::hourly(&conn, &f).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn subscription_fees(db: State<DbState>) -> Result<usage::SubscriptionFees, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::subscription_fees(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn price_quote(
+    db: State<DbState>,
+    provider_id: Option<i64>,
+    model_norm: String,
+    in_tok: i64,
+    out_tok: i64,
+    cache_read: i64,
+    cache_write: i64,
+) -> Result<usage::PriceQuote, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::price_quote(
+        &conn,
+        provider_id,
+        &model_norm,
+        in_tok,
+        out_tok,
+        cache_read,
+        cache_write,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn pricing_list(db: State<DbState>) -> Result<Vec<usage::Pricing>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pricing_list(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn pricing_upsert(
+    db: State<DbState>,
+    input: usage::PricingInput,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pricing_upsert(&conn, &input)
+}
+
+#[tauri::command]
+pub fn pricing_delete(db: State<DbState>, model_norm: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pricing_delete(&conn, &model_norm)
+}
+
+/// 清空全域預設定價（種子有版本旗標，不會在重啟後復活）。
+#[tauri::command]
+pub fn pricing_clear(db: State<DbState>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM pricing", [])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn pp_list(
+    db: State<DbState>,
+    provider_id: Option<i64>,
+) -> Result<Vec<usage::ProviderPricing>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let now = crate::fsutil::now_ms();
+    usage::pp_list(&conn, provider_id, now).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn pp_upsert(
+    db: State<DbState>,
+    input: usage::ProviderPricingInput,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pp_upsert(&conn, &input)
+}
+
+#[tauri::command]
+pub fn pp_delete(
+    db: State<DbState>,
+    provider_id: i64,
+    model_norm: String,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pp_delete(&conn, provider_id, &model_norm)
+}
+
+#[tauri::command]
+pub fn pp_periods(
+    db: State<DbState>,
+    provider_id: i64,
+    model_norm: String,
+) -> Result<Vec<usage::PricingPeriod>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pp_periods(&conn, provider_id, &model_norm).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn pp_period_add(
+    db: State<DbState>,
+    input: usage::PricingPeriodInput,
+) -> Result<i64, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pp_period_add(&conn, &input)
+}
+
+#[tauri::command]
+pub fn pp_period_update(
+    db: State<DbState>,
+    id: i64,
+    input: usage::PricingPeriodInput,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pp_period_update(&conn, id, &input)
+}
+
+#[tauri::command]
+pub fn pp_period_delete(db: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    usage::pp_period_delete(&conn, id)
+}
+
+// ---------------------------------------------------------------- 日誌 ---
+
+#[tauri::command]
+pub fn recent_logs(
+    db: State<DbState>,
+    limit: i64,
+) -> Result<Vec<proxy::LogRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    proxy::recent_logs(&conn, limit).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------- 歷史回填 ---
+
+/// 掃描本機會話來源（乾跑，只統計文件數/位元組/會話數，不寫庫）。
+#[tauri::command]
+pub fn history_scan() -> Result<Vec<history::ScanTool>, String> {
+    let home = dirs::home_dir().ok_or("找不到用戶主目錄".to_string())?;
+    Ok(history::scan_history(&home))
+}
+
+/// 執行回填（87MB 級解析放 blocking 執行緒，避免卡住命令執行緒）。
+#[tauri::command]
+pub async fn history_import(
+    app: AppHandle,
+    tools: Vec<String>,
+) -> Result<history::ImportSummary, String> {
+    for t in &tools {
+        if !["claude", "codex", "opencode"].contains(&t.as_str()) {
+            return Err(format!("未知工具：{t}"));
+        }
+    }
+    tokio::task::spawn_blocking(move || {
+        let st = app.state::<DbState>();
+        let conn = st.conn.lock().map_err(|e| e.to_string())?;
+        history::import_history(&conn, &tools)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn app_data_dir(app: AppHandle) -> Result<String, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .to_string())
+}
+
+#[tauri::command]
+pub fn tools_detect(port: u16) -> Vec<tools::ToolStatus> {
+    tools::detect_tools(port)
+}
+
+#[tauri::command]
+pub async fn tool_versions() -> Vec<tools::ToolVersion> {
+    tauri::async_runtime::spawn_blocking(tools::tool_versions)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn tool_latest() -> Vec<tools::ToolLatest> {
+    tauri::async_runtime::spawn_blocking(tools::tool_latest)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn tool_update(app: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || tools::tool_update_run(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn normalize_switch_request(
+    db: &DbState,
+    req: &mut tools::SwitchRequest,
+    port: u16,
+) -> Result<(), String> {
+    if let Some(pid) = req.provider_id {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let provider: Option<(String, String)> = conn
+            .query_row(
+                "SELECT base_url, api_format FROM providers WHERE id=?1 AND enabled=1",
+                rusqlite::params![pid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+        drop(conn);
+        let Some((base_url, api_format)) = provider else {
+            return Err("該來源不存在或已停用（可能已被刪除），請重新選擇來源接管".into());
+        };
+        req.base_url = if req.via_gateway {
+            tools::gateway_url(port, &req.app)
+        } else {
+            base_url
+        };
+        req.provider_format = Some(api_format);
+    } else {
+        if req.via_gateway {
+            req.base_url = tools::gateway_url(port, &req.app);
+        } else {
+            return Err("直連模式需先選擇來源".into());
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn switch_plan(
+    db: State<DbState>,
+    mut req: tools::SwitchRequest,
+    port: u16,
+) -> Result<tools::SwitchPlan, String> {
+    normalize_switch_request(&db, &mut req, port)?;
+    tools::plan_switch(&req, port)
+}
+
+#[tauri::command]
+pub fn switch_apply(
+    app: AppHandle,
+    db: State<DbState>,
+    mut req: tools::SwitchRequest,
+    port: u16,
+) -> Result<tools::SwitchResult, String> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    normalize_switch_request(&db, &mut req, port)?;
+    // 直連上游模式：Key 欄留空 → 以所選來源的上游 Key 直連（不經本地 Key）。
+    // 此處從庫中取出上游 Key 注入請求；config 側明文寫入（計劃頁已警告）。
+    // 對所有工具一致：claude/hermes 寫入自家配置，codex/opencode 寫 provider 段。
+    if req.direct_upstream {
+        let pid = req.provider_id.ok_or("直連模式需先選擇來源")?;
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let up: String = conn
+            .query_row(
+                "SELECT api_key FROM providers WHERE id=?1 AND enabled=1",
+                rusqlite::params![pid],
+                |r| r.get(0),
+            )
+            .map_err(|_| "直連模式需該來源已啟用".to_string())?;
+        if up.trim().is_empty() {
+            return Err("該來源未填寫上游 API Key，無法直連（請先在來源詳情填寫）".to_string());
+        }
+        req.api_key = up;
+    }
+    // Codex 模型目錄按需產生（模板收編自網關自持副本，不再依賴 cc-switch）
+    let catalog = if req.gen_catalog && req.app == "codex" {
+        let pid = req
+            .provider_id
+            .ok_or("產生模型目錄需先選擇渠道")?;
+        let home = tools::user_home()?;
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        Some(
+            crate::models::codex_catalog_generate(&conn, &home, &data, pid, req.catalog_union)
+                .map(|p| p.to_string_lossy().to_string())?,
+        )
+    } else {
+        None
+    };
+    tools::apply_switch(&data, req, port, catalog)
+}
+
+#[tauri::command]
+pub fn switch_restore(
+    app: AppHandle,
+    app_name: String,
+    port: u16,
+) -> Result<String, String> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    tools::restore_backup_port(&data, &app_name, port)
+}
+
+#[tauri::command]
+pub fn codex_doctor(port: u16) -> Vec<String> {
+    tools::codex_doctor(port)
+}
+
+// ---------------------------------------------------------------- 模型 ---
+
+#[tauri::command]
+pub async fn catalog_fetch(
+    app: AppHandle,
+    provider_id: i64,
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<crate::models::CatalogCache, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbState>();
+        // 短鎖讀配置 → 放鎖做網路（最多 30s）→ 短鎖寫快取：全程不佔主執行緒、不扣全局鎖做網路。
+        let cfg = {
+            let conn = db.conn.lock().map_err(|e| e.to_string())?;
+            crate::models::catalog_read_cfg(
+                &conn,
+                provider_id,
+                api_key.as_deref(),
+                base_url.as_deref(),
+            )?
+        };
+        let ids = crate::models::catalog_fetch_http(&cfg)?;
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        crate::models::catalog_write(&conn, provider_id, ids)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn catalog_get(
+    db: State<DbState>,
+    provider_id: i64,
+) -> Result<crate::models::CatalogCache, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::models::catalog_get(&conn, provider_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn models_list(
+    db: State<DbState>,
+    provider_id: i64,
+) -> Result<Vec<crate::models::UsableModel>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::models::models_list(&conn, provider_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn model_counts(db: State<DbState>) -> Result<Vec<(i64, i64)>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::models::model_counts(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn model_add(
+    db: State<DbState>,
+    input: crate::models::UsableModelInput,
+) -> Result<i64, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::models::model_add(&conn, &input)
+}
+
+#[tauri::command]
+pub fn model_update(
+    db: State<DbState>,
+    id: i64,
+    input: crate::models::UsableModelInput,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::models::model_update(&conn, id, &input)
+}
+
+#[tauri::command]
+pub fn model_delete(db: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::models::model_delete(&conn, id)
+}
+
+// ---------------------------------------------------------------- 價格識別 ---
+
+/// 用已加入來源的模型抽取定價（Key 只在後端使用，不寫 request_logs）。
+#[tauri::command]
+pub async fn price_extract(
+    app: AppHandle,
+    provider_id: i64,
+    model: String,
+    url: Option<String>,
+    pasted_text: Option<String>,
+    image_base64: Option<String>,
+    target_hint: Option<String>,
+) -> Result<crate::price_extract::PriceExtractResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbState>();
+        // 短鎖讀憑證 → 放鎖做代抓/LLM 抽取（最多 90s+15s）：不持全局鎖做網路。
+        let ctx = {
+            let conn = db.conn.lock().map_err(|e| e.to_string())?;
+            crate::price_extract::extract_read_ctx(&conn, provider_id, &model)?
+        };
+        crate::price_extract::extract_run(
+            &ctx,
+            url.as_deref(),
+            pasted_text.as_deref(),
+            image_base64.as_deref(),
+            target_hint.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---------------------------------------------------------------- 訂閱額度 ---
+
+/// 查詢訂閱方案額度（OpenCode Go / Claude CLI / Codex OAuth）：用量百分比 + 重置時間。
+/// 只讀本地憑證與官方查詢接口，憑證不回前端；網路在 spawn_blocking，鎖只覆蓋讀取。
+#[tauri::command]
+pub async fn quota_query_all(app: AppHandle) -> Vec<crate::quota::SubscriptionQuota> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbState>();
+        let providers: Vec<(i64, String, String, String, bool)> = {
+            let Ok(conn) = db.conn.lock() else {
+                return vec![];
+            };
+            let Ok(mut stmt) = conn.prepare(
+                "SELECT id, name, base_url, api_key, enabled FROM providers
+                 ORDER BY priority ASC, id ASC",
+            ) else {
+                return vec![];
+            };
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get::<_, i64>(4)? != 0,
+                ))
+            });
+            match rows {
+                Ok(it) => it.filter_map(|r| r.ok()).collect(),
+                Err(_) => vec![],
+            }
+        };
+        crate::quota::query_all(&providers)
+    })
+    .await
+    .unwrap_or_default()
+}
