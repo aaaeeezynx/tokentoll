@@ -1786,80 +1786,119 @@ async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'_>) -> Resp
     })
 }
 
+/// 前置階段的產物。
+struct Prelude {
+    authed: keys::AuthedKey,
+    bytes: axum::body::Bytes,
+    /// 已開好的連線。**擁有**它（而非借用）是刻意的：`Connection` 是 `Send`，
+    /// 所以可以安全地跨 `await` 持有；`&Connection` 不是（見 `RetryCtx`）。
+    conn: rusqlite::Connection,
+}
+
+/// 前置階段：解析 Bearer → 本地 Key（401 則回退直連上游）→ 限流 → 讀請求體。
+///
+/// 抽出來的理由是這一段有 **5 個拒絕出口**，每個都要「記被拒日誌 + 回錯誤
+/// JSON」；混在主管線裡會讓真正的請求處理流程難以看清。
+///
+/// `Err` 用 `Box<Response>`（`Response` 有 128 bytes，直接當 Err 會觸發
+/// clippy::result_large_err，與 `send_with_strip_retry` 一致）。
+async fn prelude(
+    ctx: &ProxyCtx,
+    started: &Instant,
+    app: &str,
+    headers: &HeaderMap,
+    body: Body,
+) -> Result<Prelude, Box<Response>> {
+    // ---- 鑑權
+    let Some(secret) = bearer(headers) else {
+        return Err(Box::new(reject(
+            ctx,
+            started,
+            app,
+            "",
+            StatusCode::UNAUTHORIZED,
+            "缺少 Authorization：請填本地 sk-local-… 或該渠道的上游 Key",
+        )));
+    };
+    let conn = match open_conn(&ctx.db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(Box::new(reject(
+                ctx,
+                started,
+                app,
+                "",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("資料庫不可用：{e}"),
+            )))
+        }
+    };
+    // 本地 Key 優先；401 再回退直連上游（Bearer 即渠道自身 api_key，不經本地 Key 轉發）
+    let key_err = |(code, msg): (u16, String)| {
+        reject(
+            ctx,
+            started,
+            app,
+            "",
+            StatusCode::from_u16(code).unwrap_or(StatusCode::UNAUTHORIZED),
+            msg,
+        )
+    };
+    let authed = match keys::auth_key(&conn, &secret) {
+        Ok(k) => k,
+        Err((401, _)) => match keys::auth_direct(&conn, &secret) {
+            Ok(k) => k,
+            Err(e) => return Err(Box::new(key_err(e))),
+        },
+        Err(e) => return Err(Box::new(key_err(e))),
+    };
+    if !ctx.rate.check(authed.id, authed.rate_limit_qpm) {
+        return Err(Box::new(reject(
+            ctx,
+            started,
+            app,
+            "",
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("該 Key 限流中（{}次/分鐘）", authed.rate_limit_qpm),
+        )));
+    }
+
+    // 讀請求體（32MB 上限）
+    const LIMIT: usize = 32 * 1024 * 1024;
+    let bytes = match axum::body::to_bytes(body, LIMIT).await {
+        Ok(b) => b,
+        Err(_) => {
+            return Err(Box::new(reject(
+                ctx,
+                started,
+                app,
+                "",
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "請求體超過 32MB",
+            )))
+        }
+    };
+    Ok(Prelude {
+        authed,
+        bytes,
+        conn,
+    })
+}
+
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
     // 來源判定只做一次（原本在每個拒絕分支各算一次，共 6 次）
     let app = infer_app(&parts.headers);
 
-    // ---- 鑑權
-    let Some(secret) = bearer(&parts.headers) else {
-        return reject(
-            &ctx,
-            &started,
-            &app,
-            "",
-            StatusCode::UNAUTHORIZED,
-            "缺少 Authorization：請填本地 sk-local-… 或該渠道的上游 Key",
-        );
-    };
-    let conn = match open_conn(&ctx.db_path) {
-        Ok(c) => c,
-        Err(e) => {
-            return reject(
-                &ctx,
-                &started,
-                &app,
-                "",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("資料庫不可用：{e}"),
-            )
-        }
-    };
-    // 本地 Key 優先；401 再回退直連上游（Bearer 即渠道自身 api_key，不經本地 Key 轉發）
-    let key_err = |(code, msg): (u16, String)| {
-        reject(
-            &ctx,
-            &started,
-            &app,
-            "",
-            StatusCode::from_u16(code).unwrap_or(StatusCode::UNAUTHORIZED),
-            msg,
-        )
-    };
-    let mut authed = match keys::auth_key(&conn, &secret) {
-        Ok(k) => k,
-        Err((401, _)) => match keys::auth_direct(&conn, &secret) {
-            Ok(k) => k,
-            Err(e) => return key_err(e),
-        },
-        Err(e) => return key_err(e),
-    };
-    if !ctx.rate.check(authed.id, authed.rate_limit_qpm) {
-        return reject(
-            &ctx,
-            &started,
-            &app,
-            "",
-            StatusCode::TOO_MANY_REQUESTS,
-            format!("該 Key 限流中（{}次/分鐘）", authed.rate_limit_qpm),
-        );
-    }
-
-    // 讀請求體
-    const LIMIT: usize = 32 * 1024 * 1024;
-    let bytes = match axum::body::to_bytes(body, LIMIT).await {
-        Ok(b) => b,
-        Err(_) => {
-            return reject(
-                &ctx,
-                &started,
-                &app,
-                "",
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "請求體超過 32MB",
-            )
-        }
+    // ---- 鑑權 → 限流 → 讀請求體（見 prelude）
+    let Prelude {
+        mut authed,
+        bytes,
+        conn,
+    } = match prelude(&ctx, &started, &app, &parts.headers, body).await {
+        Ok(p) => p,
+        Err(resp) => return *resp,
     };
 
     // 模型名（用於白名單 + 日誌；Gemini 原生請求體無 model，從 URL 回填）
