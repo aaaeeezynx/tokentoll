@@ -1263,12 +1263,12 @@ pub fn codex_wire_api(base_url: &str) -> &'static str {
 fn gateway_section(
     base_url: &str,
     inline_models: &[(String, String)],
-    direct_key: Option<&str>,
+    auth: CodexAuth<'_>,
 ) -> toml_edit::Table {
     let mut tbl = toml_edit::Table::new();
     tbl["name"] = toml_edit::value("Token Gateway");
     tbl["base_url"] = toml_edit::value(base_url);
-    match direct_key {
+    match auth.direct_key {
         // 直連上游：Bearer 即上游 Key，明文寫入（用戶顯式選擇，見警告）
         Some(k) => {
             tbl["experimental_bearer_token"] = toml_edit::value(k);
@@ -1277,7 +1277,9 @@ fn gateway_section(
             tbl["env_key"] = toml_edit::value(GATEWAY_ENV_KEY);
         }
     }
-    tbl["wire_api"] = toml_edit::value(codex_wire_api(base_url));
+    // 協議形狀：**優先採用 provider 的明確宣告**（`api_format`），只有在沒有
+    // 宣告時才依 base_url 推定。宣告比猜準（第三方也可能提供 responses 端點）。
+    tbl["wire_api"] = toml_edit::value(auth.wire_api.unwrap_or_else(|| codex_wire_api(base_url)));
     if !inline_models.is_empty() {
         let mut arr = toml_edit::Array::new();
         for (m, display) in inline_models {
@@ -1298,6 +1300,39 @@ fn gateway_section(
 /// cc-switch 時代與網關時代的舊會話（按段名引用供應商）都能繼續，
 /// 段被外部工具刪除也會在下次接管時重建。
 /// 冪等：先刪後插＋回驗，多次接管不疊段；入口先做重複段消毒（非法 TOML 也能救）。
+/// [`codex_apply`] 的認證與協議選項。
+///
+/// 把這兩個欄位綁在一起，是為了讓參數列維持在 8 個（clippy
+/// `too_many_arguments` 門檻）—— 原本只有 `direct_key`，加入協議宣告後若
+/// 直接再多一個參數就會超標。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CodexAuth<'a> {
+    /// 直連上游 Key（Some = 直連模式：各段寫 `experimental_bearer_token`
+    /// 明文，不寫 `env_key`）。
+    pub direct_key: Option<&'a str>,
+    /// 協議形狀覆寫，來自 provider **宣告**的 `api_format`（§5.3 能力宣告）。
+    /// `None` = 依 `base_url` 推定（見 [`codex_wire_api`]）。
+    pub wire_api: Option<&'a str>,
+}
+
+/// 依 provider 宣告的 `api_format` 決定 Codex 該用哪種 `wire_api`。
+///
+/// 這是「能力宣告優先於事後猜測」的具體落點：`providers.api_format` 是使用者
+/// 對該渠道的**明確宣告**，比從 URL 猜準確（第三方也可能提供 responses
+/// 端點）。
+///
+/// 回傳 `None` = 宣告不足以判定（未宣告，或 Anthropic／Gemini 這種 Codex
+/// 根本說不了的協議），交由 [`codex_wire_api`] 依 URL 推定接手。
+pub fn codex_wire_api_declared(provider_format: Option<&str>) -> Option<&'static str> {
+    match provider_format?.trim() {
+        // 只實作 Chat Completions
+        "openai-chat" => Some("chat"),
+        // 兩種都支援 → 用 Codex 原生的 responses（保留 reasoning 等欄位）
+        "mixed" | "openai-responses" => Some("responses"),
+        _ => None,
+    }
+}
+
 pub fn codex_apply(
     existing: &str,
     base_url: &str,
@@ -1306,8 +1341,7 @@ pub fn codex_apply(
     catalog: Option<&str>,
     aliases: &[String],
     inline_models: &[(String, String)],
-    // 直連上游 Key（Some = 直連模式：各段寫 experimental_bearer_token 明文，不寫 env_key）。
-    direct_key: Option<&str>,
+    auth: CodexAuth<'_>,
 ) -> Result<String, String> {
     let clean = dedupe_codex_sections(existing);
     let mut doc: toml_edit::DocumentMut = clean
@@ -1360,7 +1394,7 @@ pub fn codex_apply(
     for id in &managed {
         mp.insert(
             id.as_str(),
-            toml_edit::Item::Table(gateway_section(base_url, inline_models, direct_key)),
+            toml_edit::Item::Table(gateway_section(base_url, inline_models, auth)),
         );
     }
     let out = doc.to_string();
@@ -1865,9 +1899,10 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             } else {
                 "env_key = TOKEN_GATEWAY_KEY"
             };
-            // 協議形狀由 `codex_wire_api` 依 base_url 決定；預覽必須顯示
-            // **實際會寫入的值**，否則預覽會騙人（直連第三方時尤其明顯）。
-            let wire_api = codex_wire_api(&req.base_url);
+            // 協議形狀由 provider 宣告（`api_format`）優先、URL 推定為後備；
+            // 預覽必須顯示**實際會寫入的值**，否則預覽會騙人。
+            let wire_api = codex_wire_api_declared(req.provider_format.as_deref())
+                .unwrap_or_else(|| codex_wire_api(&req.base_url));
             if aliases.is_empty() {
                 plan.edits.push(format!(
                     "[model_providers.{CODEX_SHARED_PROVIDER_ID}] 與 [model_providers.{GATEWAY_PROVIDER_ID}] base_url = {} / {auth_desc} / wire_api = {wire_api}",
@@ -2098,7 +2133,13 @@ pub fn apply_switch(
                 catalog.as_deref(),
                 &aliases,
                 &inline_models,
-                direct_key,
+                // 協議形狀優先採用 provider 的明確宣告（`api_format`），
+                // 沒有宣告時 `gateway_section` 才依 base_url 推定。
+                // 這正是 §5.3 第 2 層「能力宣告」的落點。
+                CodexAuth {
+                    direct_key,
+                    wire_api: codex_wire_api_declared(req.provider_format.as_deref()),
+                },
             )?
         }
         "opencode" => {
@@ -2979,7 +3020,7 @@ mod tests {
             None,
             &[],
             &[],
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         assert!(out.contains("# cc-switch managed"), "註釋必須保留：{out}");
@@ -3023,6 +3064,82 @@ mod tests {
         assert_eq!(codex_wire_api("  HTTPS://API.OPENAI.COM/v1  "), "responses");
     }
 
+    /// §5.3 第 2 層：provider 的**明確宣告**（`api_format`）優先於 URL 推定。
+    ///
+    /// 這是「能力宣告」勝過「事後猜測」的落點。URL 推定只是後備：第三方也可
+    /// 能提供 responses 端點，光看網域猜不出來。
+    #[test]
+    fn codex_wire_api_prefers_declared_format() {
+        // 宣告了就照宣告走
+        assert_eq!(codex_wire_api_declared(Some("openai-chat")), Some("chat"));
+        assert_eq!(
+            codex_wire_api_declared(Some("openai-responses")),
+            Some("responses")
+        );
+        assert_eq!(codex_wire_api_declared(Some("mixed")), Some("responses"));
+        // 前後空白不影響
+        assert_eq!(codex_wire_api_declared(Some("  openai-chat  ")), Some("chat"));
+        // 宣告不足以判定 → None，交由 URL 推定
+        assert_eq!(codex_wire_api_declared(Some("anthropic")), None);
+        assert_eq!(codex_wire_api_declared(Some("gemini")), None);
+        assert_eq!(codex_wire_api_declared(None), None);
+        assert_eq!(codex_wire_api_declared(Some("")), None);
+
+        // 關鍵對照：同一個第三方 URL，宣告能推翻 URL 推定。
+        // 從 URL 猜會得到 chat（第三方通常只說 chat）……
+        assert_eq!(codex_wire_api("https://api.example.com/v1"), "chat");
+        // ……但若使用者宣告該渠道支援 responses，就該照宣告用 responses。
+        let out = codex_apply(
+            "model = \"m\"\n",
+            "https://api.example.com/v1",
+            "m",
+            None,
+            None,
+            &[],
+            &[],
+            CodexAuth {
+                direct_key: Some("k"),
+                wire_api: codex_wire_api_declared(Some("openai-responses")),
+            },
+        )
+        .unwrap();
+        let v: toml_edit::DocumentMut = out.parse().unwrap();
+        for (name, sec) in v["model_providers"].as_table().unwrap().iter() {
+            assert_eq!(
+                sec.as_table().and_then(|t| t.get("wire_api")).and_then(|x| x.as_str()),
+                Some("responses"),
+                "宣告為 openai-responses 時 [{name}] 應用 responses：{out}"
+            );
+        }
+    }
+
+    /// 沒有宣告時，`codex_apply` 必須回退到 URL 推定（不可變成無值）。
+    #[test]
+    fn codex_wire_api_falls_back_to_url_when_undeclared() {
+        let out = codex_apply(
+            "model = \"m\"\n",
+            "https://api.example.com/v1",
+            "m",
+            None,
+            None,
+            &[],
+            &[],
+            CodexAuth {
+                direct_key: None,
+                wire_api: codex_wire_api_declared(Some("anthropic")),
+            },
+        )
+        .unwrap();
+        let v: toml_edit::DocumentMut = out.parse().unwrap();
+        for (name, sec) in v["model_providers"].as_table().unwrap().iter() {
+            assert_eq!(
+                sec.as_table().and_then(|t| t.get("wire_api")).and_then(|x| x.as_str()),
+                Some("chat"),
+                "未宣告時應回退為 URL 推定（chat）：[{name}] {out}"
+            );
+        }
+    }
+
     /// B4 端到端：直連第三方時 `codex_apply` 產出的**每一個** provider 段
     /// 都必須是 `wire_api = "chat"`；走網關時則維持 `responses`。
     #[test]
@@ -3054,7 +3171,10 @@ mod tests {
             None,
             &["oldalias".to_string()],
             &[],
-            Some("nv-key"),
+            CodexAuth {
+                direct_key: Some("nv-key"),
+                ..Default::default()
+            },
         )
         .unwrap();
         let got = get(&out);
@@ -3076,7 +3196,7 @@ mod tests {
             None,
             &[],
             &[],
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         for (name, w) in get(&out) {
@@ -3096,7 +3216,7 @@ mod tests {
             None,
             &[],
             &[],
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         let v: toml_edit::DocumentMut = out.parse().unwrap();
@@ -3123,7 +3243,7 @@ mod tests {
             Some("C:\\data\\catalogs\\codex-1.json"),
             &[],
             &[],
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         assert!(out.contains("model_reasoning_effort = \"high\""), "{out}");
@@ -3131,7 +3251,7 @@ mod tests {
         assert!(out.contains("model_catalog_json"), "{out}");
         assert!(out.contains("codex-1.json"), "{out}");
         // unset / 空不寫入
-        let out2 = codex_apply(old, "http://x", "m", Some("unset"), None, &[], &[], None).unwrap();
+        let out2 = codex_apply(old, "http://x", "m", Some("unset"), None, &[], &[], CodexAuth::default()).unwrap();
         assert!(!out2.contains("model_reasoning_effort"), "{out2}");
         assert!(!out2.contains("model_catalog_json"), "{out2}");
     }
@@ -3148,7 +3268,7 @@ mod tests {
             None,
             &["nim-direct".to_string()],
             &[],
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         let twice = codex_apply(
@@ -3159,7 +3279,7 @@ mod tests {
             None,
             &["nim-direct".to_string()],
             &[],
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         for id in ["custom", "tokengateway", "nim-direct"] {
@@ -3189,7 +3309,7 @@ mod tests {
             None,
             &[],
             &[],
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         assert_eq!(
@@ -3220,7 +3340,7 @@ mod tests {
             None,
             &aliases,
             &inline,
-            None,
+            CodexAuth::default(),
         )
         .unwrap();
         let v: toml_edit::DocumentMut = out.parse().unwrap();
@@ -3383,7 +3503,10 @@ mod tests {
             None,
             &[],
             &[],
-            Some("nv-direct-secret"),
+            CodexAuth {
+                direct_key: Some("nv-direct-secret"),
+                ..Default::default()
+            },
         )
         .unwrap();
         let v: toml_edit::DocumentMut = out.parse().unwrap();
@@ -3399,7 +3522,7 @@ mod tests {
             );
         }
         // 非直連保持 env_key
-        let out2 = codex_apply(old, "http://x", "m", None, None, &[], &[], None).unwrap();
+        let out2 = codex_apply(old, "http://x", "m", None, None, &[], &[], CodexAuth::default()).unwrap();
         assert!(out2.contains("env_key = \"TOKEN_GATEWAY_KEY\""), "{out2}");
     }
 
