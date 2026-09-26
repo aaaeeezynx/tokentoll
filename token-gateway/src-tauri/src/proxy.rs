@@ -1885,6 +1885,110 @@ async fn prelude(
     })
 }
 
+/// 模型白名單檢查 + 來源解析。
+///
+/// 兩件事放在一起，是因為它們共用同一組拒絕出口（模型名／來源名），
+/// 且都可能在「模型不在清單內」時報錯。
+///
+/// - 白名單：Key 可限制可調用的模型與來源（空集合＝不限制）。
+/// - 來源解析：先比對 Key 綁定來源的模型表；未命中再跨來源按模型路由
+///   （其他啟用來源登記的同名模型同樣可走，Key 的額度／限流照常記在 Key 上）；
+///   兩者都沒有才 400。
+/// - **直連上游模式不做跨來源路由**：僅允許該渠道登記的模型。
+///
+/// 成功且跨來源路由命中時，會就地改寫 `authed` 的 `provider_*` 欄位。
+///
+/// 錯誤訊息刻意寫得囉唆：上游對「模型不存在」只回 cryptic 的 404/400，
+/// 這裡直接指明「綁定來源是誰、該往哪個方向換 Key」，讓使用者能自己修。
+///
+/// 這裡可以安全地借用 `&Connection`：本函式是**同步**的，沒有 await 點，
+/// 因此不受「`&Connection` 不是 `Send`」的限制（見 `RetryCtx`）。
+fn resolve_model(
+    ctx: &ProxyCtx,
+    started: &Instant,
+    app: &str,
+    conn: &rusqlite::Connection,
+    model_raw: &str,
+    authed: &mut keys::AuthedKey,
+) -> Result<(), Box<Response>> {
+    if !authed.allowed_models.is_empty()
+        && !model_raw.is_empty()
+        && !authed.allowed_models.iter().any(|m| m == model_raw)
+    {
+        return Err(Box::new(reject(
+            ctx,
+            started,
+            app,
+            model_raw,
+            StatusCode::FORBIDDEN,
+            format!("該 Key 不允許調用模型 {model_raw}"),
+        )));
+    }
+    if !authed.allowed_apps.is_empty()
+        && app != "unknown"
+        && !authed.allowed_apps.iter().any(|a| a == app)
+    {
+        return Err(Box::new(reject(
+            ctx,
+            started,
+            app,
+            model_raw,
+            StatusCode::FORBIDDEN,
+            format!("該 Key 不允許來源 {app}"),
+        )));
+    }
+
+    if model_raw.is_empty() {
+        return Ok(());
+    }
+    let list = crate::models::models_list(conn, authed.provider_id).unwrap_or_default();
+    let usable: Vec<_> = list.into_iter().filter(|m| m.enabled).collect();
+    let want = model_raw.to_lowercase();
+    let bound_hit = usable.iter().any(|m| {
+        m.display_name.to_lowercase() == want || m.actual_model.to_lowercase() == want
+    });
+    if usable.is_empty() || bound_hit {
+        return Ok(());
+    }
+    if authed.direct {
+        let pname = provider_name(conn, authed.provider_id);
+        return Err(Box::new(reject(
+            ctx,
+            started,
+            app,
+            model_raw,
+            StatusCode::BAD_REQUEST,
+            format!(
+                "直連模式僅允許來源「{pname}」登記的模型，{model_raw} 不在其清單內，請求不會轉發"
+            ),
+        )));
+    }
+    match resolve_model_provider(conn, model_raw, authed.provider_id) {
+        Some(p) => {
+            // 跨來源路由命中：改走登記該模型的來源
+            authed.provider_id = p.id;
+            authed.provider_base_url = p.base_url;
+            authed.provider_api_key = p.api_key;
+            authed.provider_auth_scheme = p.scheme;
+            authed.provider_api_format = p.format;
+            Ok(())
+        }
+        None => {
+            let pname = provider_name(conn, authed.provider_id);
+            Err(Box::new(reject(
+                ctx,
+                started,
+                app,
+                model_raw,
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "模型 {model_raw} 不在該 Key 綁定的來源「{pname}」模型清單內，請求不會轉發；請換用綁定正確來源的 Key；若該來源實際支援此模型，請先在來源的使用模型中新增對應映射"
+                ),
+            )))
+        }
+    }
+}
+
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
@@ -1917,81 +2021,9 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         .map(|s| s.to_string())
         .or_else(|| model_from_path(&path_hint))
         .unwrap_or_default();
-    if !authed.allowed_models.is_empty()
-        && !model_raw.is_empty()
-        && !authed.allowed_models.iter().any(|m| m == &model_raw)
-    {
-        return reject(
-            &ctx,
-            &started,
-            &app,
-            &model_raw,
-            StatusCode::FORBIDDEN,
-            format!("該 Key 不允許調用模型 {model_raw}"),
-        );
-    }
-    if !authed.allowed_apps.is_empty() && app != "unknown" && !authed.allowed_apps.contains(&app) {
-        return reject(
-            &ctx,
-            &started,
-            &app,
-            &model_raw,
-            StatusCode::FORBIDDEN,
-            format!("該 Key 不允許來源 {app}"),
-        );
-    }
-
-    // ---- 來源解析：先比對 Key 綁定來源的模型表；未命中再跨來源按模型路由
-    //（其他啟用來源登記的同名模型同樣可走，Key 的額度/限流照常記在 Key 上）；
-    // 兩者都沒有才 400（上游只回 cryptic 404/400，此處指明綁定來源與換 Key 方向）
-    // 直連上游模式不做跨來源路由：僅允許該渠道登記的模型。
-    if !model_raw.is_empty() {
-        let list = crate::models::models_list(&conn, authed.provider_id)
-            .unwrap_or_default();
-        let usable: Vec<_> = list.into_iter().filter(|m| m.enabled).collect();
-        let want = model_raw.to_lowercase();
-        let bound_hit = usable.iter().any(|m| {
-            m.display_name.to_lowercase() == want
-                || m.actual_model.to_lowercase() == want
-        });
-        if !usable.is_empty() && !bound_hit {
-            if authed.direct {
-                let pname = provider_name(&conn, authed.provider_id);
-                return reject(
-                    &ctx,
-                    &started,
-                    &app,
-                    &model_raw,
-                    StatusCode::BAD_REQUEST,
-                    format!(
-                        "直連模式僅允許來源「{pname}」登記的模型，{model_raw} 不在其清單內，請求不會轉發"
-                    ),
-                );
-            }
-            match resolve_model_provider(&conn, &model_raw, authed.provider_id) {
-                Some(p) => {
-                    // 跨來源路由命中：改走登記該模型的來源
-                    authed.provider_id = p.id;
-                    authed.provider_base_url = p.base_url;
-                    authed.provider_api_key = p.api_key;
-                    authed.provider_auth_scheme = p.scheme;
-                    authed.provider_api_format = p.format;
-                }
-                None => {
-                    let pname = provider_name(&conn, authed.provider_id);
-                    return reject(
-                        &ctx,
-                        &started,
-                        &app,
-                        &model_raw,
-                        StatusCode::BAD_REQUEST,
-                        format!(
-                            "模型 {model_raw} 不在該 Key 綁定的來源「{pname}」模型清單內，請求不會轉發；請換用綁定正確來源的 Key；若該來源實際支援此模型，請先在來源的使用模型中新增對應映射"
-                        ),
-                    );
-                }
-            }
-        }
+    // ---- 模型白名單 + 來源解析（見 resolve_model）
+    if let Err(resp) = resolve_model(&ctx, &started, &app, &conn, &model_raw, &mut authed) {
+        return *resp;
     }
 
     // ---- 格式矩陣：入站格式 × 渠道格式（mixed 視為 OpenAI 兼容）
