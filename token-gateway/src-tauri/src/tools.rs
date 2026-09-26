@@ -996,31 +996,87 @@ fn dedupe_codex_sections(text: &str) -> String {
     out
 }
 
-/// 讀 Codex 歷史會話用過的 provider 名（state_5.sqlite threads 去重），供別名段使用。
-/// 只讀不寫；DB 缺失 / 被鎖定時返回空（不阻塞接管）。
-pub fn codex_legacy_providers(codex_home: &Path) -> Vec<String> {
-    let db = codex_home.join("state_5.sqlite");
-    if !db.exists() {
+/// 讀 Codex 歷史會話 provider 名的結果。
+///
+/// **為什麼需要這個型別**：原本的實作在讀不到時回傳空 `Vec`，與「真的沒有
+/// 第三方 provider 殘留」完全無法區分。`codex_doctor()` 因此會在**讀取失敗
+/// 時報「✅ 歷史會話無第三方 provider 殘留」** —— 把一個失敗報成通過。當
+/// 使用者說「舊會話無法續用」時，唯一的診斷工具會告訴他一切正常，這是這個
+/// 問題最難查的原因。
+#[derive(Debug)]
+pub enum LegacyProviders {
+    /// 讀成功。`providers` 可能為空（＝真的沒有殘留）。
+    Ok { providers: Vec<String>, db: PathBuf },
+    /// 讀失敗，附可讀原因。**呼叫端不可把它靜默當成空。**
+    Failed { reason: String },
+}
+
+/// 找出 Codex 狀態資料庫的候選，依版號由高到低。
+///
+/// **不可寫死 `state_5.sqlite`。** Codex 家目錄裡的檔名全部帶版本後綴
+/// （`state_5`、`logs_2`、`goals_1`、`queue_1`、`memories_1`、
+/// `thread_history_1`），那是它的 schema 版號。一旦 Codex 升版把 `state_5`
+/// 換成 `state_6`，寫死路徑的程式就會**靜默回傳空 vec**，別名段全部消失，
+/// 舊會話即無法續用 —— 而且是無聲無息地發生。這裡改成掃描所有
+/// `state*.sqlite`。
+fn codex_state_db_candidates(codex_home: &Path) -> Vec<PathBuf> {
+    let mut cands: Vec<(u32, PathBuf)> = vec![];
+    let Ok(rd) = std::fs::read_dir(codex_home) else {
         return vec![];
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(rest) = name.strip_prefix("state") else {
+            continue;
+        };
+        let Some(num) = rest.strip_suffix(".sqlite") else {
+            continue;
+        };
+        // `state.sqlite` 視為 0、`state_5.sqlite` 為 5；其餘形式不認。
+        let n: u32 = if num.is_empty() {
+            0
+        } else if let Some(d) = num.strip_prefix('_') {
+            match d.parse() {
+                Ok(v) => v,
+                Err(_) => continue,
+            }
+        } else {
+            continue;
+        };
+        cands.push((n, e.path()));
     }
-    let conn = match rusqlite::Connection::open_with_flags(
-        &db,
+    cands.sort_by_key(|c| std::cmp::Reverse(c.0));
+    cands.into_iter().map(|(_, p)| p).collect()
+}
+
+/// 讀單一 DB 的 provider 名；失敗時回傳**原因**（不再吞掉）。
+fn read_legacy_providers_from(db: &Path) -> Result<Vec<String>, String> {
+    let conn = rusqlite::Connection::open_with_flags(
+        db,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    ) {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    let mut stmt = match conn.prepare("SELECT DISTINCT model_provider FROM threads") {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    let rows = match stmt.query_map([], |r| r.get::<_, String>(0)) {
-        Ok(r) => r,
-        Err(_) => return vec![],
-    };
+    )
+    .map_err(|e| format!("唯讀開啟失敗：{e}"))?;
+    // Codex 隨時在寫這個檔（實測 `-wal` 可達 2 MB、`-shm` 一直在動）。
+    // 沒有 busy_timeout 的話一遇鎖就直接失敗 —— 而失敗以前是靜默的。
+    conn.busy_timeout(std::time::Duration::from_millis(3000))
+        .map_err(|e| format!("設定 busy_timeout 失敗：{e}"))?;
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT model_provider FROM threads")
+        .map_err(|e| format!("沒有 threads 表或查詢無法準備：{e}"))?;
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| format!("查詢失敗：{e}"))?;
     let mut out: Vec<String> = vec![];
-    for r in rows.flatten() {
-        let id = r.trim().to_string();
+    let mut row_errs = 0usize;
+    for r in rows {
+        // 以前是 `rows.flatten()`，這一類錯誤被整個吞掉（第 5 條靜默路徑）。
+        let id = match r {
+            Ok(v) => v.trim().to_string(),
+            Err(_) => {
+                row_errs += 1;
+                continue;
+            }
+        };
         if id.is_empty() || id == CODEX_SHARED_PROVIDER_ID || id == GATEWAY_PROVIDER_ID {
             continue;
         }
@@ -1037,6 +1093,92 @@ pub fn codex_legacy_providers(codex_home: &Path) -> Vec<String> {
         if out.len() >= CODEX_ALIAS_CAP {
             break;
         }
+    }
+    // 有列但全讀不出來 → 這是失敗，不是「沒有殘留」。
+    if out.is_empty() && row_errs > 0 {
+        return Err(format!("{row_errs} 列的 model_provider 都讀不出來"));
+    }
+    Ok(out)
+}
+
+/// 讀 Codex 歷史會話用過的 provider 名，並**明確區分成功與失敗**。
+///
+/// 只讀不寫。逐個候選 DB（版號高者優先）嘗試，第一個成功者勝出；全部失敗
+/// 時回傳 [`LegacyProviders::Failed`] 並附完整原因。
+pub fn codex_legacy_providers_report(codex_home: &Path) -> LegacyProviders {
+    let cands = codex_state_db_candidates(codex_home);
+    if cands.is_empty() {
+        return LegacyProviders::Failed {
+            reason: format!(
+                "在 {} 找不到任何 state*.sqlite（Codex 尚未產生，或改了檔名規則）",
+                codex_home.display()
+            ),
+        };
+    }
+    let mut why: Vec<String> = vec![];
+    for db in &cands {
+        match read_legacy_providers_from(db) {
+            Ok(providers) => {
+                return LegacyProviders::Ok {
+                    providers,
+                    db: db.clone(),
+                }
+            }
+            Err(e) => why.push(format!(
+                "{}：{e}",
+                db.file_name().unwrap_or_default().to_string_lossy()
+            )),
+        }
+    }
+    LegacyProviders::Failed {
+        reason: format!(
+            "找到 {} 個 state*.sqlite 但都讀不出 provider：{}",
+            cands.len(),
+            why.join("；")
+        ),
+    }
+}
+
+/// 要管理的別名段名 = （DB 讀到的 provider 名）∪（config.toml 裡**已經指向
+/// 本網關**的 `[model_providers.*]` 段名）。
+///
+/// **為什麼要聯集**：`codex_apply` 只會刪除「在管理清單裡」的段。若清單只來自
+/// DB，一旦 threads 變少（例如使用者**封存對話**之後，那個 provider 不再出現
+/// 在 `SELECT DISTINCT model_provider` 裡），本來存在的別名段就會被剔除，
+/// 舊會話的 provider 段因而消失。聯集讓已由本工具接管的段**只增不減**，這正
+/// 是「舊會話必須一直能續用」所需要的性質。
+///
+/// **只納入 base_url 已經指向本網關的段**，不碰使用者自己指向上游的 provider
+/// —— 否則接管會把「使用者想直連」的段也一併劫持。
+fn codex_alias_ids(existing: &str, from_db: &[String], gw_url: &str) -> Vec<String> {
+    let mut out: Vec<String> = from_db.to_vec();
+    let clean = dedupe_codex_sections(existing);
+    let Ok(doc) = clean.parse::<toml_edit::DocumentMut>() else {
+        return out;
+    };
+    let Some(mp) = doc.get("model_providers").and_then(|m| m.as_table()) else {
+        return out;
+    };
+    for (k, v) in mp.iter() {
+        let id = k.trim();
+        if id.is_empty()
+            || id == CODEX_SHARED_PROVIDER_ID
+            || id == GATEWAY_PROVIDER_ID
+            || out.iter().any(|o| o == id)
+        {
+            continue;
+        }
+        if !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            continue;
+        }
+        // 只接管本來就指向本網關的段。
+        if v.get("base_url").and_then(|b| b.as_str()) != Some(gw_url) {
+            continue;
+        }
+        out.push(id.to_string());
     }
     out
 }
@@ -1672,13 +1814,24 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             plan.edits.push(format!(
                 "model_provider = {CODEX_SHARED_PROVIDER_ID}（共享段名，custom / tokengateway / 歷史別名段同時指向網關，舊會話可繼續）"
             ));
-            // 預覽歷史別名（尽力而为；DB 鎖定時為空，接管時重讀）
-            let aliases = path
+            // 預覽歷史別名。刻意用 report 版：**讀失敗要在接管前就讓使用者
+            // 看到**，而不是等到舊會話失效、回頭懷疑是網關弄壞了什麼。
+            let aliases = match path
                 .as_ref()
                 .ok()
                 .and_then(|p| p.parent())
-                .map(codex_legacy_providers)
-                .unwrap_or_default();
+                .map(codex_legacy_providers_report)
+            {
+                Some(LegacyProviders::Ok { providers, .. }) => providers,
+                Some(LegacyProviders::Failed { reason }) => {
+                    plan.warnings.push(format!(
+                        "讀不到 Codex 歷史會話的 provider 名：{reason}。接管可能無法補寫別名段，\
+                         仍在使用舊會話的 provider 可能失效（請先完全結束 Codex 再接管）"
+                    ));
+                    vec![]
+                }
+                None => vec![],
+            };
             let auth_desc = if req.direct_upstream {
                 "experimental_bearer_token = 上游 Key 明文"
             } else {
@@ -1885,11 +2038,20 @@ pub fn apply_switch(
             claude_apply(existing.as_deref(), &req.base_url, &req.api_key, req.claude_map.as_ref())?
         }
         "codex" => {
-            // 歷史會話用過的 provider 名全寫為網關別名段（只讀 threads，不寫 DB）
-            let aliases = cfg
-                .parent()
-                .map(codex_legacy_providers)
-                .unwrap_or_default();
+            // 歷史會話用過的 provider 名全寫為網關別名段（只讀 threads，不寫 DB）。
+            //
+            // 再與 config.toml 裡**已指向本網關**的別名段聯集，讓管理清單只增
+            // 不減：若清單只來自 DB，一旦 threads 變少（例如使用者**封存對話**
+            // 之後該 provider 不再出現在 `SELECT DISTINCT model_provider`），
+            // 舊的別名段就會被 `codex_apply` 剔除，舊會話的 provider 段因而
+            // 消失 —— 這正是「舊會話無法續用／無法封存」的可能成因。
+            let gw_url = gateway_url(port, "codex");
+            let db_aliases = match cfg.parent().map(codex_legacy_providers_report) {
+                Some(LegacyProviders::Ok { providers, .. }) => providers,
+                // 讀失敗時 `codex_alias_ids` 仍會保住既有的網關別名段。
+                _ => vec![],
+            };
+            let aliases = codex_alias_ids(existing.as_deref().unwrap_or(""), &db_aliases, &gw_url);
             let inline_models = codex_inline_models(catalog.as_deref());
             // 直連上游：api_key 即 switch_apply 命令層注入的上游 Key（明文寫段內）
             let direct_key = if req.direct_upstream && !req.api_key.trim().is_empty() {
@@ -2036,15 +2198,28 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
             }
         }
     }
-    let legacy = codex_legacy_providers(codex_home);
-    if legacy.is_empty() {
-        out.push("✅ 歷史會話無第三方 provider 殘留（custom / tokengateway 之外）".to_string());
-    } else {
-        out.push(format!(
-            "ℹ️ 歷史會話用過 {} 個別名 provider（{}）：接管將全寫為網關別名段",
-            legacy.len(),
-            legacy.join(", ")
-        ));
+    // **這裡以前會把讀取失敗報成 ✅。** 讀不到時 `codex_legacy_providers()`
+    // 回傳空 vec，於是體檢顯示「歷史會話無第三方 provider 殘留」——一個失敗
+    // 被當成通過，使用者唯一的診斷工具反而誤導他。現在失敗一律 ❌ 並附原因。
+    match codex_legacy_providers_report(codex_home) {
+        LegacyProviders::Failed { reason } => out.push(format!(
+            "❌ 讀不到 Codex 歷史會話的 provider 名：{reason}。接管將無法補寫別名段，\
+             仍在使用舊會話的 provider 可能失效 —— 請完全結束 Codex 後重試"
+        )),
+        LegacyProviders::Ok { providers, db } => {
+            let src = db.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if providers.is_empty() {
+                out.push(format!(
+                    "✅ 歷史會話無第三方 provider 殘留（custom / tokengateway 之外；讀自 {src}）"
+                ));
+            } else {
+                out.push(format!(
+                    "ℹ️ 歷史會話用過 {} 個別名 provider（讀自 {src}）：{} —— 接管將全寫為網關別名段",
+                    providers.len(),
+                    providers.join(", ")
+                ));
+            }
+        }
     }
     if std::env::var(GATEWAY_ENV_KEY)
         .map(|v| !v.trim().is_empty())
@@ -2970,10 +3145,119 @@ mod tests {
         )
         .unwrap();
         drop(conn);
-        let got = codex_legacy_providers(dir.path());
-        assert_eq!(got, vec!["nim-direct".to_string(), "opencode-zen".to_string()]);
-        // DB 缺失不報錯
-        assert!(codex_legacy_providers(&dir.path().join("nope")).is_empty());
+        match codex_legacy_providers_report(dir.path()) {
+            LegacyProviders::Ok { providers, .. } => assert_eq!(
+                providers,
+                vec!["nim-direct".to_string(), "opencode-zen".to_string()]
+            ),
+            LegacyProviders::Failed { reason } => panic!("應該讀得到：{reason}"),
+        }
+    }
+
+    /// 迴歸測試：state DB 的檔名**帶版本後綴**（state_5 / state_7 …），
+    /// 不可寫死。Codex 升版把它換掉時，寫死的程式會靜默回傳空 vec，
+    /// 別名段全消失、舊會話失去 provider。
+    #[test]
+    fn codex_state_db_follows_versioned_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, prov) in [
+            ("state_5.sqlite", "old-prov"),
+            ("state_7.sqlite", "new-prov"),
+        ] {
+            let conn = rusqlite::Connection::open(dir.path().join(name)).unwrap();
+            conn.execute_batch(&format!(
+                "CREATE TABLE threads (id TEXT, model_provider TEXT NOT NULL);
+                 INSERT INTO threads VALUES ('1','{prov}');"
+            ))
+            .unwrap();
+        }
+        match codex_legacy_providers_report(dir.path()) {
+            LegacyProviders::Ok { providers, db } => {
+                // 版號高者優先
+                assert_eq!(providers, vec!["new-prov".to_string()]);
+                assert!(
+                    db.to_string_lossy().ends_with("state_7.sqlite"),
+                    "應選 state_7，實際 {db:?}"
+                );
+            }
+            LegacyProviders::Failed { reason } => panic!("應該讀得到：{reason}"),
+        }
+    }
+
+    /// 迴歸測試：`codex_doctor` 曾把**讀取失敗**報成
+    /// 「✅ 歷史會話無第三方 provider 殘留」。讀不到必須是 `Failed`，
+    /// 否則唯一的診斷工具會告訴使用者一切正常。
+    #[test]
+    fn codex_legacy_read_failure_is_not_reported_as_empty() {
+        // ① 完全沒有 state DB
+        let dir = tempfile::tempdir().unwrap();
+        match codex_legacy_providers_report(dir.path()) {
+            LegacyProviders::Failed { reason } => {
+                assert!(reason.contains("state*.sqlite"), "原因應說明找不到檔案：{reason}")
+            }
+            LegacyProviders::Ok { providers, .. } => {
+                panic!("沒有任何 state DB 應該是 Failed，不是 Ok（{providers:?}）")
+            }
+        }
+        // ② 有 state DB 但缺 threads 表（schema 變動）
+        let conn = rusqlite::Connection::open(dir.path().join("state_9.sqlite")).unwrap();
+        conn.execute_batch("CREATE TABLE something_else (x TEXT);")
+            .unwrap();
+        drop(conn);
+        match codex_legacy_providers_report(dir.path()) {
+            LegacyProviders::Failed { reason } => {
+                assert!(reason.contains("threads"), "原因應提到 threads：{reason}")
+            }
+            LegacyProviders::Ok { providers, .. } => {
+                panic!("缺 threads 表應該是 Failed，不是 Ok（{providers:?}）")
+            }
+        }
+    }
+
+    /// 迴歸測試：既有的網關別名段不可因為 threads 變少而被剔除。
+    /// 使用者**封存對話**後，那個 provider 可能不再出現在 threads 裡；
+    /// 若管理清單只來自 DB，`codex_apply` 就會把別名段刪掉，舊會話失去
+    /// provider 而無法續用。
+    #[test]
+    fn codex_alias_ids_never_shrinks_existing_gateway_aliases() {
+        let gw = "http://127.0.0.1:15722/v1";
+        let existing = format!(
+            "model = \"m\"\n\
+             [model_providers.{CODEX_SHARED_PROVIDER_ID}]\nbase_url = \"{gw}\"\n\
+             [model_providers.{GATEWAY_PROVIDER_ID}]\nbase_url = \"{gw}\"\n\
+             [model_providers.oldalias]\nbase_url = \"{gw}\"\n\
+             [model_providers.foreign]\nbase_url = \"https://api.example.com/v1\"\n"
+        );
+        // DB 讀到空（＝threads 已不含任何第三方 provider）
+        let got = codex_alias_ids(&existing, &[], gw);
+        assert!(
+            got.contains(&"oldalias".to_string()),
+            "既有網關別名段必須保留：{got:?}"
+        );
+        assert!(!got.contains(&CODEX_SHARED_PROVIDER_ID.to_string()));
+        assert!(!got.contains(&GATEWAY_PROVIDER_ID.to_string()));
+        assert!(
+            !got.contains(&"foreign".to_string()),
+            "指向上游的 provider 不該被劫持：{got:?}"
+        );
+    }
+
+    /// DB 讀到的名稱要保留，與既有段聯集時不重複。
+    #[test]
+    fn codex_alias_ids_unions_db_and_existing() {
+        let gw = "http://127.0.0.1:15722/v1";
+        let existing = format!("[model_providers.oldalias]\nbase_url = \"{gw}\"\n");
+        let got = codex_alias_ids(
+            &existing,
+            &["fromdb".to_string(), "oldalias".to_string()],
+            gw,
+        );
+        assert!(got.contains(&"fromdb".to_string()));
+        assert_eq!(
+            got.iter().filter(|x| *x == "oldalias").count(),
+            1,
+            "不應重複：{got:?}"
+        );
     }
 
     #[test]
