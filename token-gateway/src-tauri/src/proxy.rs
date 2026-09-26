@@ -2120,6 +2120,66 @@ fn prepare_request(input: PrepareInput<'_>) -> Result<Prepared, Box<Response>> {
     })
 }
 
+/// 一次請求的四個元資料，後續每個階段都要用。
+struct ReqMeta {
+    /// 解析後的請求體（不是合法 JSON 時為 `None`；錯誤留給 prepare_request 回報）
+    body_json: Option<serde_json::Value>,
+    /// 請求路徑，用於判定入站格式（`InFmt::from_path`）
+    path_hint: String,
+    content_type: String,
+    /// 模型名。Gemini 原生請求體沒有 `model` 欄位，從 URL 路徑回填。
+    model_raw: String,
+}
+
+/// 從請求標頭與本體取出後續階段要用的四個值。
+///
+/// 模型名的來源順序是刻意的：**請求體優先，其次 URL 路徑**。Gemini 原生
+/// 端點把模型放在路徑（`/v1beta/models/gemini-2.5-pro:generateContent`），
+/// 只有路徑回填才能讓白名單與記帳拿到正確的模型名。
+fn request_meta(parts: &axum::http::request::Parts, bytes: &[u8]) -> ReqMeta {
+    let body_json = parse_body_json(bytes);
+    let path_hint = parts.uri.path().to_string();
+    let content_type = parts
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let model_raw = body_json
+        .as_ref()
+        .and_then(|v| v.get("model"))
+        .and_then(|m| m.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| model_from_path(&path_hint))
+        .unwrap_or_default();
+    ReqMeta {
+        body_json,
+        path_hint,
+        content_type,
+        model_raw,
+    }
+}
+
+/// 組裝上游連線物件（URL + 轉發標頭 + 方法 + client）。
+///
+/// 只是把 `build_upstream_target` 的結果（URL 與標頭）與 `client`／`method`
+/// 綁成 `Upstream`，讓呼叫端少一段純粹的欄位搬運。
+fn upstream_for<'a>(
+    ctx: &'a ProxyCtx,
+    parts: &axum::http::request::Parts,
+    authed: &keys::AuthedKey,
+    translated: bool,
+    app: &str,
+) -> Upstream<'a> {
+    let (url, headers) = build_upstream_target(parts, authed, translated, app);
+    Upstream {
+        client: &ctx.client,
+        method: parts.method.clone(),
+        url,
+        headers,
+    }
+}
+
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
@@ -2136,22 +2196,13 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         Err(resp) => return *resp,
     };
 
-    // 模型名（用於白名單 + 日誌；Gemini 原生請求體無 model，從 URL 回填）
-    let body_json: Option<serde_json::Value> = parse_body_json(&bytes);
-    let path_hint = parts.uri.path().to_string();
-    let content_type = parts
-        .headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    let model_raw = body_json
-        .as_ref()
-        .and_then(|v| v.get("model"))
-        .and_then(|m| m.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| model_from_path(&path_hint))
-        .unwrap_or_default();
+    // ---- 請求元資料（模型名／路徑／內容類型；見 request_meta）
+    let ReqMeta {
+        body_json,
+        path_hint,
+        content_type,
+        model_raw,
+    } = request_meta(&parts, &bytes);
     // ---- 模型白名單 + 來源解析（見 resolve_model）
     if let Err(resp) = resolve_model(&ctx, &started, &app, &conn, &model_raw, &mut authed) {
         return *resp;
@@ -2184,13 +2235,7 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     } = prep;
 
     // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
-    let (url, fwd_headers) = build_upstream_target(&parts, &authed, translated, &app);
-    let up = Upstream {
-        client: &ctx.client,
-        method: parts.method.clone(),
-        url,
-        headers: fwd_headers,
-    };
+    let up = upstream_for(&ctx, &parts, &authed, translated, &app);
 
     let rc = RetryCtx {
         ctx: &ctx,
