@@ -1,5 +1,8 @@
     use super::*;
     use axum::http::HeaderValue;
+    // `SseUsage` 原本經由 `proxy.rs` 的檔案層級 `use crate::translate::{…}`
+    // 取得（該行隨 `extract_usage` 搬進 `proxy/logging.rs`），故在此明確引入。
+    use crate::translate::SseUsage;
     // 矩陣的 400 訊息常數住在 `proxy::matrix`（第十一步拆出），
     // `use super::*` 只涵蓋 `proxy` 自身的綁定，故須明確指名。
     use super::matrix::{
