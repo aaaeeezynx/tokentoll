@@ -1989,6 +1989,137 @@ fn resolve_model(
     }
 }
 
+/// `prepare_request` 的輸入（欄位較多，故用參數物件而非長參數列）。
+struct PrepareInput<'a> {
+    ctx: &'a ProxyCtx,
+    started: &'a Instant,
+    app: &'a str,
+    conn: &'a rusqlite::Connection,
+    provider_id: i64,
+    /// 渠道協議（`providers.api_format`），用於矩陣判定。
+    api_format: &'a str,
+    model_raw: &'a str,
+    content_type: &'a str,
+    path_hint: &'a str,
+    raw: &'a [u8],
+    body_json: &'a Option<serde_json::Value>,
+}
+
+/// 請求準備的產物。
+struct Prepared {
+    in_fmt: InFmt,
+    target_fmt: TargetFmt,
+    kind: TransKind,
+    translated: bool,
+    /// 已轉譯、已剝離，可以直接送上游的位元組。
+    bytes: Vec<u8>,
+    /// 送往上游的實際模型名（未改寫則空字串）。
+    model: String,
+}
+
+/// 格式矩陣判定 → 請求體轉譯 → 剝離上游拒收結構。
+///
+/// - 矩陣由 `resolve_trans_kind` 全表窮舉（編譯器保證，見 §3 B5/B6）；
+///   不支援的組合先留一筆 warn 追蹤（`trans_kind: "unsupported"`）再回 400。
+/// - 翻譯路上請求體不是 JSON 時，留下**原始位元組的 hex** 再回 400 ——
+///   這是 §5.2 那個懸而未決的「body 解析失敗 400」的定案依據。
+/// - 最後套用 `strip_for_upstream`（渠道記憶欄位、encrypted_content、
+///   不支援的 tool types、直通歷史配對修復）。
+///
+/// 本函式是同步的，所以可以安全借用 `&Connection`。
+fn prepare_request(input: PrepareInput<'_>) -> Result<Prepared, Box<Response>> {
+    let in_fmt = InFmt::from_path(input.path_hint);
+    let target_fmt = TargetFmt::from_db(input.api_format);
+    let kind = match resolve_trans_kind(in_fmt, target_fmt) {
+        Ok(k) => k,
+        Err(msg) => {
+            trace::log_to(
+                &input.ctx.db_path,
+                &TraceRecord {
+                    app: input.app.to_string(),
+                    model_raw: input.model_raw.to_string(),
+                    in_fmt: in_fmt.as_str().to_string(),
+                    target_fmt: target_fmt.as_str().to_string(),
+                    trans_kind: "unsupported".to_string(),
+                    upstream_status: 400,
+                    latency_ms: input.started.elapsed().as_millis() as i64,
+                    note: msg.to_string(),
+                    ..Default::default()
+                }
+                .warn(),
+            );
+            return Err(Box::new(reject(
+                input.ctx,
+                input.started,
+                input.app,
+                input.model_raw,
+                StatusCode::BAD_REQUEST,
+                msg,
+            )));
+        }
+    };
+    let translated = kind != TransKind::None;
+    // 流式請求強制索取用量：僅 OpenAI chat（含翻譯後）需要顯式 stream_options；
+    // Responses / Anthropic / Gemini 加此欄位會被上游 400。
+    let want_usage_opt = should_inject_usage(translated, input.path_hint);
+    let (bytes, model) = match translate_forward_body(
+        input.conn,
+        input.provider_id,
+        input.raw,
+        input.body_json,
+        input.model_raw,
+        TransSpec { kind, translated },
+        want_usage_opt,
+    ) {
+        BodyPrep::Ready(fb) => (fb.bytes, fb.model),
+        BodyPrep::Unparsable => {
+            // ── §5.2 的關鍵修復 ──
+            // 本專案的「body 解析失敗 400」一直無法判定根因：docs/evidence/
+            // 的三份樣本裡，成功案例的 bytes_len 是原始長度，兩個失敗案例卻是
+            // 「去引號後」的長度，無法區分「真解析失敗」與「debug 儀器弄壞 body」。
+            // 這裡把**原始位元組前綴的 hex** 落庫，下次失敗即可直接定案。
+            trace::log_to(
+                &input.ctx.db_path,
+                &TraceRecord {
+                    app: input.app.to_string(),
+                    model_raw: input.model_raw.to_string(),
+                    in_fmt: in_fmt.as_str().to_string(),
+                    target_fmt: target_fmt.as_str().to_string(),
+                    trans_kind: kind.as_str().to_string(),
+                    upstream_status: 400,
+                    latency_ms: input.started.elapsed().as_millis() as i64,
+                    content_type: input.content_type.to_string(),
+                    note: format!(
+                        "請求體不是合法 JSON，無法翻譯（原始 {} bytes，已記錄 hex）",
+                        input.raw.len()
+                    ),
+                    ..Default::default()
+                }
+                .with_body_hex(input.raw)
+                .warn(),
+            );
+            return Err(Box::new(reject(
+                input.ctx,
+                input.started,
+                input.app,
+                input.model_raw,
+                StatusCode::BAD_REQUEST,
+                format!("{} 請求體不是 JSON，無法轉換為上游格式", in_fmt.label()),
+            )));
+        }
+    };
+    // 預先剝離該渠道已知拒收欄位與已知不支援結構（詳見 strip_for_upstream）。
+    let bytes = strip_for_upstream(input.conn, input.provider_id, bytes, in_fmt, translated);
+    Ok(Prepared {
+        in_fmt,
+        target_fmt,
+        kind,
+        translated,
+        bytes,
+        model,
+    })
+}
+
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
@@ -2026,93 +2157,31 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         return *resp;
     }
 
-    // ---- 格式矩陣：入站格式 × 渠道格式（mixed 視為 OpenAI 兼容）
-    // 全表列舉於 resolve_trans_kind，由編譯器保證窮舉（見 §3 B5/B6）。
-    let in_fmt = InFmt::from_path(&path_hint);
-    let target_fmt = TargetFmt::from_db(&authed.provider_api_format);
-    let kind = match resolve_trans_kind(in_fmt, target_fmt) {
-        Ok(k) => k,
-        Err(msg) => {
-            trace::log_to(
-                &ctx.db_path,
-                &TraceRecord {
-                    app: app.clone(),
-                    model_raw: model_raw.clone(),
-                    in_fmt: in_fmt.as_str().to_string(),
-                    target_fmt: target_fmt.as_str().to_string(),
-                    trans_kind: "unsupported".to_string(),
-                    upstream_status: 400,
-                    latency_ms: started.elapsed().as_millis() as i64,
-                    note: msg.to_string(),
-                    ..Default::default()
-                }
-                .warn(),
-            );
-            return reject(
-                &ctx,
-                &started,
-                &app,
-                &model_raw,
-                StatusCode::BAD_REQUEST,
-                msg,
-            );
-        }
+    // ---- 格式矩陣 + 請求體轉譯與剝離（見 prepare_request）
+    let prep = match prepare_request(PrepareInput {
+        ctx: &ctx,
+        started: &started,
+        app: &app,
+        conn: &conn,
+        provider_id: authed.provider_id,
+        api_format: &authed.provider_api_format,
+        model_raw: &model_raw,
+        content_type: &content_type,
+        path_hint: &path_hint,
+        raw: &bytes,
+        body_json: &body_json,
+    }) {
+        Ok(p) => p,
+        Err(resp) => return *resp,
     };
-    let translated = kind != TransKind::None;
-
-    // 模型改寫 display→actual：翻譯分支在轉換時做，直通分支（OpenAI / Responses）
-    // 在此改寫 body.model；無映射時 resolve_actual 原樣返回，行為不變。
-    // 若不改寫，工具送顯示名（如 deepseek-v4-flash-0731）會被上游以 invalid model ID 拒收。
-    let spec = TransSpec { kind, translated };
-    // 流式請求強制索取用量：僅 OpenAI chat（含翻譯後）需要顯式 stream_options；
-    // Responses / Anthropic / Gemini 加此欄位會被上游 400。
-    let want_usage_opt = should_inject_usage(translated, &path_hint);
-    let (mut body_bytes, translated_model) = match translate_forward_body(
-        &conn,
-        authed.provider_id,
-        &bytes,
-        &body_json,
-        &model_raw,
-        spec,
-        want_usage_opt,
-    ) {
-        BodyPrep::Ready(fb) => (fb.bytes, fb.model),
-        BodyPrep::Unparsable => {
-            // ── §5.2 的關鍵修復 ──
-            // 本專案的「body 解析失敗 400」一直無法判定根因：docs/evidence/
-            // 的三份樣本裡，成功案例的 bytes_len 是原始長度，兩個失敗案例卻是
-            // 「去引號後」的長度，無法區分「真解析失敗」與「debug 儀器弄壞 body」。
-            // 這裡把**原始位元組前綴的 hex** 落庫，下次失敗即可直接定案。
-            trace::log_to(
-                &ctx.db_path,
-                &TraceRecord {
-                    app: app.clone(),
-                    model_raw: model_raw.clone(),
-                    in_fmt: in_fmt.as_str().to_string(),
-                    target_fmt: target_fmt.as_str().to_string(),
-                    trans_kind: kind.as_str().to_string(),
-                    upstream_status: 400,
-                    latency_ms: started.elapsed().as_millis() as i64,
-                    content_type: content_type.clone(),
-                    note: format!(
-                        "請求體不是合法 JSON，無法翻譯（原始 {} bytes，已記錄 hex）",
-                        bytes.len()
-                    ),
-                    ..Default::default()
-                }
-                .with_body_hex(&bytes)
-                .warn(),
-            );
-            return reject(
-                &ctx,
-                &started,
-                &app,
-                &model_raw,
-                StatusCode::BAD_REQUEST,
-                format!("{} 請求體不是 JSON，無法轉換為上游格式", in_fmt.label()),
-            );
-        }
-    };
+    let Prepared {
+        in_fmt,
+        target_fmt,
+        kind,
+        translated,
+        bytes: body_bytes,
+        model: translated_model,
+    } = prep;
 
     // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
     let (url, fwd_headers) = build_upstream_target(&parts, &authed, translated, &app);
@@ -2122,8 +2191,6 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         url,
         headers: fwd_headers,
     };
-    // 預先剝離該渠道已知拒收欄位與已知不支援結構（詳見 strip_for_upstream）。
-    body_bytes = strip_for_upstream(&conn, authed.provider_id, body_bytes, in_fmt, translated);
 
     let rc = RetryCtx {
         ctx: &ctx,
