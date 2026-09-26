@@ -22,16 +22,22 @@ use tokio::net::TcpListener;
 use crate::fsutil::now_ms;
 use crate::keys;
 use crate::tools::APPS;
+use crate::trace::{self, TraceRecord};
 
 // ---------------------------------------------------------------- 狀態 ---
+
+/// 上游連線階段上限（秒）。握手卡住時快速失敗，避免佔用請求 10 分鐘。
+pub(crate) const CONNECT_TIMEOUT_SECS: u64 = 10;
+/// 上游整體請求上限（秒），含串流讀取。
+pub(crate) const REQUEST_TIMEOUT_SECS: u64 = 600;
+/// `proxy_trace` 保留筆數上限（網關啟動時裁剪）。
+pub(crate) const TRACE_KEEP: i64 = 5000;
 
 #[derive(Clone)]
 pub(crate) struct ProxyCtx {
     pub db_path: PathBuf,
     pub client: Client,
     pub rate: RateLimiter,
-    /// 每渠道已知的上游拒收欄位（命中一次後記住，後續請求預先剝離）。
-    pub stripped: Arc<Mutex<HashMap<i64, Vec<String>>>>,
 }
 
 #[derive(Clone, Default)]
@@ -590,14 +596,60 @@ fn strip_unsupported_tools(body: &[u8]) -> Option<Vec<u8>> {
     serde_json::to_vec(&v).ok()
 }
 
+/// 遞迴移除所有 `encrypted_content` 欄位（含 reasoning item 內）。
+///
+/// 目的：Codex 在 ChatGPT 授權模式下產生的推理簽章只對 OpenAI 本身有效，
+/// 送到任何第三方 responses 端點都會被 400 拒收：
+/// `reasoning \`encrypted_content\` was not issued to this caller`。
+///
+/// 只在**直通**路徑需要（兩條翻譯路徑都已是白名單重建 body，天然不含此欄位）。
+/// 回傳 `None` 表示未命中 —— 原文一字不動。
+fn strip_encrypted_content(body: &[u8]) -> Option<Vec<u8>> {
+    // 位元組快掃短路：絕大多數請求不含此欄位，避免每次多一次完整 JSON parse。
+    const NEEDLE: &[u8] = b"encrypted_content";
+    if !body.windows(NEEDLE.len()).any(|w| w == NEEDLE) {
+        return None;
+    }
+    fn walk(v: &mut serde_json::Value) -> bool {
+        match v {
+            serde_json::Value::Object(o) => {
+                let mut hit = o.remove("encrypted_content").is_some();
+                for (_, child) in o.iter_mut() {
+                    // 不用 `|=` 短路：即使已命中也要走完全樹，移除所有副本
+                    if walk(child) {
+                        hit = true;
+                    }
+                }
+                hit
+            }
+            serde_json::Value::Array(a) => {
+                let mut hit = false;
+                for c in a.iter_mut() {
+                    if walk(c) {
+                        hit = true;
+                    }
+                }
+                hit
+            }
+            _ => false,
+        }
+    }
+    let mut v: serde_json::Value = parse_body_json(body)?;
+    if walk(&mut v) {
+        serde_json::to_vec(&v).ok()
+    } else {
+        None
+    }
+}
+
 /// 直通 chat 請求的歷史配對修復（舊 session 續跑常見孤兒 tool_calls）。
 /// 僅處理 OpenAI chat 格式且未經翻譯的請求體；有效歷史返回 None（原文一字不動）。
 fn sanitize_passthrough_chat_body(
     body: &[u8],
-    in_fmt: &str,
+    in_fmt: InFmt,
     translated: bool,
 ) -> Option<Vec<u8>> {
-    if translated || in_fmt != "openai" {
+    if translated || in_fmt != InFmt::OpenAi {
         return None;
     }
     let v: serde_json::Value = parse_body_json(body)?;
@@ -612,18 +664,6 @@ fn sanitize_passthrough_chat_body(
         serde_json::Value::Array(fixed),
     );
     serde_json::to_vec(&serde_json::Value::Object(obj)).ok()
-}
-
-/// 記住某渠道被拒收的欄位（進程內記憶，後續請求預先剝離）。
-fn remember_stripped(ctx: &ProxyCtx, provider_id: i64, field: &str) {
-    let mut m = ctx
-        .stripped
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let v = m.entry(provider_id).or_default();
-    if !v.iter().any(|x| x == field) {
-        v.push(field.to_string());
-    }
 }
 
 /// 上游錯誤原文透出（截斷，便於排查；不含密鑰）。
@@ -649,25 +689,157 @@ enum TransKind {
     ResponsesToChat,
 }
 
-/// 入站格式判定（按路徑；未知按透傳處理，不誤傷 /v1/models 這類中性路徑）。
-fn detect_in_format(path: &str) -> &'static str {
-    if path.contains(":generateContent")
-        || path.contains(":streamGenerateContent")
-        || path.contains(":embedContent")
-        || path.contains("v1beta/models")
-    {
-        "gemini"
-    } else if path.ends_with("/messages") {
-        "anthropic"
-    } else if path.ends_with("/responses") {
-        "responses"
-    } else if path.contains("/chat/completions")
-        || path.contains("/embeddings")
-        || path.ends_with("/models")
-    {
-        "openai"
-    } else {
-        "unknown"
+impl TransKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            TransKind::None => "none",
+            TransKind::AnthropicToChat => "anthropic_to_chat",
+            TransKind::ResponsesToChat => "responses_to_chat",
+        }
+    }
+}
+
+/// 入站格式（由請求路徑判定）。
+///
+/// 改用 enum（原為 `&str`）是為了讓格式矩陣能被**編譯器**窮舉檢查：
+/// `match (InFmt, TargetFmt)` 若少列一格就編譯失敗，從根本上消除
+/// 「正確性依賴分支順序」的脆弱性（見 docs/REFACTORING-PLAN.md §3 B5）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InFmt {
+    Anthropic,
+    Responses,
+    OpenAi,
+    Gemini,
+    /// 未知／中性路徑（如 `/v1/models`）：一律透傳，不誤傷。
+    Unknown,
+}
+
+impl InFmt {
+    fn from_path(path: &str) -> Self {
+        if path.contains(":generateContent")
+            || path.contains(":streamGenerateContent")
+            || path.contains(":embedContent")
+            || path.contains("v1beta/models")
+        {
+            InFmt::Gemini
+        } else if path.ends_with("/messages") {
+            InFmt::Anthropic
+        } else if path.ends_with("/responses") {
+            InFmt::Responses
+        } else if path.contains("/chat/completions")
+            || path.contains("/embeddings")
+            || path.ends_with("/models")
+        {
+            InFmt::OpenAi
+        } else {
+            InFmt::Unknown
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            InFmt::Anthropic => "anthropic",
+            InFmt::Responses => "responses",
+            InFmt::OpenAi => "openai",
+            InFmt::Gemini => "gemini",
+            InFmt::Unknown => "unknown",
+        }
+    }
+}
+
+/// 渠道協議（`providers.api_format`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TargetFmt {
+    OpenAiChat,
+    OpenAiResponses,
+    /// 混合渠道：同時支援 chat 與 responses 端點（見 `db.rs` 的 zen 種子）。
+    Mixed,
+    Anthropic,
+    Gemini,
+    /// `api_format` 不在已知值內（拼錯或未來新增）。**不猜測協議**。
+    Unknown,
+}
+
+impl TargetFmt {
+    fn from_db(s: &str) -> Self {
+        match s {
+            "openai-chat" => TargetFmt::OpenAiChat,
+            "openai-responses" => TargetFmt::OpenAiResponses,
+            "mixed" => TargetFmt::Mixed,
+            "anthropic" => TargetFmt::Anthropic,
+            "gemini" => TargetFmt::Gemini,
+            _ => TargetFmt::Unknown,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            TargetFmt::OpenAiChat => "openai-chat",
+            TargetFmt::OpenAiResponses => "openai-responses",
+            TargetFmt::Mixed => "mixed",
+            TargetFmt::Anthropic => "anthropic",
+            TargetFmt::Gemini => "gemini",
+            TargetFmt::Unknown => "unknown",
+        }
+    }
+}
+
+// 400 訊息（使用者直接看到，故集中管理）
+const E_ANTHROPIC_UNSUPPORTED: &str =
+    "該渠道不接受 Anthropic 請求：請換 Anthropic 官方或 OpenAI 兼容渠道";
+const E_REVERSE_UNSUPPORTED: &str =
+    "反向轉換（OpenAI → Anthropic）尚未實現，請換 OpenAI 兼容渠道";
+const E_GEMINI_IN_ONLY: &str = "Gemini 原生請求只能走 Gemini 渠道";
+const E_GEMINI_OUT_ONLY: &str = "Gemini 渠道只接受 Gemini 原生請求";
+/// B6：chat 請求打到 responses 端點，原實作靜默直通而必然失敗，改為明確報錯。
+const E_CHAT_TO_RESPONSES: &str =
+    "此渠道為 Responses 協議，不接受 OpenAI Chat 請求：請改用 Chat 兼容渠道，或改用 Codex 等 Responses 客戶端";
+
+/// 入站格式 × 渠道協議 → 翻譯類型（`Err` = 該組合不支援，字串即 400 訊息）。
+///
+/// **30 格全列舉，無萬用字元** —— 未來新增任何 `InFmt` / `TargetFmt` 變體，
+/// 編譯器都會強制在此補上對應行為，不會靜默落到透傳。
+/// 既有行為已逐格核對與原實作等價（僅 B6 一格由「靜默直通」改為「明確報錯」）。
+fn resolve_trans_kind(in_fmt: InFmt, target: TargetFmt) -> Result<TransKind, &'static str> {
+    use InFmt::*;
+    use TargetFmt as T;
+    match (in_fmt, target) {
+        // ── Anthropic 入站 ──
+        (Anthropic, T::Anthropic) => Ok(TransKind::None),
+        (Anthropic, T::OpenAiChat) | (Anthropic, T::Mixed) => Ok(TransKind::AnthropicToChat),
+        (Anthropic, T::OpenAiResponses)
+        | (Anthropic, T::Gemini)
+        | (Anthropic, T::Unknown) => Err(E_ANTHROPIC_UNSUPPORTED),
+
+        // ── Responses 入站（Codex）──
+        (Responses, T::OpenAiChat) | (Responses, T::Mixed) => Ok(TransKind::ResponsesToChat),
+        (Responses, T::OpenAiResponses) => Ok(TransKind::None),
+        (Responses, T::Anthropic) => Err(E_REVERSE_UNSUPPORTED),
+        (Responses, T::Gemini) => Err(E_GEMINI_OUT_ONLY),
+        (Responses, T::Unknown) => Ok(TransKind::None),
+
+        // ── OpenAI Chat 入站 ──
+        (OpenAi, T::OpenAiChat) | (OpenAi, T::Mixed) => Ok(TransKind::None),
+        (OpenAi, T::OpenAiResponses) => Err(E_CHAT_TO_RESPONSES),
+        (OpenAi, T::Anthropic) => Err(E_REVERSE_UNSUPPORTED),
+        (OpenAi, T::Gemini) => Err(E_GEMINI_OUT_ONLY),
+        (OpenAi, T::Unknown) => Ok(TransKind::None),
+
+        // ── Gemini 原生入站 ──
+        (Gemini, T::Gemini) => Ok(TransKind::None),
+        (Gemini, T::OpenAiChat)
+        | (Gemini, T::OpenAiResponses)
+        | (Gemini, T::Mixed)
+        | (Gemini, T::Anthropic)
+        | (Gemini, T::Unknown) => Err(E_GEMINI_IN_ONLY),
+
+        // ── 未知入站格式（中性路徑）──
+        (Unknown, T::Gemini) => Err(E_GEMINI_OUT_ONLY),
+        (Unknown, T::OpenAiChat)
+        | (Unknown, T::OpenAiResponses)
+        | (Unknown, T::Mixed)
+        | (Unknown, T::Anthropic)
+        | (Unknown, T::Unknown) => Ok(TransKind::None),
     }
 }
 
@@ -961,13 +1133,12 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     }
 
     // ---- 格式矩陣：入站格式 × 渠道格式（mixed 視為 OpenAI 兼容）
-    let in_fmt = detect_in_format(&path_hint);
-    let target = authed.provider_api_format.as_str();
-    let kind = match (in_fmt, target) {
-        ("anthropic", "anthropic") => TransKind::None,
-        ("anthropic", "openai-chat") | ("anthropic", "mixed") => TransKind::AnthropicToChat,
-        ("responses", "openai-chat") | ("responses", "mixed") => TransKind::ResponsesToChat,
-        ("anthropic", _) => {
+    // 全表列舉於 resolve_trans_kind，由編譯器保證窮舉（見 §3 B5/B6）。
+    let in_fmt = InFmt::from_path(&path_hint);
+    let target_fmt = TargetFmt::from_db(&authed.provider_api_format);
+    let kind = match resolve_trans_kind(in_fmt, target_fmt) {
+        Ok(k) => k,
+        Err(msg) => {
             log_reject(
                 &ctx.db_path,
                 &app,
@@ -975,52 +1146,23 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                 400,
                 started.elapsed().as_millis() as i64,
             );
-            return err_json(
-                StatusCode::BAD_REQUEST,
-                "該渠道不接受 Anthropic 請求：請換 Anthropic 官方或 OpenAI 兼容渠道".into(),
-            );
-        }
-        ("openai", "anthropic") | ("responses", "anthropic") => {
-            log_reject(
+            trace::log_to(
                 &ctx.db_path,
-                &app,
-                &model_raw,
-                400,
-                started.elapsed().as_millis() as i64,
+                &TraceRecord {
+                    app: app.clone(),
+                    model_raw: model_raw.clone(),
+                    in_fmt: in_fmt.as_str().to_string(),
+                    target_fmt: target_fmt.as_str().to_string(),
+                    trans_kind: "unsupported".to_string(),
+                    upstream_status: 400,
+                    latency_ms: started.elapsed().as_millis() as i64,
+                    note: msg.to_string(),
+                    ..Default::default()
+                }
+                .warn(),
             );
-            return err_json(
-                StatusCode::BAD_REQUEST,
-                "反向轉換（OpenAI → Anthropic）尚未實現，請換 OpenAI 兼容渠道".into(),
-            );
+            return err_json(StatusCode::BAD_REQUEST, msg.into());
         }
-        ("gemini", "gemini") => TransKind::None,
-        ("gemini", _) => {
-            log_reject(
-                &ctx.db_path,
-                &app,
-                &model_raw,
-                400,
-                started.elapsed().as_millis() as i64,
-            );
-            return err_json(
-                StatusCode::BAD_REQUEST,
-                "Gemini 原生請求只能走 Gemini 渠道".into(),
-            );
-        }
-        (_, "gemini") => {
-            log_reject(
-                &ctx.db_path,
-                &app,
-                &model_raw,
-                400,
-                started.elapsed().as_millis() as i64,
-            );
-            return err_json(
-                StatusCode::BAD_REQUEST,
-                "Gemini 渠道只接受 Gemini 原生請求".into(),
-            );
-        }
-        _ => TransKind::None,
     };
     let translated = kind != TransKind::None;
 
@@ -1041,9 +1183,46 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                     400,
                     started.elapsed().as_millis() as i64,
                 );
+                // ── §5.2 的關鍵修復 ──
+                // 本專案的「body 解析失敗 400」一直無法判定根因：docs/evidence/
+                // 的三份樣本裡，成功案例的 bytes_len 是原始長度，兩個失敗案例卻是
+                // 「去引號後」的長度，無法區分「真解析失敗」與「debug 儀器弄壞 body」。
+                // 這裡把**原始位元組前綴的 hex** 落庫，下次失敗即可直接定案。
+                let fmt_name = match in_fmt {
+                    InFmt::Anthropic => "Anthropic",
+                    InFmt::Responses => "Responses",
+                    InFmt::OpenAi => "OpenAI Chat",
+                    InFmt::Gemini => "Gemini",
+                    InFmt::Unknown => "入站",
+                };
+                trace::log_to(
+                    &ctx.db_path,
+                    &TraceRecord {
+                        app: app.clone(),
+                        model_raw: model_raw.clone(),
+                        in_fmt: in_fmt.as_str().to_string(),
+                        target_fmt: target_fmt.as_str().to_string(),
+                        trans_kind: kind.as_str().to_string(),
+                        upstream_status: 400,
+                        latency_ms: started.elapsed().as_millis() as i64,
+                        content_type: parts
+                            .headers
+                            .get("content-type")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("")
+                            .to_string(),
+                        note: format!(
+                            "請求體不是合法 JSON，無法翻譯（原始 {} bytes，已記錄 hex）",
+                            bytes.len()
+                        ),
+                        ..Default::default()
+                    }
+                    .with_body_hex(&bytes)
+                    .warn(),
+                );
                 return err_json(
                     StatusCode::BAD_REQUEST,
-                    "Anthropic 請求體不是 JSON".into(),
+                    format!("{fmt_name} 請求體不是 JSON，無法轉換為上游格式"),
                 );
             }
         };
@@ -1176,20 +1355,19 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         b = b.header("accept-encoding", "identity");
         b.body(body).send()
     };
-    // 預先剝離該渠道已知拒收欄位（命中記憶後後續請求不再試錯）
-    {
-        let known: Vec<String> = ctx
-            .stripped
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&authed.provider_id)
-            .cloned()
-            .unwrap_or_default();
-        for f in known {
-            if let Some(nb) = strip_json_field(&body_bytes, &f) {
-                body_bytes = nb;
-            }
+    // 預先剝離該渠道已知拒收欄位。
+    // 記憶持久化於 SQLite 的 provider_stripped_fields：原實作只存在進程記憶體
+    // （`ProxyCtx.stripped`），網關每次停止／啟動即歸零，導致每個渠道的第一個
+    // 請求都要重踩一次 400 再重試（見 docs/REFACTORING-PLAN.md §3 B2）。
+    for f in trace::load_stripped(&conn, authed.provider_id) {
+        if let Some(nb) = strip_json_field(&body_bytes, &f) {
+            body_bytes = nb;
         }
+    }
+    // 剝離 OpenAI 專屬推理簽章（第三方 responses 端點會 400，§3 B1）。
+    // 翻譯路徑已是白名單重建 body，此處靠位元組快掃短路，成本可忽略。
+    if let Some(stripped) = strip_encrypted_content(&body_bytes) {
+        body_bytes = stripped;
     }
     // 剝掉上游不支援的 tool types（Codex `custom` → DeepSeek 400）
     if !translated {
@@ -1197,8 +1375,7 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
             body_bytes = stripped;
         }
         // 直通 chat 歷史配對修復（舊 session 孤兒 tool_calls；有效歷史不動）
-        if let Some(fixed) = sanitize_passthrough_chat_body(&body_bytes, in_fmt, translated)
-        {
+        if let Some(fixed) = sanitize_passthrough_chat_body(&body_bytes, in_fmt, translated) {
             body_bytes = fixed;
         }
     }
@@ -1221,19 +1398,51 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     // 仍失敗或無法解析則透出上游原文，不再吞錯。
     if upstream.status() == StatusCode::BAD_REQUEST {
         let eb: Vec<u8> = upstream.bytes().await.unwrap_or_default().to_vec();
+        // 客戶端訊息用截斷版；追蹤表存完整原文（§5.3 第 0 層）
+        let upstream_text = upstream_err_text(&eb);
+        let upstream_full = String::from_utf8_lossy(&eb).to_string();
+        let content_type = parts
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let mut retried: Option<reqwest::Response> = None;
+        let mut applied: Vec<String> = vec![];
         let fields = parse_unknown_fields(&String::from_utf8_lossy(&eb));
         if !fields.is_empty() {
             let mut nb = body_bytes.clone();
-            let mut stripped_any = false;
             for field in &fields {
                 if let Some(n) = strip_json_field(&nb, field) {
-                    remember_stripped(&ctx, authed.provider_id, field);
+                    // 持久化到 SQLite：網關重啟後不必再對同一渠道試錯（§3 B2）
+                    if let Err(e) = trace::remember_stripped(&conn, authed.provider_id, field) {
+                        eprintln!("gateway: 記錄拒收欄位失敗: {e}");
+                    }
                     nb = n;
-                    stripped_any = true;
+                    applied.push(field.clone());
                 }
             }
-            if stripped_any {
+            if !applied.is_empty() {
+                // 剝離事件留痕：這是回答「這個 400 到底剝了什麼」的唯一來源
+                trace::log_to(
+                    &ctx.db_path,
+                    &TraceRecord {
+                        app: app.clone(),
+                        model_raw: model_raw.clone(),
+                        in_fmt: in_fmt.as_str().to_string(),
+                        target_fmt: target_fmt.as_str().to_string(),
+                        trans_kind: kind.as_str().to_string(),
+                        upstream_status: 400,
+                        latency_ms: started.elapsed().as_millis() as i64,
+                        retry_count: 1,
+                        stripped_fields: applied.clone(),
+                        content_type: content_type.clone(),
+                        note: "上游 400 拒收欄位，已剝離並重試".to_string(),
+                        ..Default::default()
+                    }
+                    .with_body(&body_bytes)
+                    .with_upstream_error(&upstream_full),
+                );
                 match send_once(nb).await {
                     Ok(r) => {
                         retried = Some(r);
@@ -1261,12 +1470,33 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
             Some(r) => {
                 let st = r.status();
                 let eb2 = r.bytes().await.unwrap_or_default().to_vec();
+                let eb2_full = String::from_utf8_lossy(&eb2).to_string();
                 log_reject(
                     &ctx.db_path,
                     &app,
                     &model_raw,
                     st.as_u16(),
                     started.elapsed().as_millis() as i64,
+                );
+                // 剝離後仍失敗 → 這是真正未解決的 400，完整留痕
+                trace::log_to(
+                    &ctx.db_path,
+                    &TraceRecord {
+                        app: app.clone(),
+                        model_raw: model_raw.clone(),
+                        in_fmt: in_fmt.as_str().to_string(),
+                        target_fmt: target_fmt.as_str().to_string(),
+                        trans_kind: kind.as_str().to_string(),
+                        upstream_status: st.as_u16(),
+                        latency_ms: started.elapsed().as_millis() as i64,
+                        retry_count: 1,
+                        stripped_fields: applied.clone(),
+                        content_type: content_type.clone(),
+                        note: "剝離後重試仍失敗（未解決）".to_string(),
+                        ..Default::default()
+                    }
+                    .with_body(&body_bytes)
+                    .with_upstream_error(&eb2_full),
                 );
                 return err_json(st, upstream_err_text(&eb2));
             }
@@ -1278,7 +1508,30 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                     400,
                     started.elapsed().as_millis() as i64,
                 );
-                return err_json(StatusCode::BAD_REQUEST, upstream_err_text(&eb));
+                // 無法從錯誤訊息解析出欄位名 → 相容策略失效，必須留痕才能改進
+                trace::log_to(
+                    &ctx.db_path,
+                    &TraceRecord {
+                        app: app.clone(),
+                        model_raw: model_raw.clone(),
+                        in_fmt: in_fmt.as_str().to_string(),
+                        target_fmt: target_fmt.as_str().to_string(),
+                        trans_kind: kind.as_str().to_string(),
+                        upstream_status: 400,
+                        latency_ms: started.elapsed().as_millis() as i64,
+                        stripped_fields: applied.clone(),
+                        content_type: content_type.clone(),
+                        note: if applied.is_empty() {
+                            "上游 400 且無法解析出拒收欄位名（相容策略失效）".to_string()
+                        } else {
+                            "上游 400（剝離未命中任何欄位）".to_string()
+                        },
+                        ..Default::default()
+                    }
+                    .with_body(&body_bytes)
+                    .with_upstream_error(&upstream_full),
+                );
+                return err_json(StatusCode::BAD_REQUEST, upstream_text);
             }
         }
     }
@@ -1640,14 +1893,22 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
 }
 
 pub async fn serve(db_path: PathBuf, listener: TcpListener) -> Result<(), String> {
+    // 追蹤表上限：啟動時裁剪一次，避免長期運行無限成長。
+    if let Ok(conn) = open_conn(&db_path) {
+        if let Err(e) = trace::prune_traces(&conn, TRACE_KEEP) {
+            eprintln!("gateway: 裁剪 proxy_trace 失敗: {e}");
+        }
+    }
     let ctx = ProxyCtx {
         db_path,
         client: Client::builder()
-            .timeout(std::time::Duration::from_secs(600))
+            // 連線階段上限：上游 TCP 可達但握手卡住時，不該等滿整體 timeout（§3 B9）
+            .connect_timeout(std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            // 整體請求上限（含串流讀取）
+            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
             .map_err(|e| e.to_string())?,
         rate: RateLimiter::default(),
-        stripped: Default::default(),
     };
     let app = axum::Router::new()
         .fallback(proxy_handler)
@@ -1975,9 +2236,12 @@ mod tests {
         let db_path = dir.path().join("t.db");
         {
             let conn = crate::db::open_and_ensure(&db_path).unwrap();
+            // 註：此處原宣告 'openai-responses'，但本測試走的是 chat 端點 ——
+            // 它之所以一直綠燈，正是因為 B6 的靜默直通掩蓋了設定錯誤。
+            // 改為 'openai-chat' 以符合本測試「chat 直通轉發」的意圖。
             conn.execute(
                 "INSERT INTO providers (name, app_type, api_format, base_url, api_key, models_json, priority, enabled, created_at, updated_at)
-                 VALUES ('fake','codex','openai-responses','PLACEHOLDER','up-key','[]',0,1,0,0)",
+                 VALUES ('fake','codex','openai-chat','PLACEHOLDER','up-key','[]',0,1,0,0)",
                 [],
             )
             .unwrap();
@@ -2062,6 +2326,44 @@ mod tests {
         assert_eq!(r.status(), 200);
         let body: serde_json::Value = r.json().await.unwrap();
         assert_eq!(body["usage"]["prompt_tokens"], 11);
+        // 2c) B6 端到端回歸：把渠道改成 responses 協議後，同一個 chat 請求必須
+        //     得到網關自己產生的明確 400，而不是被靜默轉發給上游後失敗。
+        {
+            let conn = crate::db::open_and_ensure(&db_path).unwrap();
+            conn.execute(
+                "UPDATE providers SET api_format='openai-responses' WHERE name='fake'",
+                [],
+            )
+            .unwrap();
+        }
+        let r = http
+            .post(format!("http://127.0.0.1:{gw_port}/v1/chat/completions"))
+            .bearer_auth(&secret)
+            .header("user-agent", "codex-e2e")
+            .json(&serde_json::json!({"model": "gpt-5"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 400, "chat→responses 應明確拒絕（B6）");
+        let err_text = r.text().await.unwrap();
+        assert!(
+            err_text.contains("Responses"),
+            "錯誤訊息應說明協議不符: {err_text}"
+        );
+        // 訊息必須是可理解的中文說明，而非上游原始錯誤
+        assert!(
+            err_text.contains("Chat 兼容渠道") || err_text.contains("Responses 客戶端"),
+            "應給出可行動的建議: {err_text}"
+        );
+        // 還原協議，避免影響後續流式步驟
+        {
+            let conn = crate::db::open_and_ensure(&db_path).unwrap();
+            conn.execute(
+                "UPDATE providers SET api_format='openai-chat' WHERE name='fake'",
+                [],
+            )
+            .unwrap();
+        }
         // 2b) 流式轉發：SSE 原樣透出 + 結束落日誌
         let r = http
             .post(format!("http://127.0.0.1:{gw_port}/v1/chat/completions"))
@@ -2097,11 +2399,21 @@ mod tests {
             last
         };
         assert_eq!((app2.as_str(), i2, o2, s2), ("codex", 3, 2, 200));
-        // 3) 非流式日誌落庫（按 is_stream=0 精確取那一行）
+        // 3) 非流式日誌落庫（取成功那一行；步驟 2c 的被拒 400 也會落一行，
+        //    故必須以 status 區分 —— 這同時驗證「被拒請求也留痕」）
         let conn = crate::db::open_and_ensure(&db_path).unwrap();
+        let rejects: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM request_logs WHERE status=400",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rejects, 1, "B6 的 400 應留下一筆被拒日誌");
         let (app, itok, otok, status): (String, i64, i64, i64) = conn
             .query_row(
-                "SELECT app, in_tok, out_tok, status FROM request_logs WHERE is_stream=0 ORDER BY id DESC LIMIT 1",
+                "SELECT app, in_tok, out_tok, status FROM request_logs
+                 WHERE is_stream=0 AND status=200 ORDER BY id DESC LIMIT 1",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
@@ -2911,7 +3223,7 @@ mod tests {
             {"role":"user","content":"hi"},
             {"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]}
         ]}"#;
-        let out = sanitize_passthrough_chat_body(broken, "openai", false).expect("應修復");
+        let out = sanitize_passthrough_chat_body(broken, InFmt::OpenAi, false).expect("應修復");
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         let msgs = v["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 3);
@@ -2919,11 +3231,199 @@ mod tests {
         assert_eq!(msgs[2]["tool_call_id"], "c1");
         // 有效歷史一字不動
         let ok_body = br#"{"model":"m","messages":[{"role":"user","content":"hi"}]}"#;
-        assert!(sanitize_passthrough_chat_body(ok_body, "openai", false).is_none());
+        assert!(sanitize_passthrough_chat_body(ok_body, InFmt::OpenAi, false).is_none());
         // 非 chat / 已翻譯不碰
-        assert!(sanitize_passthrough_chat_body(broken, "anthropic", false).is_none());
-        assert!(sanitize_passthrough_chat_body(broken, "openai", true).is_none());
-        assert!(sanitize_passthrough_chat_body(b"not json", "openai", false).is_none());
+        assert!(sanitize_passthrough_chat_body(broken, InFmt::Anthropic, false).is_none());
+        assert!(sanitize_passthrough_chat_body(broken, InFmt::OpenAi, true).is_none());
+        assert!(sanitize_passthrough_chat_body(b"not json", InFmt::OpenAi, false).is_none());
+    }
+
+    // ───────── B1：encrypted_content 剝離（Responses 直通路徑）─────────
+
+    #[test]
+    fn strip_encrypted_content_removes_nested_occurrences() {
+        // 第三方 responses 端點會以「encrypted_content was not issued to this
+        // caller」400 拒收，故直通前必須剝離所有副本（含巢狀）。
+        let body = br#"{"model":"m","input":[
+            {"type":"reasoning","encrypted_content":"SECRET","summary":[]},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}],
+             "meta":{"encrypted_content":"ALSO_SECRET"}}
+        ],"store":false}"#;
+        let out = strip_encrypted_content(body).expect("應命中並剝離");
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("encrypted_content"), "仍有殘留: {s}");
+        assert!(!s.contains("SECRET"), "簽章值未移除: {s}");
+        // 其餘欄位一字不動
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["model"], "m");
+        assert_eq!(v["store"], false);
+        assert_eq!(v["input"].as_array().unwrap().len(), 2);
+        assert_eq!(v["input"][0]["type"], "reasoning");
+        assert_eq!(v["input"][1]["content"][0]["text"], "hi");
+    }
+
+    #[test]
+    fn strip_encrypted_content_is_noop_when_absent() {
+        // 未命中必須回 None（呼叫端據此判斷「原文一字不動」）
+        assert!(strip_encrypted_content(br#"{"model":"m","input":"hi"}"#).is_none());
+    }
+
+    #[test]
+    fn strip_encrypted_content_handles_arrays_and_deep_nesting() {
+        let body =
+            br#"{"a":[[{"encrypted_content":"x"}]],"b":{"c":{"d":{"encrypted_content":"y"}}}}"#;
+        let out = strip_encrypted_content(body).expect("應命中");
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("encrypted_content"), "深層殘留: {s}");
+    }
+
+    #[test]
+    fn strip_encrypted_content_leaves_similar_keys_alone() {
+        // 只剝離精確鍵名，不得誤傷其他含相似字串的鍵
+        let body = br#"{"my_encrypted_content_x":1,"encrypted_content":"z"}"#;
+        let out = strip_encrypted_content(body).expect("應命中");
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert!(v.get("encrypted_content").is_none());
+        assert_eq!(v["my_encrypted_content_x"], 1, "相似鍵名被誤刪");
+    }
+
+    #[test]
+    fn strip_encrypted_content_ignores_non_json() {
+        assert!(strip_encrypted_content(b"not json").is_none());
+        assert!(strip_encrypted_content(b"").is_none());
+    }
+
+    // ───────── B5：格式矩陣窮舉（30 格全釘死）─────────
+
+    #[test]
+    fn trans_kind_matrix_is_fully_pinned() {
+        use InFmt::*;
+        use TargetFmt as T;
+        const NONE: Option<TransKind> = Some(TransKind::None);
+        const A2C: Option<TransKind> = Some(TransKind::AnthropicToChat);
+        const R2C: Option<TransKind> = Some(TransKind::ResponsesToChat);
+        // 5 種入站 × 6 種渠道協議 = 30 格，全部明列。
+        // 這份表就是行為契約：任何分支被重排或漏改，這裡立刻失敗。
+        let table: &[(InFmt, T, Option<TransKind>)] = &[
+            // Anthropic 入站
+            (Anthropic, T::OpenAiChat, A2C),
+            (Anthropic, T::OpenAiResponses, None),
+            (Anthropic, T::Mixed, A2C),
+            (Anthropic, T::Anthropic, NONE),
+            (Anthropic, T::Gemini, None),
+            (Anthropic, T::Unknown, None),
+            // Responses 入站（Codex）
+            (Responses, T::OpenAiChat, R2C),
+            (Responses, T::OpenAiResponses, NONE),
+            (Responses, T::Mixed, R2C),
+            (Responses, T::Anthropic, None),
+            (Responses, T::Gemini, None),
+            (Responses, T::Unknown, NONE),
+            // OpenAI Chat 入站
+            (OpenAi, T::OpenAiChat, NONE),
+            (OpenAi, T::OpenAiResponses, None), // B6：原為靜默直通
+            (OpenAi, T::Mixed, NONE),
+            (OpenAi, T::Anthropic, None),
+            (OpenAi, T::Gemini, None),
+            (OpenAi, T::Unknown, NONE),
+            // Gemini 原生入站
+            (Gemini, T::OpenAiChat, None),
+            (Gemini, T::OpenAiResponses, None),
+            (Gemini, T::Mixed, None),
+            (Gemini, T::Anthropic, None),
+            (Gemini, T::Gemini, NONE),
+            (Gemini, T::Unknown, None),
+            // 未知入站（中性路徑，如 /v1/models）
+            (Unknown, T::OpenAiChat, NONE),
+            (Unknown, T::OpenAiResponses, NONE),
+            (Unknown, T::Mixed, NONE),
+            (Unknown, T::Anthropic, NONE),
+            (Unknown, T::Gemini, None),
+            (Unknown, T::Unknown, NONE),
+        ];
+        assert_eq!(table.len(), 30, "矩陣必須窮舉 5×6 共 30 格");
+        for (i, t, want) in table {
+            let got = resolve_trans_kind(*i, *t);
+            match want {
+                Some(k) => assert_eq!(got.ok(), Some(*k), "({i:?}, {t:?}) 翻譯類型不符"),
+                None => assert!(got.is_err(), "({i:?}, {t:?}) 應被明確拒絕"),
+            }
+        }
+    }
+
+    #[test]
+    fn b6_chat_to_responses_endpoint_errors_loudly() {
+        // 原實作落入 `_ => TransKind::None`，把 chat 請求原樣打到 responses 端點，
+        // 必然失敗且訊息來自上游、難以理解。改為網關自己明確報錯。
+        let e = resolve_trans_kind(InFmt::OpenAi, TargetFmt::OpenAiResponses)
+            .expect_err("應明確拒絕而非靜默直通");
+        assert_eq!(e, E_CHAT_TO_RESPONSES);
+        assert!(e.contains("Responses"), "訊息應指出協議不符: {e}");
+    }
+
+    #[test]
+    fn matrix_preserves_original_error_messages() {
+        // 逐格核對既有 400 訊息語義不變（含原實作的分支優先序）
+        assert_eq!(
+            resolve_trans_kind(InFmt::Anthropic, TargetFmt::OpenAiResponses).unwrap_err(),
+            E_ANTHROPIC_UNSUPPORTED
+        );
+        // anthropic 入站的訊息優先於「gemini 渠道」訊息（原實作順序語義）
+        assert_eq!(
+            resolve_trans_kind(InFmt::Anthropic, TargetFmt::Gemini).unwrap_err(),
+            E_ANTHROPIC_UNSUPPORTED
+        );
+        assert_eq!(
+            resolve_trans_kind(InFmt::Responses, TargetFmt::Anthropic).unwrap_err(),
+            E_REVERSE_UNSUPPORTED
+        );
+        assert_eq!(
+            resolve_trans_kind(InFmt::Gemini, TargetFmt::OpenAiChat).unwrap_err(),
+            E_GEMINI_IN_ONLY
+        );
+        assert_eq!(
+            resolve_trans_kind(InFmt::OpenAi, TargetFmt::Gemini).unwrap_err(),
+            E_GEMINI_OUT_ONLY
+        );
+    }
+
+    #[test]
+    fn in_fmt_from_path_matches_legacy_detection() {
+        // 與原 detect_in_format 的判定完全一致
+        assert_eq!(InFmt::from_path("/v1/messages"), InFmt::Anthropic);
+        assert_eq!(InFmt::from_path("/v1/responses"), InFmt::Responses);
+        assert_eq!(InFmt::from_path("/v1/chat/completions"), InFmt::OpenAi);
+        assert_eq!(InFmt::from_path("/v1/models"), InFmt::OpenAi);
+        assert_eq!(InFmt::from_path("/v1/embeddings"), InFmt::OpenAi);
+        assert_eq!(
+            InFmt::from_path("/v1beta/models/gemini-2.5-pro:generateContent"),
+            InFmt::Gemini
+        );
+        assert_eq!(
+            InFmt::from_path("/v1beta/models/x:streamGenerateContent"),
+            InFmt::Gemini
+        );
+        // 中性路徑 → Unknown（透傳，不誤傷）
+        assert_eq!(InFmt::from_path("/v1/health"), InFmt::Unknown);
+    }
+
+    #[test]
+    fn target_fmt_from_db_covers_every_ui_value() {
+        // 前端 Providers.tsx 的 API_FORMATS 必須全部被辨識，
+        // 否則會落入 Unknown 而被拒服務。
+        for f in [
+            "openai-chat",
+            "openai-responses",
+            "mixed",
+            "anthropic",
+            "gemini",
+        ] {
+            assert_ne!(TargetFmt::from_db(f), TargetFmt::Unknown, "{f} 未被辨識");
+            // as_str 應可往返
+            assert_eq!(TargetFmt::from_db(f).as_str(), f);
+        }
+        assert_eq!(TargetFmt::from_db("typo"), TargetFmt::Unknown);
+        assert_eq!(TargetFmt::from_db(""), TargetFmt::Unknown);
     }
 
     /// 嚴格上游 400 unknown field → 剝離重發一次成功，且同渠道後續請求預先剝離。

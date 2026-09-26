@@ -11,6 +11,7 @@ mod quota;
 #[doc(hidden)]
 pub mod proxy;
 mod tools;
+mod trace;
 mod translate;
 mod usage;
 
