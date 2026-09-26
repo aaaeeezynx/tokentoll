@@ -903,6 +903,90 @@ struct ReroutedProvider {
     format: String,
 }
 
+/// 組裝上游 URL 與轉發標頭，回傳 `(url, headers)`。
+///
+/// - 翻譯路徑固定打 `/chat/completions`；直通保留原始路徑（`join_upstream`
+///   負責去重 `/v1` 之類的重複前綴）。查詢字串會剝掉 `key=` 再附加。
+/// - 標頭：先複製客戶端標頭（略過 hop-by-hop），再依渠道 `auth_scheme`
+///   注入鑑權 —— `goog-key` 用 `x-goog-api-key`、`anthropic` 用 `x-api-key`
+///   + 版本頭、其餘用 `Bearer`。
+fn build_upstream_target(
+    parts: &axum::http::request::Parts,
+    authed: &keys::AuthedKey,
+    translated: bool,
+    app: &str,
+) -> (String, Vec<(String, String)>) {
+    let mut url = if translated {
+        format!(
+            "{}/chat/completions",
+            authed.provider_base_url.trim_end_matches('/')
+        )
+    } else {
+        join_upstream(&authed.provider_base_url, parts.uri.path())
+    };
+    if let Some(q) = strip_key_param(parts.uri.query()) {
+        url.push('?');
+        url.push_str(&q);
+    }
+
+    let mut fwd: Vec<(String, String)> = Vec::new();
+    for (k, v) in parts.headers.iter() {
+        let name = k.as_str();
+        if is_hop_header(name) {
+            continue;
+        }
+        if let Ok(val) = v.to_str() {
+            fwd.push((name.to_string(), val.to_string()));
+        }
+    }
+    let pkey = authed.provider_api_key.as_str();
+    match authed.provider_auth_scheme.as_str() {
+        "goog-key" => {
+            // Google 原生：x-goog-api-key，不用 Bearer
+            if !pkey.is_empty() {
+                fwd.push(("x-goog-api-key".to_string(), pkey.to_string()));
+            }
+        }
+        "anthropic" => {
+            // Anthropic 官方：x-api-key + 版本頭
+            if !pkey.is_empty() {
+                fwd.push(("x-api-key".to_string(), pkey.to_string()));
+            }
+            fwd.push(("anthropic-version".to_string(), "2023-06-01".to_string()));
+        }
+        _ => {
+            if !pkey.is_empty() {
+                fwd.push(("authorization".to_string(), format!("Bearer {pkey}")));
+            }
+        }
+    }
+
+    // OpenCode Zen/Go 要求 session 標頭才能有效路由（缺失回 400 MissingSessionID）。
+    // 客戶端（hermes/opencode/claude 等）沒帶時，注入穩定的合成 id：同一本地 Key
+    // 固定同一 id → 上游路由與前綴快取穩定；Codex 自帶 session-id 時原樣透傳。
+    if authed.provider_base_url.contains("opencode.ai") {
+        const SESSION_HEADS: [&str; 6] = [
+            "x-opencode-session",
+            "session-id",
+            "x-session-id",
+            "thread-id",
+            "x-client-request-id",
+            "x-grok-session-id",
+        ];
+        let has_session = fwd
+            .iter()
+            .any(|(k, _)| SESSION_HEADS.iter().any(|h| k.eq_ignore_ascii_case(h)));
+        if !has_session {
+            let who = if app.is_empty() { "unknown" } else { app };
+            let sid = format!("tg-{who}-{}", authed.id);
+            fwd.push(("x-opencode-session".to_string(), sid.clone()));
+            fwd.push(("session-id".to_string(), sid));
+        }
+    }
+    // 注：X-TG-App 是網關內務頭，如需隱藏可在此剝離；當前選擇透傳以便上游觀測。
+    (url, fwd)
+}
+
 /// 取渠道顯示名（僅用於錯誤訊息；查不到時給可讀的佔位字串）。
 fn provider_name(conn: &rusqlite::Connection, provider_id: i64) -> String {
     conn.query_row("SELECT name FROM providers WHERE id=?1", [provider_id], |r| {
@@ -971,6 +1055,160 @@ fn responses_line_events(
         crate::translate::chat_chunk_to_responses(tstate, &v, echo, acc, customs),
         false,
     )
+}
+
+/// SSE 轉送的統一骨架：逐行讀上游、交給 `on_line` 轉譯、結束時由 `on_finish`
+/// 補收尾事件，最後把狀態交還呼叫端（供寫用量日誌）。
+///
+/// 三個串流分支原本各自手寫這套 buffer/drain/收流邏輯（各約 60–70 行），
+/// 且尾行處理與斷線處理的細節已經開始分歧。這裡統一：`on_line` 回傳
+/// `(要送出的內容, 是否收流)`，非 `data:` 行或無法解析的行只要回空 vec 即可。
+async fn relay_sse<S, F, G>(
+    upstream: reqwest::Response,
+    tx: &tokio::sync::mpsc::Sender<Result<axum::body::Bytes, axum::Error>>,
+    mut state: S,
+    mut on_line: F,
+    mut on_finish: G,
+) -> S
+where
+    F: FnMut(&mut S, &str) -> (Vec<String>, bool),
+    G: FnMut(&mut S) -> Vec<String>,
+{
+    use tokio_stream::StreamExt;
+    let mut buf = String::new();
+    let mut closed = false;
+    let mut stream = upstream.bytes_stream();
+    'outer: while let Some(item) = stream.next().await {
+        match item {
+            Ok(chunk) => {
+                buf.push_str(&String::from_utf8_lossy(&chunk));
+                while let Some(nl) = buf.find('\n') {
+                    let line: String = buf.drain(..=nl).collect();
+                    let t = line.trim_end_matches(['\r', '\n']);
+                    let (outs, stop) = on_line(&mut state, t);
+                    for o in outs {
+                        if tx.send(Ok(axum::body::Bytes::from(o))).await.is_err() {
+                            closed = true;
+                            break 'outer;
+                        }
+                    }
+                    if stop {
+                        closed = true;
+                        break 'outer;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = tx.send(Err(axum::Error::new(e))).await;
+                closed = true;
+                break;
+            }
+        }
+    }
+    // 尾端沒有換行的殘留行（正常 SSE 以空行結尾，這裡通常空操作）
+    if !closed {
+        let rest = buf.trim_end_matches(['\r', '\n']).to_string();
+        if !rest.is_empty() {
+            let (outs, _) = on_line(&mut state, &rest);
+            for o in outs {
+                let _ = tx.send(Ok(axum::body::Bytes::from(o))).await;
+            }
+        }
+    }
+    for o in on_finish(&mut state) {
+        let _ = tx.send(Ok(axum::body::Bytes::from(o))).await;
+    }
+    state
+}
+
+/// 串流結束後寫用量日誌所需的固定脈絡（三個串流分支共用）。
+struct StreamLog<'a> {
+    db_path: &'a PathBuf,
+    app: &'a str,
+    provider_id: i64,
+    key_id: Option<i64>,
+    latency_ms: i64,
+    status: u16,
+}
+
+impl<'a> StreamLog<'a> {
+    fn new(
+        db_path: &'a PathBuf,
+        app: &'a str,
+        provider_id: i64,
+        key_id: Option<i64>,
+        latency_ms: i64,
+        status: u16,
+    ) -> Self {
+        Self {
+            db_path,
+            app,
+            provider_id,
+            key_id,
+            latency_ms,
+            status,
+        }
+    }
+
+    /// 寫一筆串流請求的用量日誌並累加 Key 額度。
+    /// （原本三個分支各手寫約 20 行的同款程式碼，只有 model/usage 來源不同。）
+    fn write(&self, model: &str, acc: &SseUsage) {
+        let norm = normalize_model(model);
+        let Ok(conn) = open_conn(self.db_path) else {
+            return;
+        };
+        let ts = now_ms();
+        let rates = crate::usage::resolve_rates(&conn, Some(self.provider_id), &norm, ts);
+        let cost = crate::usage::rate_cost(
+            &rates,
+            acc.in_tok,
+            acc.out_tok,
+            acc.cache_read,
+            acc.cache_write,
+        );
+        let _ = insert_log(
+            &conn,
+            ts,
+            self.key_id,
+            self.app,
+            Some(self.provider_id),
+            model,
+            &norm,
+            acc,
+            cost,
+            self.latency_ms,
+            self.status as i64,
+            true,
+        );
+        if let Some(kid) = self.key_id {
+            let _ = keys::add_used(&conn, kid, acc.total());
+        }
+    }
+}
+
+/// 把 mpsc 接收端包成 SSE 響應；建 body 失敗時回 500。
+fn sse_response(
+    builder: axum::http::response::Builder,
+    rx: tokio::sync::mpsc::Receiver<Result<axum::body::Bytes, axum::Error>>,
+) -> Response {
+    let stream_body = Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
+    builder
+        .body(stream_body)
+        .unwrap_or_else(|_| err_json(StatusCode::INTERNAL_SERVER_ERROR, "構造響應失敗".into()))
+}
+
+/// Responses 翻譯分支的逐行轉譯狀態。
+#[derive(Default)]
+struct ResponsesRelay {
+    tstate: crate::translate::ResponsesStreamState,
+    acc: SseUsage,
+}
+
+/// Anthropic 翻譯分支的逐行轉譯狀態。
+#[derive(Default)]
+struct AnthropicRelay {
+    tstate: crate::translate::AnthropicStreamState,
+    acc: SseUsage,
 }
 
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
@@ -1275,79 +1513,7 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     }
 
     // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
-    let path = parts.uri.path().to_string();
-    let mut url = if translated {
-        format!(
-            "{}/chat/completions",
-            authed.provider_base_url.trim_end_matches('/')
-        )
-    } else {
-        join_upstream(&authed.provider_base_url, &path)
-    };
-    if let Some(q) = strip_key_param(parts.uri.query()) {
-        url.push('?');
-        url.push_str(&q);
-    }
-    let scheme = authed.provider_auth_scheme.as_str();
-    // 固定頭（每次發送復用；鑑權按渠道方案組裝）
-    let mut fwd_headers: Vec<(String, String)> = vec![];
-    for (k, v) in parts.headers.iter() {
-        let name = k.as_str();
-        if is_hop_header(name) {
-            continue;
-        }
-        if let Ok(val) = v.to_str() {
-            fwd_headers.push((name.to_string(), val.to_string()));
-        }
-    }
-    let pkey = authed.provider_api_key.clone();
-    match scheme {
-        "goog-key" => {
-            // Google 原生：x-goog-api-key，不用 Bearer
-            if !pkey.is_empty() {
-                fwd_headers.push(("x-goog-api-key".to_string(), pkey.clone()));
-            }
-        }
-        "anthropic" => {
-            // Anthropic 官方：x-api-key + 版本頭
-            if !pkey.is_empty() {
-                fwd_headers.push(("x-api-key".to_string(), pkey.clone()));
-            }
-            fwd_headers.push((
-                "anthropic-version".to_string(),
-                "2023-06-01".to_string(),
-            ));
-        }
-        _ => {
-            if !pkey.is_empty() {
-                fwd_headers.push(("authorization".to_string(), format!("Bearer {pkey}")));
-            }
-        }
-    }
-    // OpenCode Zen/Go 要求 session 標頭才能有效路由（缺失回 400 MissingSessionID）。
-    // 客戶端（hermes/opencode/claude 等）沒帶時，注入穩定的合成 id：同一本地 Key
-    // 固定同一 id → 上游路由與前綴快取穩定；Codex 自帶 session-id 時原樣透傳。
-    if authed.provider_base_url.contains("opencode.ai") {
-        const SESSION_HEADS: [&str; 6] = [
-            "x-opencode-session",
-            "session-id",
-            "x-session-id",
-            "thread-id",
-            "x-client-request-id",
-            "x-grok-session-id",
-        ];
-        let has_session = fwd_headers.iter().any(|(k, _)| {
-            SESSION_HEADS
-                .iter()
-                .any(|h| k.eq_ignore_ascii_case(h))
-        });
-        if !has_session {
-            let sid = format!("tg-{}-{}", if app.is_empty() { "unknown" } else { &app }, authed.id);
-            fwd_headers.push(("x-opencode-session".to_string(), sid.clone()));
-            fwd_headers.push(("session-id".to_string(), sid));
-        }
-    }
-    // 注：X-TG-App 是網關內務頭，如需隱藏可在此剝離；當前選擇透傳以便上游觀測。
+    let (url, fwd_headers) = build_upstream_target(&parts, &authed, translated, &app);
     let send_once = |body: Vec<u8>| {
         let mut b = ctx.client.request(parts.method.clone(), &url);
         for (k, v) in fwd_headers.iter() {
@@ -1575,211 +1741,77 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
             let logm = log_fallback.clone();
             let customs = custom_tools.clone();
             tokio::spawn(async move {
-                let mut tstate = crate::translate::ResponsesStreamState::default();
-                let mut acc = SseUsage::default();
-                let mut buf = String::new();
-                let mut closed = false;
-                let mut stream = upstream.bytes_stream();
-                use tokio_stream::StreamExt;
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(chunk) => {
-                            buf.push_str(&String::from_utf8_lossy(&chunk));
-                            while let Some(nl) = buf.find('\n') {
-                                let line: String = buf.drain(..=nl).collect();
-                                let t = line.trim_end_matches(['\r', '\n']);
-                                let (outs, stop) = responses_line_events(
-                                    t, &mut tstate, &echo, &mut acc, &customs,
-                                );
-                                for o in outs {
-                                    if tx
-                                        .send(Ok(axum::body::Bytes::from(o)))
-                                        .await
-                                        .is_err()
-                                    {
-                                        closed = true;
-                                        break;
-                                    }
-                                }
-                                if stop {
-                                    closed = true;
-                                    break;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(Err(axum::Error::new(e))).await;
-                            break;
-                        }
-                    }
-                    if closed {
-                        break;
-                    }
-                }
-                // 尾行無換行時補處理（正常 SSE 以空行結尾，這裡通常空操作）
-                if !closed {
-                    let rest = buf.trim_end_matches(['\r', '\n']).to_string();
-                    if !rest.is_empty() {
-                        let (outs, _) = responses_line_events(
-                            &rest, &mut tstate, &echo, &mut acc, &customs,
-                        );
-                        for o in outs {
-                            let _ = tx.send(Ok(axum::body::Bytes::from(o))).await;
-                        }
-                    }
-                }
-                let finals = crate::translate::responses_stream_finish(
-                    &mut tstate, &echo, &acc, &customs,
-                );
-                for o in finals {
-                    let _ = tx.send(Ok(axum::body::Bytes::from(o))).await;
-                }
-                let norm = normalize_model(&logm);
-                if let Ok(conn) = open_conn(&db_path) {
-                    let ts = now_ms();
-                    let rates = crate::usage::resolve_rates(
-                        &conn,
-                        Some(provider_id),
-                        &norm,
-                        ts,
-                    );
-                    let cost = crate::usage::rate_cost(
-                        &rates,
-                        acc.in_tok,
-                        acc.out_tok,
-                        acc.cache_read,
-                        acc.cache_write,
-                    );
-                    let _ = insert_log(
-                        &conn, ts, key_id, &app, Some(provider_id),
-                        &logm, &norm, &acc, cost, latency_ms, status.as_u16() as i64, true,
-                    );
-                    if let Some(kid) = key_id {
-                        let _ = keys::add_used(&conn, kid, acc.total());
-                    }
-                }
+                let on_line = |s: &mut ResponsesRelay, t: &str| {
+                    responses_line_events(t, &mut s.tstate, &echo, &mut s.acc, &customs)
+                };
+                let on_finish = |s: &mut ResponsesRelay| {
+                    crate::translate::responses_stream_finish(
+                        &mut s.tstate,
+                        &echo,
+                        &s.acc,
+                        &customs,
+                    )
+                };
+                let st =
+                    relay_sse(upstream, &tx, ResponsesRelay::default(), on_line, on_finish)
+                        .await;
+                StreamLog::new(
+                    &db_path,
+                    &app,
+                    provider_id,
+                    key_id,
+                    latency_ms,
+                    status.as_u16(),
+                )
+                .write(&logm, &st.acc);
             });
-            let stream_body =
-                Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
-            return builder.body(stream_body).unwrap_or_else(|_| {
-                err_json(StatusCode::INTERNAL_SERVER_ERROR, "構造響應失敗".into())
-            });
+            return sse_response(builder, rx);
         }
         if translated {
             let echo = model_raw.clone();
             let logm = log_fallback.clone();
             tokio::spawn(async move {
-                let mut tstate =
-                    crate::translate::AnthropicStreamState::default();
-                let mut acc = SseUsage::default();
-                let mut buf = String::new();
-                let mut closed = false;
-                let mut stream = upstream.bytes_stream();
-                use tokio_stream::StreamExt;
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(chunk) => {
-                            buf.push_str(&String::from_utf8_lossy(&chunk));
-                            while let Some(nl) = buf.find('\n') {
-                                let line: String = buf.drain(..=nl).collect();
-                                let t = line.trim_end_matches(['\r', '\n']);
-                                let Some(d) = t.strip_prefix("data:") else {
-                                    continue;
-                                };
-                                let d = d.trim_start();
-                                if d == "[DONE]" || d.is_empty() {
-                                    continue;
-                                }
-                                if let Ok(v) =
-                                    serde_json::from_str::<serde_json::Value>(d)
-                                {
-                                    // 上游錯誤 → Anthropic error 事件並收流
-                                    if let Some(err) = v.get("error") {
-                                        let err = if err.is_null() { v.clone() } else { err.clone() };
-                                        let line =
-                                            crate::translate::anthropic_error_line(&err);
-                                        let _ = tx
-                                            .send(Ok(axum::body::Bytes::from(line)))
-                                            .await;
-                                        closed = true;
-                                        break;
-                                    }
-                                    let outs =
-                                        crate::translate::openai_chunk_to_anthropic(
-                                            &mut tstate, &v, &echo, &mut acc,
-                                        );
-                                    for o in outs {
-                                        if tx
-                                            .send(Ok(axum::body::Bytes::from(o)))
-                                            .await
-                                            .is_err()
-                                        {
-                                            closed = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                if closed {
-                                    break;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(Err(axum::Error::new(e))).await;
-                            break;
-                        }
+                let on_line = |s: &mut AnthropicRelay, t: &str| {
+                    let Some(d) = t.strip_prefix("data:") else {
+                        return (vec![], false);
+                    };
+                    let d = d.trim_start();
+                    if d.is_empty() || d == "[DONE]" {
+                        return (vec![], false);
                     }
-                    if closed {
-                        break;
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(d) else {
+                        return (vec![], false);
+                    };
+                    // 上游錯誤 → Anthropic error 事件並收流
+                    if let Some(err) = v.get("error") {
+                        let err = if err.is_null() { v.clone() } else { err.clone() };
+                        return (vec![crate::translate::anthropic_error_line(&err)], true);
                     }
-                }
-                // 尾行無換行時補處理
-                if !closed {
-                    let rest = buf.trim_end_matches(['\r', '\n']).to_string();
-                    if !rest.is_empty() {
-                        if let Some(d) = rest.strip_prefix("data:") {
-                            let d = d.trim_start();
-                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(d) {
-                                let outs = crate::translate::openai_chunk_to_anthropic(
-                                    &mut tstate, &v, &echo, &mut acc,
-                                );
-                                for o in outs {
-                                    let _ = tx.send(Ok(axum::body::Bytes::from(o))).await;
-                                }
-                            }
-                        }
-                    }
-                }
-                let norm = normalize_model(&logm);
-                if let Ok(conn) = open_conn(&db_path) {
-                    let ts = now_ms();
-                    let rates = crate::usage::resolve_rates(
-                        &conn,
-                        Some(provider_id),
-                        &norm,
-                        ts,
-                    );
-                    let cost = crate::usage::rate_cost(
-                        &rates,
-                        acc.in_tok,
-                        acc.out_tok,
-                        acc.cache_read,
-                        acc.cache_write,
-                    );
-                    let _ = insert_log(
-                        &conn, ts, key_id, &app, Some(provider_id),
-                        &logm, &norm, &acc, cost, latency_ms, status.as_u16() as i64, true,
-                    );
-                    if let Some(kid) = key_id {
-                        let _ = keys::add_used(&conn, kid, acc.total());
-                    }
-                }
+                    (
+                        crate::translate::openai_chunk_to_anthropic(
+                            &mut s.tstate,
+                            &v,
+                            &echo,
+                            &mut s.acc,
+                        ),
+                        false,
+                    )
+                };
+                let on_finish = |_s: &mut AnthropicRelay| Vec::new();
+                let st =
+                    relay_sse(upstream, &tx, AnthropicRelay::default(), on_line, on_finish)
+                        .await;
+                StreamLog::new(
+                    &db_path,
+                    &app,
+                    provider_id,
+                    key_id,
+                    latency_ms,
+                    status.as_u16(),
+                )
+                .write(&logm, &st.acc);
             });
-            let stream_body =
-                Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
-            return builder.body(stream_body).unwrap_or_else(|_| {
-                err_json(StatusCode::INTERNAL_SERVER_ERROR, "構造響應失敗".into())
-            });
+            return sse_response(builder, rx);
         }
         let (tx, rx) =
             tokio::sync::mpsc::channel::<Result<axum::body::Bytes, axum::Error>>(64);
@@ -1804,31 +1836,17 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
             acc.finish();
             let u = acc.usage;
             let model = u.model.clone().unwrap_or(model_raw);
-            let norm = normalize_model(&model);
-            if let Ok(conn) = open_conn(&db_path) {
-                let ts = now_ms();
-                let rates =
-                    crate::usage::resolve_rates(&conn, Some(provider_id), &norm, ts);
-                let cost = crate::usage::rate_cost(
-                    &rates,
-                    u.in_tok,
-                    u.out_tok,
-                    u.cache_read,
-                    u.cache_write,
-                );
-                let _ = insert_log(
-                    &conn, ts, key_id, &app, Some(provider_id),
-                    &model, &norm, &u, cost, latency_ms, status.as_u16() as i64, true,
-                );
-                if let Some(kid) = key_id {
-                    let _ = keys::add_used(&conn, kid, u.total());
-                }
-            }
+            StreamLog::new(
+                &db_path,
+                &app,
+                provider_id,
+                key_id,
+                latency_ms,
+                status.as_u16(),
+            )
+            .write(&model, &u);
         });
-        let stream_body = Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
-        return builder.body(stream_body).unwrap_or_else(|_| {
-            err_json(StatusCode::INTERNAL_SERVER_ERROR, "構造響應失敗".into())
-        });
+        return sse_response(builder, rx);
     }
 
     // 非流式：整包解析後轉發（翻譯分支轉成 Anthropic message）
