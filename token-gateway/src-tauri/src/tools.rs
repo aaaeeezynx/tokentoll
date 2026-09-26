@@ -2293,14 +2293,11 @@ fn migrate_gateway_baseline(
 
 /// 一鍵還原：把接管前的備份寫回配置文件。
 /// 從新到舊掃描 `{stem}.bak-*`，跳過仍含網關痕跡的版本（多次切換會產生多層備份）。
-pub fn restore_backup_to(
-    app_data: &Path,
-    app: &str,
-    cfg: &Path,
-) -> Result<String, String> {
-    restore_backup_to_inner(app_data, app, cfg, crate::db::DEFAULT_GATEWAY_PORT, false)
-}
-
+///
+/// 註：原本另有 `restore_backup_to(...)`（無 port 參數）只被測試呼叫，且它傳
+/// `migrate: false`，是「不做 baseline 遷移」的變體（B7）。為免生產 API 出現
+/// 兩個語義不同的同名還原入口，已把它降為測試模組內的 helper；生產呼叫端一律
+/// 走本函式（migrate=true）。
 pub fn restore_backup_to_port(
     app_data: &Path,
     app: &str,
@@ -2486,10 +2483,9 @@ fn restore_summary(text: &str) -> String {
     out
 }
 
-pub fn restore_backup(app_data: &Path, app: &str) -> Result<String, String> {
-    restore_backup_port(app_data, app, crate::db::DEFAULT_GATEWAY_PORT)
-}
-
+/// 還原指定工具到接管前狀態（埠由呼叫端提供）。
+/// 註：原本另有 `restore_backup(app_data, app)` 預設埠包裝，只被測試呼叫而成為
+/// dead_code（B7），已降為測試模組內的 helper。
 pub fn restore_backup_port(app_data: &Path, app: &str, port: u16) -> Result<String, String> {
     let cfg = config_path_for(app)?;
     restore_backup_to_port(app_data, app, &cfg, port)
@@ -2500,6 +2496,22 @@ pub fn restore_backup_port(app_data: &Path, app: &str, port: u16) -> Result<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 測試便利包裝：以預設埠呼叫正式還原路徑（migrate=true）。
+    ///
+    /// 這兩個函式原本是生產碼（`restore_backup_to` / `restore_backup`）。
+    /// 它們只被測試呼叫，因此在 lib 建置下恆為 dead_code（B7）。
+    /// `restore_backup` 是 `restore_backup_port` 的預設埠等價包裝，直接對應；
+    /// `restore_backup_to` 則不同 —— 它傳 `migrate: false`，
+    /// 是「不做 baseline 遷移」的還原路徑，測試需要精確覆蓋它，
+    /// 故這裡照抄原行為而非改走 `restore_backup_to_port`。
+    fn restore_backup_to(app_data: &Path, app: &str, cfg: &Path) -> Result<String, String> {
+        restore_backup_to_inner(app_data, app, cfg, crate::db::DEFAULT_GATEWAY_PORT, false)
+    }
+
+    fn restore_backup(app_data: &Path, app: &str) -> Result<String, String> {
+        restore_backup_port(app_data, app, crate::db::DEFAULT_GATEWAY_PORT)
+    }
 
     #[test]
     fn gateway_request_overrides_conflicting_external_url() {
