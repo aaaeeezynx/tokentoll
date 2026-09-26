@@ -122,6 +122,7 @@ pub fn run() {
             commands::trace_problems,
             commands::trace_clear,
             commands::provider_stripped_list,
+            commands::provider_stripped_all,
             commands::provider_stripped_clear,
         ])
         .run(tauri::generate_context!())

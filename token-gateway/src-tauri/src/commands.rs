@@ -1008,6 +1008,50 @@ pub fn provider_stripped_list(db: State<DbState>, provider_id: i64) -> Result<Ve
     Ok(trace::load_stripped(&conn, provider_id))
 }
 
+/// 各渠道的上游拒收欄位記憶（含渠道名），供診斷頁一次列出。
+/// 用 LEFT JOIN：即使渠道已被刪除而留下孤兒列，也要看得見（而非靜默隱藏），
+/// 名稱以空字串回傳，由前端顯示為「已刪除的渠道」。
+#[derive(Serialize)]
+pub struct ProviderStripped {
+    pub provider_id: i64,
+    pub provider_name: String,
+    pub fields: Vec<String>,
+}
+
+#[tauri::command]
+pub fn provider_stripped_all(db: State<DbState>) -> Result<Vec<ProviderStripped>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.provider_id, COALESCE(p.name, ''), s.field
+             FROM provider_stripped_fields s
+             LEFT JOIN providers p ON p.id = s.provider_id
+             ORDER BY s.provider_id ASC, s.learned_at ASC, s.field ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out: Vec<ProviderStripped> = Vec::new();
+    for (pid, name, field) in rows.flatten() {
+        match out.last_mut() {
+            Some(last) if last.provider_id == pid => last.fields.push(field),
+            _ => out.push(ProviderStripped {
+                provider_id: pid,
+                provider_name: name,
+                fields: vec![field],
+            }),
+        }
+    }
+    Ok(out)
+}
+
 /// 清除某渠道的拒收記憶：下次請求會重新探測上游能力。
 /// 用於「改了渠道設定後想重測」或「誤剝離導致功能缺失」時。
 #[tauri::command]

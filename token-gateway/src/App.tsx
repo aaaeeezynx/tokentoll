@@ -28,6 +28,7 @@ function AccentSync() {
 import ProvidersPage from "./components/Providers";
 import KeysPage from "./components/Keys";
 import SettingsPage from "./components/Settings";
+import DiagnosticsPage from "./components/Diagnostics";
 import UsagePage, {
   UsageFilterBar,
   type UsageFilterState,
@@ -38,12 +39,13 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
-type Tab = "usage" | "providers" | "keys" | "calc" | "settings";
+type Tab = "usage" | "providers" | "keys" | "diagnostics" | "calc" | "settings";
 
 const TABS: { id: Tab; label: string; icon: IconName; iconFill: IconName }[] = [
   { id: "usage", label: "用量", icon: "chart-bar", iconFill: "chart-bar-fill" },
   { id: "providers", label: "上游來源", icon: "server", iconFill: "server" },
   { id: "keys", label: "本地 Key", icon: "key", iconFill: "key-fill" },
+  { id: "diagnostics", label: "診斷", icon: "alert", iconFill: "bolt-fill" },
   { id: "calc", label: "試算", icon: "calculator", iconFill: "calculator" },
   { id: "settings", label: "設定", icon: "gear", iconFill: "gear-fill" },
 ];
@@ -270,6 +272,7 @@ function Shell() {
             {tab === "calc" && <CalcPage />}
             {tab === "providers" && <ProvidersPage />}
             {tab === "keys" && <KeysPage />}
+            {tab === "diagnostics" && <DiagnosticsPage />}
             {tab === "settings" && <SettingsPage />}
           </div>
         </main>
