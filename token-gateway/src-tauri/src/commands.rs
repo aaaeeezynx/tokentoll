@@ -8,6 +8,7 @@ use crate::history;
 use crate::keys;
 use crate::proxy::{self, ProxyState};
 use crate::tools;
+use crate::trace;
 use crate::usage;
 
 #[derive(Serialize)]
@@ -891,4 +892,126 @@ pub async fn quota_query_all(app: AppHandle) -> Vec<crate::quota::SubscriptionQu
     })
     .await
     .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------- 診斷中心 ---
+//
+// Phase 1 可觀測性（見 docs/REFACTORING-PLAN.md §5.3 第 0 層）。
+// 目的：把「連線錯誤(400)」「codex 對話記錄錯誤」這類只能靠猜的問題，
+// 變成可查詢的事實 —— `proxy_trace` 保留每次異常的完整上下文（含 body 指紋
+// 與解析失敗時的原始 hex），`provider_stripped_fields` 則記錄各渠道學到的
+// 上游能力。兩者皆由 proxy.rs 在請求路徑上被動寫入。
+
+/// 某欄位被多少個渠道的上游拒收。
+#[derive(Serialize)]
+pub struct StrippedFieldStat {
+    pub field: String,
+    pub providers: i64,
+}
+
+/// 上游狀態碼分佈。
+#[derive(Serialize)]
+pub struct StatusStat {
+    pub status: i64,
+    pub count: i64,
+}
+
+#[derive(Serialize)]
+pub struct TraceSummary {
+    pub total: i64,
+    pub warn_count: i64,
+    pub last_24h: i64,
+    /// 有重試過的請求數（即「遇到 400 後剝離重發」的次數）
+    pub retried: i64,
+    /// 帶有 body hex 的追蹤數 —— 這些就是 body 解析失敗的樣本，
+    /// 用於判定 §5.2 那個懸而未決的 400 根因。
+    pub with_body_hex: i64,
+    pub stripped_fields: Vec<StrippedFieldStat>,
+    pub top_status: Vec<StatusStat>,
+}
+
+/// 診斷總覽：一次查詢拿到所有計數，供診斷頁開頭顯示。
+#[tauri::command]
+pub fn trace_summary(db: State<DbState>) -> Result<TraceSummary, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
+    let since = crate::fsutil::now_ms() - 24 * 60 * 60 * 1000;
+
+    let stripped_fields = trace::stripped_field_summary(&conn)
+        .into_iter()
+        .map(|(field, providers)| StrippedFieldStat { field, providers })
+        .collect();
+
+    let top_status = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT upstream_status, COUNT(*) AS n FROM proxy_trace
+                 WHERE upstream_status > 0 GROUP BY upstream_status
+                 ORDER BY n DESC, upstream_status ASC LIMIT 10",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(StatusStat {
+                    status: r.get(0)?,
+                    count: r.get(1)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    Ok(TraceSummary {
+        total: count("SELECT COUNT(*) FROM proxy_trace"),
+        warn_count: count("SELECT COUNT(*) FROM proxy_trace WHERE trace_level='warn'"),
+        last_24h: conn
+            .query_row(
+                "SELECT COUNT(*) FROM proxy_trace WHERE ts >= ?1",
+                [since],
+                |r| r.get(0),
+            )
+            .unwrap_or(0),
+        retried: count("SELECT COUNT(*) FROM proxy_trace WHERE retry_count > 0"),
+        with_body_hex: count("SELECT COUNT(*) FROM proxy_trace WHERE body_hex <> ''"),
+        stripped_fields,
+        top_status,
+    })
+}
+
+/// 最近的請求追蹤（新到舊）。
+#[tauri::command]
+pub fn trace_list(db: State<DbState>, limit: Option<i64>) -> Result<Vec<trace::TraceRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    trace::list_recent(&conn, limit.unwrap_or(200))
+}
+
+/// 只看有問題的追蹤（warn／有剝離欄位／有重試）。
+#[tauri::command]
+pub fn trace_problems(
+    db: State<DbState>,
+    limit: Option<i64>,
+) -> Result<Vec<trace::TraceRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    trace::list_problems(&conn, limit.unwrap_or(200))
+}
+
+#[tauri::command]
+pub fn trace_clear(db: State<DbState>) -> Result<usize, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    trace::clear_traces(&conn)
+}
+
+/// 某渠道已被記住的上游拒收欄位。
+#[tauri::command]
+pub fn provider_stripped_list(db: State<DbState>, provider_id: i64) -> Result<Vec<String>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    Ok(trace::load_stripped(&conn, provider_id))
+}
+
+/// 清除某渠道的拒收記憶：下次請求會重新探測上游能力。
+/// 用於「改了渠道設定後想重測」或「誤剝離導致功能缺失」時。
+#[tauri::command]
+pub fn provider_stripped_clear(db: State<DbState>, provider_id: i64) -> Result<usize, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    trace::clear_stripped(&conn, provider_id)
 }

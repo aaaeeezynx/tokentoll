@@ -116,6 +116,13 @@ pub fn run() {
             providers::provider_reorder,
             commands::price_extract,
             commands::quota_query_all,
+            // Phase 1：診斷中心（可觀測性，見 docs/REFACTORING-PLAN.md §5.3）
+            commands::trace_summary,
+            commands::trace_list,
+            commands::trace_problems,
+            commands::trace_clear,
+            commands::provider_stripped_list,
+            commands::provider_stripped_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
