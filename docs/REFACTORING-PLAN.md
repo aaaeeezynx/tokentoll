@@ -167,7 +167,18 @@
 | `2026-09-26-body-parse-FAILED.log` | `token-gateway/gw_debug.log` | 失敗案例一（`bytes_len=107` ＝ 去引號長度） |
 | `2026-09-26-body-parse-FAILED-openai.log` | `token-gateway/gw_req_debug.txt` | 失敗案例二（`bytes_len=69` ＝ 去引號長度） |
 
-> ⚠️ **`scripts/test_anthropic.py` 內硬編了一把 `sk-local-…` 金鑰**。雖是本地 Key 且已被 `.gitignore` 之外的規則納入追蹤，仍**建議改為從環境變數讀取**（列入 Phase 1 順手處理）。
+> ✅ **已於 Phase 1 處理**：`scripts/test_anthropic.py` 原本硬編了一把
+> `sk-local-…` 金鑰（以 `git grep` 掃描確認它是**唯一**含該實值的追蹤檔案）。
+> 已改為從環境變數 `TOKEN_GATEWAY_KEY`（本專案既有的標準變數名）或命令列
+> 參數讀取，並在缺金鑰時給出可行動提示。
+>
+> 同時改良了該腳本：回應不是 JSON 時，印出原始 bytes 的 hex 而非直接
+> `json.loads` 崩潰 —— 這正好對應 §5.2 的需求（先前無法結案就是因為
+> 沒有留下原始 bytes）。
+>
+> 註：該金鑰是僅在本機有效的閘道 Key（離開本機的 `app.db` 即無用），
+> 且已在快照與 git 歷史中；若你曾在別處重用過同一把字串，建議在
+> 「本地 Key」頁輪換它。
 
 ---
 
