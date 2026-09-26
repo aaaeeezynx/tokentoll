@@ -1,5 +1,11 @@
     use super::*;
     use axum::http::HeaderValue;
+    // 矩陣的 400 訊息常數住在 `proxy::matrix`（第十一步拆出），
+    // `use super::*` 只涵蓋 `proxy` 自身的綁定，故須明確指名。
+    use super::matrix::{
+        E_ANTHROPIC_UNSUPPORTED, E_CHAT_TO_RESPONSES, E_GEMINI_IN_ONLY, E_GEMINI_OUT_ONLY,
+        E_REVERSE_UNSUPPORTED,
+    };
 
     #[test]
     fn stream_options_only_for_chat() {
