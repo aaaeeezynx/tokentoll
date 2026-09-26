@@ -40,7 +40,10 @@ pub enum TraceLevel {
     /// 有剝離欄位或有重試，但最終成功。
     #[default]
     Info,
-    /// 上游 4xx/5xx、連線失敗、body 解析失敗。
+    /// 上游 4xx/5xx、連線失敗、body 解析失敗，**以及網關自己拒絕的請求**
+    /// （見 `proxy::logging::reject`：401／403／413／429／500 與模型不在
+    /// 清單內的 400）。這一類沒有上游，`upstream_status` 記的是
+    /// **回給客戶端的狀態碼**。
     Warn,
 }
 

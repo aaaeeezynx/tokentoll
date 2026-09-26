@@ -199,18 +199,41 @@ pub(super) fn reject(
     status: StatusCode,
     message: impl Into<String>,
 ) -> Response {
+    let latency_ms = started.elapsed().as_millis() as i64;
+    let message = message.into();
     log_reject(
         &ctx.db_path,
         app,
         model,
         status.as_u16(),
-        started.elapsed().as_millis() as i64,
+        latency_ms,
+        &message,
     );
-    err_json(status, message.into())
+    err_json(status, message)
 }
 /// 拒絕/失敗請求也落庫（key 未知記 NULL、零 token），否則用量頁完全看不到
 /// 被擋掉的流量，除錯只能靠猜。
-pub(super) fn log_reject(db_path: &PathBuf, app: &str, model_raw: &str, status: u16, latency_ms: i64) {
+///
+/// **同時寫一筆 `proxy_trace`（level = warn）。** 這是後來補上的關鍵一環：
+/// 原本只有 `prepare_request`（矩陣不支援、body 不是 JSON）與
+/// `send_with_strip_retry`（連線失敗、剝離重試）會寫 trace，**網關層的每一種
+/// 拒絕都不寫** —— 而使用者回報的「連線錯誤（通常是 400）」正是這一類。
+/// 等於診斷中心剛好漏掉最主要的症狀。現在 401／403／413／429／500 與
+/// 「模型不在清單內」的 400 一律留痕，`trans_kind` 標為 `"rejected"`。
+///
+/// 安全性：`note` 會被寫進資料庫，故**不得包含任何金鑰**。已核對
+/// `keys::auth_key`／`auth_direct` 的所有錯誤字串（「該 Key 已被停用」
+/// 「該 Key 已過期」「該 Key 配額已用完」「無效的 Key」）皆不含 secret；
+/// `keys.rs` 裡的 `key_prefix`（首 12 字＋末 4 字）只用於 UI 顯示，
+/// 不會流到這裡。
+pub(super) fn log_reject(
+    db_path: &PathBuf,
+    app: &str,
+    model_raw: &str,
+    status: u16,
+    latency_ms: i64,
+    note: &str,
+) {
     if let Ok(conn) = open_conn(db_path) {
         let norm = normalize_model(model_raw);
         let _ = insert_log(
@@ -227,5 +250,18 @@ pub(super) fn log_reject(db_path: &PathBuf, app: &str, model_raw: &str, status: 
             status as i64,
             false,
         );
+        // 同一個連線順手寫 trace：為了一筆已經註定失敗的請求再開第二條
+        // 連線不划算，且這裡已經有現成的 conn。
+        let rec = TraceRecord {
+            app: app.to_string(),
+            model_raw: model_raw.to_string(),
+            trans_kind: "rejected".to_string(),
+            upstream_status: status,
+            latency_ms,
+            note: note.to_string(),
+            ..Default::default()
+        }
+        .warn();
+        let _ = trace::insert_trace(&conn, &rec);
     }
 }

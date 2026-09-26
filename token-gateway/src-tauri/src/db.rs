@@ -601,6 +601,129 @@ mod tests {
         }
     }
 
+    fn count_rows(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap_or(-1)
+    }
+
+    /// v7 → v8 升級：**Phase 1 之前建立的資料庫升級後必須原樣保留既有資料。**
+    ///
+    /// 這條路徑值得單獨釘住，因為它是**真實使用者第一次啟動新版本時唯一會走
+    /// 的路**：`%APPDATA%\com.tokencounter.gateway\app.db` 是長期累積的檔案
+    /// （實際測到的現況：v7、7 個 providers、4,111 筆 request_logs）。升級若把
+    /// 資料弄丟或讓程式起不來，代價是使用者的全部歷史。
+    ///
+    /// 作法：造一個「除 Phase 1 那兩張表以外都是最新形狀」的資料庫，再把版本
+    /// 退回 7。因為 Phase 1 只**新增**表與索引、沒有動任何既有表的欄位，這與
+    /// 真實的 v7 資料庫等價。
+    #[test]
+    fn v7_db_without_phase1_tables_upgrades_preserving_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.db");
+        {
+            let c = open(&path);
+            c.execute(
+                "INSERT INTO providers (name, app_type, api_format, base_url, api_key,
+                 models_json, priority, enabled, created_at, updated_at)
+                 VALUES ('p','codex','openai-chat','http://x','k','[]',0,1,0,0)",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO request_logs (ts, app, model_raw, model_norm, in_tok, out_tok,
+                 cost_usd, latency_ms, status, is_stream)
+                 VALUES (1,'codex','m','m',1,2,0.0,10,200,0)",
+                [],
+            )
+            .unwrap();
+            // 退回 v7：拿掉 Phase 1 才有的兩張表與對應版本列
+            c.execute_batch(
+                "DROP TABLE proxy_trace;
+                 DROP TABLE provider_stripped_fields;
+                 DELETE FROM schema_version WHERE version >= 8;",
+            )
+            .unwrap();
+            assert!(!has_table(&c, "proxy_trace"), "前置條件：v7 沒有 proxy_trace");
+            assert_eq!(max_version(&c), 7, "前置條件：版本應為 7");
+        }
+
+        // 比較「升級前 vs 升級後」，而不是比對寫死的數字：`open_and_ensure`
+        // 在全新資料庫上會**播種** providers／pricing（見
+        // `fresh_db_seeds_providers_and_pricing_once`），所以第一次 `open`
+        // 之後 providers 已經不只是上面插入的那一筆。
+        let before = {
+            let c = Connection::open(&path).unwrap();
+            (count_rows(&c, "providers"), count_rows(&c, "request_logs"))
+        };
+        assert!(before.0 > 0 && before.1 > 0, "前置條件：應有既有資料");
+
+        // 再次開啟 == 使用者啟動新版
+        let c = open(&path);
+        assert_eq!(max_version(&c), SCHEMA_VERSION as i64, "版本應升到 8");
+        assert!(has_table(&c, "proxy_trace"), "升級後應補回 proxy_trace");
+        assert!(
+            has_table(&c, "provider_stripped_fields"),
+            "升級後應補回 provider_stripped_fields"
+        );
+        assert_eq!(
+            count_rows(&c, "providers"),
+            before.0,
+            "既有 providers 不得遺失"
+        );
+        assert_eq!(
+            count_rows(&c, "request_logs"),
+            before.1,
+            "既有 request_logs 不得遺失"
+        );
+    }
+
+    /// 對**指定的真實資料庫副本**跑一次升級，用來在出貨前確認使用者的檔案能
+    /// 安全升級、資料不減。
+    ///
+    /// 先複製再跑，切勿直接指向正式檔：
+    /// ```text
+    /// copy "%APPDATA%\com.tokencounter.gateway\app.db" "%TEMP%\app_copy.db"
+    /// set TOKEN_GATEWAY_MIGRATE_DB=%TEMP%\app_copy.db
+    /// cargo test live_migrate_real_db_copy -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore]
+    fn live_migrate_real_db_copy() {
+        let Ok(path) = std::env::var("TOKEN_GATEWAY_MIGRATE_DB") else {
+            eprintln!("略過：未設定 TOKEN_GATEWAY_MIGRATE_DB");
+            return;
+        };
+        let p = std::path::PathBuf::from(&path);
+        let before = {
+            let c = Connection::open(&p).expect("開啟副本");
+            (
+                max_version(&c),
+                count_rows(&c, "providers"),
+                count_rows(&c, "request_logs"),
+            )
+        };
+        println!(
+            "升級前：version={} providers={} request_logs={}",
+            before.0, before.1, before.2
+        );
+        let c = open_and_ensure(&p).expect("升級失敗");
+        let after = (
+            max_version(&c),
+            count_rows(&c, "providers"),
+            count_rows(&c, "request_logs"),
+            has_table(&c, "proxy_trace"),
+            has_table(&c, "provider_stripped_fields"),
+        );
+        println!(
+            "升級後：version={} providers={} request_logs={} proxy_trace={} provider_stripped_fields={}",
+            after.0, after.1, after.2, after.3, after.4
+        );
+        assert_eq!(after.0, SCHEMA_VERSION as i64, "版本應升到最新");
+        assert_eq!(after.1, before.1, "providers 不得增減");
+        assert_eq!(after.2, before.2, "request_logs 不得增減");
+        assert!(after.3 && after.4, "Phase 1 的兩張表應被補上");
+    }
+
     #[test]
     fn open_and_ensure_is_idempotent() {
         let dir = tempfile::tempdir().unwrap();
