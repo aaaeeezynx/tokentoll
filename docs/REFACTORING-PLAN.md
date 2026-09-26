@@ -121,7 +121,23 @@
 | App 二進位 | `cargo build` | ✅ 成功 |
 
 > Phase 2 每一步結束都重新確認前三項，數字維持不變（179/0、0 錯誤、
-> 5 條既有警告）—— 這是「純重構」的證明。
+> 5 條既有警告）—— 這是「純重構」的證明。第 5～9 步（抽 `finish_response`／
+> `prelude`／`resolve_model`／`prepare_request`／`request_meta`）亦同。
+
+**Phase 2 結束（handler 部分，9 步）**
+
+| 檢查 | 指令 | 結果 |
+|---|---|---|
+| 後端測試 | `cargo test --offline` | ✅ **179 passed / 0 failed / 8 ignored**，exit 0（**測試一行未改**） |
+| 前端型別 | `npx tsc --noEmit` | ✅ **0 錯誤** |
+| Clippy（含測試） | `cargo clippy --offline --all-targets` | ✅ exit 0；仍為同 5 條既有風格提示 |
+| `proxy_handler` | 實測 | 909 → **86 行**（目標 < 80，❌ 差 6 行） |
+| `proxy.rs` 總行數 | 實測 | 3,098（Phase 0）→ **4,195**（實作 2,294 + 測試 1,901）❌ |
+
+> ⚠️ **注意 `proxy.rs` 變大了，這是預期結果、不是退步。** 抽函式解決的是
+> 「單一 869 行的巨型函式」，不是「巨型檔案」。每個抽出的函式都自帶簽章與
+> 解釋「為什麼」的註解，而本專案註解密度極高（§2 註記：註解是優點，不該
+> 為行數刪減）。**檔案行數只能靠拆模組解決，而拆模組尚未開始。**
 
 8 個 ignored 測試是標記 `#[ignore]` 的 **live 測試**，會真的寫入 `~/.claude/settings.json`、`opencode.json`、hermes `.env`（跑法：`cargo test live_ -- --ignored --test-threads=1`）。
 
@@ -135,7 +151,8 @@
 
 | # | 位置 | 規模 | 問題本質 | 建議拆法 |
 |---|---|---|---|---|
-| **F1** | `proxy.rs:774-1642` `proxy_handler` | **單一函式 868 行** | 鑑權／路由／翻譯／剝離／轉發／重試／SSE 全在一個函式；8 處重複 `log_reject + err_json` 樣板；5 個 `return err_json(400, …)` 分支 | 拆為 `auth` / `route` / `matrix` / `forward` / `retry` 五個階段函式，`proxy_handler` 只做編排（目標 < 80 行） |
+| **F1** | `proxy.rs:774-1642` `proxy_handler` | ~~單一函式 868 行~~ → **86 行** | 鑑權／路由／翻譯／剝離／轉發／重試／SSE 全在一個函式；8 處重複 `log_reject + err_json` 樣板；5 個 `return err_json(400, …)` 分支 | ✅ **Phase 2 已完成**：拆為 `prelude` / `request_meta` / `resolve_model` / `prepare_request` / `upstream_for`+`send_with_strip_retry` / `finish_response` 六段，`proxy_handler` 只做編排（實際 86 行，目標 < 80 差 6 行） |
+| **F1b** | `proxy.rs` 整個檔案 | **4,195 行**（實作 2,294 + 測試 1,901） | F1 修完後才看得出來的**真正問題**：抽出的小函式全部留在同一檔，檔案行數不減反增 | ⏳ **尚未開始**：拆 `proxy/{mod,auth,route,matrix,forward,stream,strip}.rs` + 測試移到 `proxy/tests.rs`，目標每檔 < 600 行 |
 | **F2** | `tools.rs`（2,500 行） | 7 個工具 × (偵測／計畫／套用／還原) | 全部塞一檔；`apply_switch` 巨型 match（L1874-1930） | 拆 `tools/{claude,codex,opencode,hermes,dsh,cursor,antigravity}.rs` + `tools/mod.rs` 共用 trait |
 | **F3** | `Providers.tsx`（2,766 行） | `SwitchDialog` 單元件 **528 行**、`ProviderForm` 328 行 | 表單、定價、時段、模型面板、接管對話框全在一檔 | 拆 `providers/` 目錄，7 個檔案 |
 | **F4** | `Usage.tsx`（1,605 行） | 32 個頂層函式 | 7 個 lens + 貢獻日曆 + 額度環 + 匯入對話框 | 拆 `usage/` 目錄，每個 lens 一檔 |
@@ -832,45 +849,83 @@ exit 0 且 `dead_code` 歸零；能查詢任一 400 的完整上下文（含原�
    因為修正後的網關還沒遇到該情況。下一步是請你在實際使用中留意診斷頁
    「body 解析失敗」那格是否變為非 0。
 
-### Phase 2：拆 `proxy.rs`（最大技術債）—— 🟡 進行中（4/8 步）
+### Phase 2：拆 `proxy.rs`（最大技術債）—— 🟡 handler 部分完成（9 步）
 
 **目標**：`proxy_handler` 從 868 行降到 < 80 行。**行為完全不變**，只重構結構。
 
-**目前進度：`proxy_handler` 909 → 467 行**（實測；起點比原估的 868 行更長），
-四個步驟各自獨立成一次提交，每步都跑完整測試。
+**目前進度：`proxy_handler` 909 → 86 行**（實測；起點比原估的 868 行更長），
+九個步驟各自獨立成一次提交，每步都跑完整測試後才提交。
 
 | 步驟 | 提交 | 內容 | handler |
 |---|---|---|---|
 | 1 | `7602086` | `reject()` 統一 11 處「記日誌 + 回錯誤 JSON」；`infer_app` 只算一次；`provider_name()` | 909 → 870 |
 | 2 | `e6a7a8e` | `relay_sse` 通用逐行 SSE 轉送 + `StreamLog` 記帳 + `sse_response` | 870 → 655 |
 | 3 | `7c312dc` | `translate_forward_body` + `strip_for_upstream`（`BodyPrep` 而非 `Result<_, Response>`） | 655 → 589 |
-| 4 | `f946937` | `Upstream` 連線物件 + `RetryCtx` + `send_with_strip_retry` | 589 → **467** |
+| 4 | `f946937` | `Upstream` 連線物件 + `RetryCtx` + `send_with_strip_retry` | 589 → 467 |
+| 5 | `859b8fc` | `FinishCtx` + `finish_response`（標頭轉發、三種串流分支、非流式整包解析、記帳） | 467 → 278 |
+| 6 | `22d353a` | `Prelude` + `prelude`（Bearer → 本地 Key／直連回退 → 限流 → 讀請求體；5 個拒絕出口） | 278 → 237 |
+| 7 | `b6dc4ce` | `resolve_model`（模型／來源白名單 + 跨來源路由；4 個拒絕出口） | 237 → 165 |
+| 8 | `8c408e3` | `PrepareInput`／`Prepared` + `prepare_request`（矩陣判定 → 轉譯 → 剝離） | 165 → 101 |
+| 9 | `dce9321` | `ReqMeta`／`request_meta` + `upstream_for`（請求元資料、上游連線物件） | 101 → **86** |
 
-**實作階段發現、值得記下的三件事**
+`proxy_handler` 現在是一條六段具名管線，每段一個函式、各自有 doc：
+
+```
+prelude  →  request_meta  →  resolve_model  →  prepare_request
+         →  upstream_for + send_with_strip_retry  →  finish_response
+鑑權限流    請求元資料       白名單與路由      矩陣/轉譯/剝離    送出與重試        收尾與記帳
+```
+
+**實作階段發現、值得記下的四件事**
 
 1. **`&rusqlite::Connection` 不能跨越 `await`。** 抽出 `send_with_strip_retry`
    時第一版傳入 `conn: &Connection`：`cargo check` 過了，但 axum 的
    `Handler` 突然不成立。原因是 `Connection` 是 `Send` 但**不是 `Sync`**，
    故 `&Connection` 不是 `Send`，整個 handler future 退化成 `!Send`。
    編譯器的錯誤訊息完全沒提 Send，只說「Handler trait 未滿足」——
-   這是日後拆檔時最容易再踩一次的坑。改傳 `db_path`，寫入時開短命連線。
+   這是日後拆檔時最容易再踩一次的坑。改傳 `db_path`，寫入時開短命連線；
+   需要跨階段持有連線時，**傳所有權**（見 `Prelude.conn`）。
+   反過來說，**同步**函式（如 `resolve_model`、`prepare_request`）借用
+   `&Connection` 完全沒問題——這個區別已寫進這兩個函式的 doc。
 2. **`clippy::result_large_err`**：`Result<_, Response>` 的 Err 有 128 bytes，
    改 `Box<Response>`。
 3. **留痕必須記「原始」body**：重構中 `nb`（剝完的）與 `body`（原始的）
    極易混淆；若記成剝完的，「這次剝了什麼」就永遠看不出來，整個觀測設施
    的意義歸零。
+4. **`tokio::spawn` 要求 `'static`，借用脈絡不能搬進 task。**
+   `finish_response` 的三個串流分支都必須在 `async move` **之外**先
+   `f.app.to_string()` 等做出 owned 字串。把「借用脈絡」與「spawn」放進
+   同一個函式時一定會遇到，已寫進該函式 doc。
 
-**尚未完成（後續步驟）**
+**尚未完成 —— 這是 Phase 2 剩下的主要工作**
 
-- 抽出回應收尾（非流式整包解析 + 三種翻譯，約 180 行）
-- 抽出設定/鑑權/模型白名單/跨來源路由（約 200 行）
-- 把純函式搬進 `proxy/` 子模組，達成 `proxy.rs` < 600 行
-  （目前 3,744 行 —— **拆檔尚未開始**，前四步只縮小了 handler，
-  檔案本身因為新增輔助函式反而略增）
+- **把實作搬進 `proxy/` 子模組，達成 `proxy.rs` < 600 行。** ❌ **未達成，
+  而且離目標很遠**：目前 `proxy.rs` 共 **4,195 行**（實作 2,294 + 測試 1,901）。
+  九個步驟只縮小了 `handler`，**檔案本身反而變大**（3,744 → 4,195）——
+  抽出的每個函式都自帶簽章與「為什麼」的註解，而這份程式碼的註解密度
+  極高（見 §2 的註記：註解是優點，不該為了行數刪減）。
+  **這是預期中的結果**：抽函式解決的是「單一巨型函式」，不是「巨型檔案」；
+  檔案行數只能靠拆模組解決，而拆模組還沒開始。
+- handler < 80 行（❌ 差 6 行，見下）
 - §5.3 第 2 層（`wire_api` A/B、能力宣告）
 
-**驗收**：179 個測試**一行不改**全部通過（目前每步皆如此 ✅）；
-`proxy.rs` < 600 行（❌ 未達成）。
+**為何 handler 停在 86 行、不再往下壓**
+
+剩下的 6 行全部來自同一處：`PrepareInput`／`RetryCtx`／`FinishCtx` 三個階段
+脈絡各自重複列出 `ctx`/`started`/`app`/`model_raw`（`RetryCtx` 還多一個
+`content_type`）。唯一正確的解法是引入共用的 `ReqCtx` 讓三者內嵌它，但那會
+牽動約 **56 處欄位存取**（`f.ctx` → `f.req.ctx`、`input.app` → `input.req.app`、
+`rc.started` → `rc.req.started` …），換來 **7 行**。
+
+判斷：**這是行數高爾夫，不是設計改進，故不做。** 86 行已經是一條六段具名
+管線，原本「單一 869 行函式」的可讀性問題已經解決。若日後真的要滿足這個
+硬指標，共用的 `ReqCtx` 是唯一正確路徑。
+
+**驗收**：179 個測試**一行不改**全部通過（九個步驟皆如此 ✅）；
+`cargo clippy --all-targets` 僅餘 5 條既有警告（`price_extract.rs` 1 條、
+`tools.rs` 4 條，皆為 Phase 1 前就存在）✅；
+`proxy_handler` < 80 行（❌ 86 行）；
+`proxy.rs` < 600 行（❌ 4,195 行，拆檔尚未開始）。
 
 ### Phase 3：拆 `tools.rs` + 修 Codex 會話（B3）
 
