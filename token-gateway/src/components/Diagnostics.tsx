@@ -120,7 +120,15 @@ function TraceDetail({ row }: { row: TraceRow }) {
     ["時間", fmtTime(row.ts)],
     ["應用", row.app || "—"],
     ["模型（原始）", <span className="font-mono">{row.model_raw || "—"}</span>],
-    ["轉換", `${row.in_fmt} → ${row.target_fmt}（${row.trans_kind}）`],
+    [
+      "轉換",
+      // 網關自己拒絕的請求（`trans_kind = "rejected"`）沒有格式轉換、也沒有
+      // 上游，`in_fmt`／`target_fmt` 皆為空。若照其他種類的寫法會顯示成
+      // 「 → （rejected）」，故這一類單獨呈現。
+      row.trans_kind === "rejected"
+        ? "網關拒絕（未觸及上游）"
+        : `${row.in_fmt} → ${row.target_fmt}（${row.trans_kind}）`,
+    ],
     ["延遲", `${row.latency_ms} ms`],
     ["重試次數", String(row.retry_count)],
     [
@@ -271,7 +279,7 @@ export default function DiagnosticsPage() {
           icon="bolt-fill"
           tile="linear-gradient(160deg, #ff9f0a, #c26a00)"
           title="網關診斷"
-          caption="異常請求追蹤（僅在剝離／4xx／5xx／解析失敗時寫入）"
+          caption="異常請求追蹤（網關拒絕、剝離重試、4xx／5xx、解析失敗時寫入）"
           right={
             <button
               className="btn-ghost flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs"

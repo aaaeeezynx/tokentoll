@@ -110,7 +110,20 @@
 | 前端型別 | `npx tsc --noEmit` | ✅ **0 錯誤**，exit 0 |
 | 編譯警告 | `cargo test` | ⚠️ 3 個（皆 `dead_code`） |
 
-**Phase 1 結束（現況）**
+**目前（Phase 1.5 + Phase 2 全部完成，即 `377e31e`）**
+
+| 檢查 | 指令 | 結果 |
+|---|---|---|
+| 後端測試 | `cargo test --offline` | ✅ **181 passed / 0 failed / 9 ignored**，exit 0 |
+| 前端型別 | `npx tsc --noEmit` | ✅ **0 錯誤**，exit 0 |
+| 前端建置 | `npx vite build` | ✅ 成功（主 chunk 542 kB，gzip 150 kB） |
+| Clippy（含測試） | `cargo clippy --offline --all-targets` | ✅ exit 0；仍為同 5 條既有風格提示（`tools.rs` ×4、`price_extract.rs` ×1） |
+| Release 建置 | `npx tauri build` | ✅ exe + MSI + NSIS 三種產物皆成功 |
+| 真實資料庫升級 | 對 `app.db` 副本跑 `live_migrate_real_db_copy` | ✅ v7 → v8，providers 7→7、request_logs 4111→4111，零減損 |
+
+8 個 ignored 測試是標記 `#[ignore]` 的 **live 測試**，會真的寫入 `~/.claude/settings.json`、`opencode.json`、hermes `.env`（跑法：`cargo test live_ -- --ignored --test-threads=1`）。第 9 個是 Phase 1.5 新增的 `live_migrate_real_db_copy`（需設 `TOKEN_GATEWAY_MIGRATE_DB` 指向資料庫**副本**）。
+
+**Phase 1 結束**
 
 | 檢查 | 指令 | 結果 |
 |---|---|---|
@@ -848,6 +861,49 @@ exit 0 且 `dead_code` 歸零；能查詢任一 400 的完整上下文（含原�
    **真實重現一次**才能定案 —— 目前資料庫裡 `with_body_hex` 應為 0，
    因為修正後的網關還沒遇到該情況。下一步是請你在實際使用中留意診斷頁
    「body 解析失敗」那格是否變為非 0。
+
+### Phase 1.5 ✅ 已完成：補上觀測設施漏掉的主要症狀（`377e31e`）
+
+**Phase 1 建的診斷中心本身有一個缺口，是在為它寫驗證測試時才發現的。**
+
+`reject()` 是網關**所有失敗路徑的共同出口** —— 缺 Authorization 401、
+白名單 403、限流 429、body 過大 413、DB 不可用 500，以及「模型不在清單內」
+的 400。但它只寫 `request_logs`，**沒有寫 `proxy_trace`**。而 `proxy_trace`
+當下只有三處會寫：`prepare_request`（矩陣不支援、body 不是 JSON）與
+`send_with_strip_retry`（連線失敗、剝離重試）。
+
+> 也就是說：**使用者回報的「連線錯誤（通常是 400）」正好是唯一不會出現在
+> 診斷中心追蹤清單裡的那一類。** 觀測設施做完了，卻剛好漏掉最主要的症狀。
+
+根因是當初只想著「上游異常才值得追蹤」，而網關層拒絕根本沒有上游。
+
+**修法**：`logging::log_reject()` 多收一個 `note`（即回給使用者的拒絕訊息），
+在**同一個連線**上順手寫一筆 `trans_kind = "rejected"`、`level = warn` 的
+trace。`upstream_status` 對這一類記的是**回給客戶端的狀態碼**。
+
+> **安全性**：`note` 會落庫，故不得含金鑰。已逐條核對 `keys::auth_key`／
+> `auth_direct` 的錯誤字串（「該 Key 已被停用」「該 Key 已過期」「該 Key
+> 配額已用完」「無效的 Key」）皆不含 secret；`keys.rs` 的 `key_prefix`
+> （首 12 字＋末 4 字）只用於 UI 顯示，不會流到這裡。
+
+**新增測試（179 → 181 passed、9 ignored）**
+
+| 測試 | 位置 | 釘住什麼 |
+|---|---|---|
+| `e2e_rejected_request_is_visible_in_diagnostics` | `proxy/tests.rs` | **可見性閉環**：400（模型不在清單）與 401（缺 Authorization）都要在 `list_recent`、`list_problems` 查得到，`note` 讀得出原因且不含金鑰 |
+| `v7_db_without_phase1_tables_upgrades_preserving_data` | `db.rs` | v7 → v8 升級後既有資料零減損、兩張新表補回 |
+| `live_migrate_real_db_copy` `#[ignore]` | `db.rs` | 對**真實資料庫副本**跑升級並比較升級前後列數，供出貨前確認 |
+
+**對真實資料庫的實測**（`%APPDATA%\com.tokencounter.gateway\app.db` 的副本，
+熱拷貝含 `-wal`，先驗 `PRAGMA integrity_check` = ok）：
+
+```text
+升級前：version=7 providers=7 request_logs=4111
+升級後：version=8 providers=7 request_logs=4111 proxy_trace=true provider_stripped_fields=true
+```
+
+資料零減損。這條路是**真實使用者第一次啟動新版唯一會走的路**，所以值得在
+出貨前用真檔驗一次而不只靠模擬。
 
 ### Phase 2：拆 `proxy.rs`（最大技術債）—— ✅ 完成（12 步）
 
