@@ -10,7 +10,9 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
 /// 當前 schema 版本。後續升級時遞增，並補充 ALTER 遷移。
-pub const SCHEMA_VERSION: i32 = 7;
+/// v8（Phase 1）：新增 provider_stripped_fields / proxy_trace（純新增表，
+/// 走 SCHEMA 的 CREATE TABLE IF NOT EXISTS，無需 ALTER）。
+pub const SCHEMA_VERSION: i32 = 8;
 
 /// 網關預設連接埠（C 方案：可在設定中修改；歷史預設 15721 與 cc-switch 衝突）。
 pub const DEFAULT_GATEWAY_PORT: u16 = 15722;
@@ -165,6 +167,46 @@ CREATE TABLE IF NOT EXISTS provider_models (
 );
 CREATE INDEX IF NOT EXISTS idx_models_lookup
     ON provider_models (provider_id, ord, id);
+
+-- ── Phase 1：可觀測性設施 ────────────────────────────────────────
+
+-- 上游拒收欄位的持久化記憶。
+-- 原本只存在 ProxyCtx 的進程記憶體（proxy.rs 的 `stripped`），網關每次
+-- 停止／啟動就歸零，導致每個渠道的第一個請求都要重踩一次 400 再重試。
+CREATE TABLE IF NOT EXISTS provider_stripped_fields (
+    provider_id INTEGER NOT NULL,
+    field TEXT NOT NULL,
+    learned_at INTEGER NOT NULL,
+    PRIMARY KEY (provider_id, field)
+);
+
+-- 請求追蹤。刻意「只在異常時寫入」（被剝離欄位、上游 4xx/5xx、body 解析
+-- 失敗、重試），正常請求不寫，避免日誌洪水。
+-- 隱私：body_sha256 是請求體指紋；body_hex 僅在 body 解析失敗時記錄
+-- 前 BODY_HEX_MAX bytes 的十六進位，用於判定「是真解析失敗還是 debug
+-- 儀器自己弄壞 body」（見 docs/REFACTORING-PLAN.md §5.2）。
+CREATE TABLE IF NOT EXISTS proxy_trace (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              INTEGER NOT NULL,
+    trace_level     TEXT NOT NULL DEFAULT 'info',
+    app             TEXT NOT NULL DEFAULT '',
+    model_raw       TEXT NOT NULL DEFAULT '',
+    in_fmt          TEXT NOT NULL DEFAULT '',
+    target_fmt      TEXT NOT NULL DEFAULT '',
+    trans_kind      TEXT NOT NULL DEFAULT '',
+    upstream_status INTEGER NOT NULL DEFAULT 0,
+    latency_ms      INTEGER NOT NULL DEFAULT 0,
+    retry_count     INTEGER NOT NULL DEFAULT 0,
+    stripped_fields TEXT NOT NULL DEFAULT '',
+    content_length  INTEGER,
+    content_type    TEXT NOT NULL DEFAULT '',
+    body_sha256     TEXT NOT NULL DEFAULT '',
+    body_hex        TEXT NOT NULL DEFAULT '',
+    upstream_error  TEXT NOT NULL DEFAULT '',
+    note            TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_proxy_trace_ts ON proxy_trace(ts);
+CREATE INDEX IF NOT EXISTS idx_proxy_trace_status ON proxy_trace(upstream_status, ts);
 "#;
 
 /// 內置種子定價（美元/百萬 token，source='seed'；未知模型費用記 0，M4 做定價管理）。
@@ -495,4 +537,349 @@ pub fn init_db(app: &AppHandle) -> Result<DbState, String> {
         conn: Mutex::new(conn),
         path,
     })
+}
+
+// ─────────────────────────────────────────────────────── 單測 ───
+//
+// 本檔是資料真相層：schema 建錯或 migration 漏跑等於使用者資料損毀。
+// 在 Phase 1 之前這裡是 0 測試（見 docs/REFACTORING-PLAN.md §3 B8）。
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_column(conn: &Connection, table: &str, col: &str) -> bool {
+        conn.prepare(&format!(
+            "SELECT 1 FROM pragma_table_info('{table}') WHERE name='{col}'"
+        ))
+        .and_then(|mut s| s.exists([]))
+        .unwrap_or(false)
+    }
+
+    fn has_table(conn: &Connection, table: &str) -> bool {
+        conn.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1")
+            .and_then(|mut s| s.exists([table]))
+            .unwrap_or(false)
+    }
+
+    fn max_version(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COALESCE(MAX(version),0) FROM schema_version", [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(0)
+    }
+
+    fn open(path: &Path) -> Connection {
+        open_and_ensure(path).expect("open_and_ensure")
+    }
+
+    #[test]
+    fn fresh_db_reaches_current_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = open(&dir.path().join("app.db"));
+        assert_eq!(max_version(&c), SCHEMA_VERSION as i64);
+    }
+
+    #[test]
+    fn fresh_db_has_all_core_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = open(&dir.path().join("app.db"));
+        for t in [
+            "schema_version",
+            "providers",
+            "local_keys",
+            "request_logs",
+            "import_state",
+            "pricing",
+            "settings",
+            "provider_pricing",
+            "pricing_periods",
+            "provider_models",
+            "provider_stripped_fields",
+            "proxy_trace",
+        ] {
+            assert!(has_table(&c, t), "缺少表 {t}");
+        }
+    }
+
+    #[test]
+    fn open_and_ensure_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.db");
+        let c1 = open(&path);
+        assert_eq!(max_version(&c1), SCHEMA_VERSION as i64);
+        drop(c1);
+        // 再開一次不得報錯、版本不得重複寫入
+        let c2 = open(&path);
+        assert_eq!(max_version(&c2), SCHEMA_VERSION as i64);
+        let rows: i64 = c2
+            .query_row("SELECT COUNT(*) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, SCHEMA_VERSION as i64, "版本列應逐版一列，不重複");
+    }
+
+    #[test]
+    fn phase1_tables_are_recreated_on_legacy_db() {
+        // 模擬 Phase 1 之前的資料庫：兩張新表不存在。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let c = open(&path);
+            c.execute_batch(
+                "DROP TABLE proxy_trace; DROP TABLE provider_stripped_fields;",
+            )
+            .unwrap();
+            assert!(!has_table(&c, "proxy_trace"));
+        }
+        // 重新開啟應自動補回（SCHEMA 的 CREATE TABLE IF NOT EXISTS）
+        let c = open(&path);
+        assert!(has_table(&c, "proxy_trace"), "proxy_trace 未補回");
+        assert!(
+            has_table(&c, "provider_stripped_fields"),
+            "provider_stripped_fields 未補回"
+        );
+        // 索引也要在
+        let idx: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index'
+                 AND name IN ('idx_proxy_trace_ts','idx_proxy_trace_status')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 2, "proxy_trace 索引未建立");
+    }
+
+    #[test]
+    fn legacy_local_keys_gains_provider_id_and_key_plain() {
+        // v1 → v2（provider_id）與 v6 → v7（key_plain）的 ALTER 路徑。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE local_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_prefix TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL DEFAULT '',
+                    quota_tokens INTEGER NOT NULL DEFAULT -1,
+                    used_tokens INTEGER NOT NULL DEFAULT 0,
+                    rate_limit_qpm INTEGER NOT NULL DEFAULT 60,
+                    allowed_models_json TEXT NOT NULL DEFAULT '[]',
+                    allowed_apps_json TEXT NOT NULL DEFAULT '[]',
+                    expires_at INTEGER,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL
+                 );
+                 INSERT INTO local_keys (key_prefix, key_hash, created_at)
+                 VALUES ('sk-local-abc', 'hash1', 1000);",
+            )
+            .unwrap();
+        }
+        let c = open(&path);
+        assert!(has_column(&c, "local_keys", "provider_id"));
+        assert!(has_column(&c, "local_keys", "key_plain"));
+        // 既有資料必須保留，新欄位取預設值
+        let (prefix, pid, plain, created): (String, Option<i64>, String, i64) = c
+            .query_row(
+                "SELECT key_prefix, provider_id, key_plain, created_at FROM local_keys",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(prefix, "sk-local-abc");
+        assert_eq!(pid, None);
+        assert_eq!(plain, "");
+        assert_eq!(created, 1000);
+    }
+
+    #[test]
+    fn legacy_request_logs_gains_source_and_import_path() {
+        // v5 → v6（M5 歷史回填）的 ALTER 路徑。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE request_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    key_id INTEGER,
+                    app TEXT NOT NULL DEFAULT '',
+                    provider_id INTEGER,
+                    model_raw TEXT NOT NULL DEFAULT '',
+                    model_norm TEXT NOT NULL DEFAULT '',
+                    in_tok INTEGER NOT NULL DEFAULT 0,
+                    out_tok INTEGER NOT NULL DEFAULT 0,
+                    cache_read INTEGER NOT NULL DEFAULT 0,
+                    cache_write INTEGER NOT NULL DEFAULT 0,
+                    cost_usd REAL NOT NULL DEFAULT 0,
+                    latency_ms INTEGER NOT NULL DEFAULT 0,
+                    status INTEGER NOT NULL DEFAULT 0,
+                    is_stream INTEGER NOT NULL DEFAULT 0
+                 );
+                 INSERT INTO request_logs (ts, app) VALUES (500, 'codex');",
+            )
+            .unwrap();
+        }
+        let c = open(&path);
+        assert!(has_column(&c, "request_logs", "source"));
+        assert!(has_column(&c, "request_logs", "import_path"));
+        let (app, source, ip): (String, String, String) = c
+            .query_row(
+                "SELECT app, source, import_path FROM request_logs",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(app, "codex");
+        assert_eq!(source, "gateway", "舊列應補上預設來源");
+        assert_eq!(ip, "");
+        // ALTER 之後才建的索引必須存在
+        let idx: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index'
+                 AND name IN ('idx_logs_import','idx_logs_dedupe')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 2, "v6 索引未建立");
+    }
+
+    #[test]
+    fn legacy_tou_pricing_migrates_to_periods_and_drops_peak_columns() {
+        // v3 → v4：單窗口峰谷 → pricing_periods 多時段，然後 DROP 舊列。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE provider_pricing (
+                    provider_id INTEGER NOT NULL,
+                    model_norm TEXT NOT NULL,
+                    mode TEXT NOT NULL DEFAULT 'usage',
+                    in_pm REAL NOT NULL DEFAULT 0,
+                    out_pm REAL NOT NULL DEFAULT 0,
+                    cache_read_pm REAL NOT NULL DEFAULT 0,
+                    cache_create_pm REAL NOT NULL DEFAULT 0,
+                    peak_start TEXT NOT NULL DEFAULT '',
+                    peak_end TEXT NOT NULL DEFAULT '',
+                    peak_in_pm REAL,
+                    peak_out_pm REAL,
+                    peak_cache_read_pm REAL,
+                    peak_cache_create_pm REAL
+                 );
+                 INSERT INTO provider_pricing
+                   (provider_id, model_norm, mode, in_pm, out_pm, peak_start, peak_end,
+                    peak_in_pm, peak_out_pm, peak_cache_read_pm, peak_cache_create_pm)
+                 VALUES (3, '*', 'tou', 1.0, 2.0, '08:00', '20:00', 5.0, 6.0, 0.5, 0.6);
+                 -- 非 tou 列不應被遷移
+                 INSERT INTO provider_pricing (provider_id, model_norm, mode, in_pm, out_pm, peak_start, peak_end)
+                 VALUES (4, 'm', 'usage', 1.0, 2.0, '', '');",
+            )
+            .unwrap();
+        }
+        let c = open(&path);
+        // 舊欄位已移除
+        for col in ["peak_start", "peak_end", "peak_in_pm", "peak_out_pm"] {
+            assert!(!has_column(&c, "provider_pricing", col), "{col} 未移除");
+        }
+        // 峰時段已遷移
+        let (name, start, end, ipm, opm, cr, cc): (String, String, String, f64, f64, f64, f64) = c
+            .query_row(
+                "SELECT name, start, end, in_pm, out_pm, cache_read_pm, cache_create_pm
+                 FROM pricing_periods WHERE provider_id=3 AND model_norm='*'",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(name, "峰時");
+        assert_eq!((start.as_str(), end.as_str()), ("08:00", "20:00"));
+        assert_eq!((ipm, opm, cr, cc), (5.0, 6.0, 0.5, 0.6));
+        // 非 tou 列不產生時段
+        let n: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM pricing_periods WHERE provider_id=4",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0);
+        // 原始列保留（遷移只補時段，不刪定價列）
+        let kept: i64 = c
+            .query_row("SELECT COUNT(*) FROM provider_pricing", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 2);
+    }
+
+    #[test]
+    fn settings_defaults_seeded_without_overwriting_user_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.db");
+        {
+            let c = open(&path);
+            assert_eq!(
+                get_setting(&c, "gateway_port").as_deref(),
+                Some(DEFAULT_GATEWAY_PORT.to_string().as_str())
+            );
+            assert_eq!(get_setting(&c, "accent").as_deref(), Some("blue"));
+            // 使用者改過之後重開不得被覆蓋
+            set_setting(&c, "accent", "purple").unwrap();
+            set_setting(&c, "gateway_port", "19999").unwrap();
+        }
+        let c = open(&path);
+        assert_eq!(get_setting(&c, "accent").as_deref(), Some("purple"));
+        assert_eq!(get_setting(&c, "gateway_port").as_deref(), Some("19999"));
+    }
+
+    #[test]
+    fn seeds_are_not_revived_after_user_deletes_them() {
+        // 種子只在 seed_version 落後時下發；使用者刪除後重開不應復活。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.db");
+        {
+            let c = open(&path);
+            c.execute("DELETE FROM pricing", []).unwrap();
+            c.execute("DELETE FROM providers", []).unwrap();
+        }
+        let c = open(&path);
+        let p: i64 = c
+            .query_row("SELECT COUNT(*) FROM pricing", [], |r| r.get(0))
+            .unwrap();
+        let v: i64 = c
+            .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(p, 0, "使用者刪除的種子定價不應復活");
+        assert_eq!(v, 0, "使用者刪除的種子渠道不應復活");
+    }
+
+    #[test]
+    fn fresh_db_seeds_providers_and_pricing_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = open(&dir.path().join("app.db"));
+        let p: i64 = c
+            .query_row("SELECT COUNT(*) FROM pricing WHERE source='seed'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(p as usize, SEED_PRICING.len());
+        let v: i64 = c
+            .query_row("SELECT COUNT(*) FROM providers", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v as usize, SEED_PROVIDERS.len());
+        // 種子渠道的 key 必須是空的（絕不內建金鑰）
+        let nonempty: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM providers WHERE api_key <> ''",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(nonempty, 0, "種子渠道不得內建任何金鑰");
+    }
 }
