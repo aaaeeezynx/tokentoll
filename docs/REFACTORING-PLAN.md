@@ -102,11 +102,22 @@
 
 ### 1.5 健康度基線（實測，非推測）
 
+**Phase 0 基線（重構前）**
+
 | 檢查 | 指令 | 結果 |
 |---|---|---|
 | 後端測試 | `cargo test --offline` | ✅ **146 passed / 0 failed / 8 ignored**，exit 0 |
 | 前端型別 | `npx tsc --noEmit` | ✅ **0 錯誤**，exit 0 |
 | 編譯警告 | `cargo test` | ⚠️ 3 個（皆 `dead_code`） |
+
+**Phase 1 結束（現況）**
+
+| 檢查 | 指令 | 結果 |
+|---|---|---|
+| 後端測試 | `cargo test --offline` | ✅ **179 passed / 0 failed / 8 ignored**，exit 0 |
+| 前端型別 | `npx tsc --noEmit` | ✅ **0 錯誤**，exit 0 |
+| 前端建置 | `npx vite build` | ✅ 成功（主 chunk 542 kB，gzip 150 kB） |
+| Clippy（含測試） | `cargo clippy --offline --all-targets` | ✅ exit 0；**`dead_code` 歸零**，餘 5 條為既有的風格提示（`tools.rs` ×4、`price_extract.rs` ×1，非本次新增） |
 
 8 個 ignored 測試是標記 `#[ignore]` 的 **live 測試**，會真的寫入 `~/.claude/settings.json`、`opencode.json`、hermes `.env`（跑法：`cargo test live_ -- --ignored --test-threads=1`）。
 
@@ -164,17 +175,83 @@
 
 ### 3.1 分級總表
 
-| ID | 嚴重度 | 位置 | 症狀 | 本計畫書處理階段 |
-|---|---|---|---|---|
-| **B1** | 🔴 高 | `proxy.rs`（缺失） | `encrypted_content` 直通上游 → `400 reasoning encrypted_content was not issued to this caller` | Phase 2 |
-| **B2** | 🟠 中 | `proxy.rs`（`stripped` 記憶體） | **每次重啟網關，每個渠道都要重踩一次 400 + 重試** | Phase 1 |
-| **B3** | 🔴 高 | `tools.rs:999-1036` | 硬編 `state_5.sqlite` + **所有失敗路徑靜默回空** → 舊 Codex 會話 provider 別名段消失 | Phase 3 |
-| **B4** | 🟠 中 | `tools.rs:1110` | 無差別強制 `wire_api = "responses"`，強迫所有 Codex 流量走最複雜翻譯路徑 | Phase 2 |
-| **B5** | 🟡 低 | `proxy.rs:966-1024` | 格式矩陣正確性依賴 match **分支順序**，重排即靜默改行為 | Phase 2 |
-| **B6** | 🟡 低 | `proxy.rs:1023` | `("openai","openai-responses")` 落入 `_ => TransKind::None` 直通 → chat 請求打到 responses 端點必失敗 | Phase 2 |
-| **B7** | 🟡 低 | `tools.rs` | 3 個 `dead_code`：`restore_backup_to`、`restore_backup` 是 `pub` 但未註冊為 command | Phase 1 |
-| **B8** | 🟠 中 | `commands.rs`、`db.rs` | 801 + 446 行 **零測試**，卻是 API 邊界與資料真相層 | Phase 4 |
-| **B9** | 🟡 低 | `proxy.rs:1646` | `reqwest` timeout **600 秒**且未設 connect_timeout → 上游卡死會佔用請求 10 分鐘 | Phase 1 |
+| ID | 嚴重度 | 位置 | 症狀 | 階段 | 狀態 |
+|---|---|---|---|---|---|
+| **B1** | 🔴 高 | `proxy.rs`（缺失） | `encrypted_content` 直通上游 → `400 reasoning encrypted_content was not issued to this caller` | Phase 1 | ✅ 已修 |
+| **B2** | 🟠 中 | `proxy.rs`（`stripped` 記憶體） | **每次重啟網關，每個渠道都要重踩一次 400 + 重試** | Phase 1 | ✅ 已修 |
+| **B3** | 🔴 高 | `tools.rs:999-1036` | 硬編 `state_5.sqlite` + **所有失敗路徑靜默回空** → 舊 Codex 會話 provider 別名段消失 | Phase 3 | ⏳ 待處理 |
+| **B4** | 🟠 中 | `tools.rs:1110` | 無差別強制 `wire_api = "responses"`，強迫所有 Codex 流量走最複雜翻譯路徑 | Phase 2 | ⏳ 待處理 |
+| **B5** | 🟡 低 | `proxy.rs:966-1024` | 格式矩陣正確性依賴 match **分支順序**，重排即靜默改行為 | Phase 1 | ✅ 已修 |
+| **B6** | 🟡 低 | `proxy.rs:1023` | `("openai","openai-responses")` 落入 `_ => TransKind::None` 直通 → chat 請求打到 responses 端點必失敗 | Phase 1 | ✅ 已修 |
+| **B7** | 🟡 低 | `tools.rs` | 2 個 `dead_code`：`restore_backup_to`、`restore_backup` 只被測試呼叫，lib 建置下恆為未使用 | Phase 1 | ✅ 已處置 |
+| **B8** | 🟠 中 | `commands.rs`、`db.rs` | 801 + 446 行 **零測試**，卻是 API 邊界與資料真相層 | Phase 1（`db.rs`）/ 4（`commands.rs`） | 🟡 `db.rs` 已補 |
+| **B9** | 🟡 低 | `proxy.rs:1646` | `reqwest` timeout **600 秒**且未設 connect_timeout → 上游卡死會佔用請求 10 分鐘 | Phase 1 | ✅ 已修 |
+
+> 狀態於 Phase 1 結束時更新。詳見 §3.2 的完成記錄。
+
+---
+
+### 3.2 Phase 1 完成記錄（實作後回填）
+
+**⚠️ 一處判斷修正**：B1–B9 的初稿把 B7 寫成「3 個 dead_code」且推測是
+「未註冊為 command」。實際是 **2 個**，且真正原因是它們**只被測試呼叫**，
+因此在 lib 建置（無 `cfg(test)`）下才是 dead code —— 這也解釋了為何
+`cargo test` 從不抱怨、只有 `cargo clippy --all-targets` 看得見。
+
+更關鍵的是：我原先認為 `restore_backup_to` 與 `restore_backup_to_port` 是
+「同義重複（只差埠預設值）」，**這是錯的**。兩者真正的差異是 `migrate` 參數：
+
+| 函式 | port | migrate |
+|---|---|---|
+| `restore_backup_to`（只被測試用） | `DEFAULT_GATEWAY_PORT` | **false** |
+| `restore_backup_to_port`（生產路徑） | 呼叫端提供 | **true** |
+| `restore_backup`（只被測試用） | `DEFAULT_GATEWAY_PORT` | true（經 `_port`） |
+
+第一版改寫讓 `restore_backup_to` 的測試 helper 轉呼叫 `_port` 版本，
+7 個測試立刻失敗 —— 它們測的正是「不做 baseline 遷移」的還原路徑。
+這個失敗本身就是證據。最終處置：helper 照抄原行為（`migrate: false`），
+生產 API 只留帶 port 的版本。
+
+**各項實際改動**
+
+| ID | 改動 | 測試 |
+|---|---|---|
+| B1 | 新增 `proxy.rs::strip_encrypted_content()`，遞迴移除所有 `encrypted_content`（含巢狀／陣列），以位元組快掃短路避免多一次 JSON parse | 5 個單測 |
+| B2 | `ProxyCtx.stripped`（進程 HashMap）→ `provider_stripped_fields` 表；移除 `ProxyCtx` 欄位與舊 `remember_stripped()` | 持久化跨連線回歸測試 |
+| B5 | `detect_in_format`/字串 match → `InFmt`/`TargetFmt` enum + `resolve_trans_kind()`，30 格全列舉、**無萬用字元**（新增變體時編譯器強制補齊） | `trans_kind_matrix_is_fully_pinned` 釘死 30 格 |
+| B6 | `(OpenAi, OpenAiResponses)` 由靜默直通改為明確 400 + 可行動建議 | 單測 + e2e 回歸 |
+| B7 | 兩個包裝降為測試模組內 helper | 179→179 全綠 |
+| B9 | 加 `connect_timeout(10s)`，整體 timeout 維持 600s（抽出常數） | — |
+| B8 | `db.rs` 補 10 個 migration 測試（詳見下） | 10 個 |
+
+**B6 修正當場暴露了一個既有測試的假陽性**：`e2e_forward_auth_and_log`
+的 fixture 把渠道宣告成 `openai-responses`，卻在測 chat 端點轉發 ——
+它長期綠燈**正是因為 B6 的靜默直通**掩蓋了這個不一致。已修正 fixture
+（改 `openai-chat`），並補上 B6 的端到端回歸斷言。
+
+**可觀測性（§5.3 第 0 層，本次新增）**
+
+- 新增 `trace.rs`（`proxy.rs` 已 1,660 行，不讓它繼續膨脹）。
+- 新增 `db.rs` 的 `proxy_trace` 表，只寫異常請求（正常請求不寫，避免日誌洪水），
+  網關啟動時裁剪至 5000 筆。
+- 四類留痕：① 上游 400 且成功剝離（記下剝了哪些欄位 + 上游完整原文）
+  ② 剝離後重試仍失敗（標為「未解決」）③ 上游 400 但解析不出欄位名
+  （標為「相容策略失效」）④ **body 解析失敗 → 存原始位元組 hex 前綴（512 bytes）**。
+- ④ 是 §5.2 懸案的解藥：該處三個證據樣本的 `bytes_len` 用了兩套算法
+  （成功案例是原始長度、失敗案例是去引號後長度），無法區分「真解析失敗」
+  與「debug 儀器弄壞 body」。現在失敗當下會留下原始 hex，可直接定案。
+- 順帶修正該 400 的訊息：原本無論 Anthropic 或 Responses 入站都說
+  「Anthropic 請求體不是 JSON」。
+- 前端新增側欄「診斷」分頁（`Diagnostics.tsx`）：總覽統計、上游能力記憶
+  （可逐渠道重設）、請求追蹤（只看異常／全部、展開看完整上下文、可複製 hex）。
+
+**`db.rs` 遷移測試覆蓋（B8 部分）**
+
+全新庫版本、冪等重開、舊庫自動補表、v1→v2（`provider_id`）與
+v6→v7（`key_plain`）的 ALTER 路徑、v5→v6（`source`/`import_path`）、
+v3→v4 峰谷定價 → `pricing_periods` 遷移（含非 `tou` 列不遷移、原列保留）、
+`settings` 種子不覆蓋使用者值、使用者刪除種子後不復活、
+以及「種子渠道不得內建任何金鑰」。
 
 ---
 
@@ -598,20 +675,40 @@ client: Client::builder()
 
 **驗收標準**：能回答「過去 24 小時所有 4xx 請求，各自剝了什麼欄位、上游原文是什麼、第幾次重試成功」。
 
+**實作結果（Phase 1 ✅）**：已落地，與上面的草案有幾處刻意偏離：
+
+- 表名與欄位以實作為準（見 `db.rs` 的 `proxy_trace`）。多存了
+  `content_length` / `content_type` / `body_hex` / `upstream_error` / `note`，
+  `level` 而非 `debug`；`model` 拆成 `model_raw`。**沒有**存
+  `Content-Encoding`（`reqwest` 已是 `identity`，無意義）。
+- 第 1 點的 `trace_level` 最終只用了 `info` / `warn` 兩級：warn＝確實出錯，
+  info＝有剝離或重試但最終成功。
+- **只寫異常請求**（草案未言明）。正常請求不寫，避免日誌洪水；
+  網關啟動時裁剪至最近 5000 筆。
+- 第 4 點的「主動探測每個渠道」**未做** —— 它會對上游產生真實流量與費用，
+  且屬於 Phase 2 的能力宣告（§5.4）範疇。目前只做被動記錄。
+- 診斷頁（`Diagnostics.tsx`）已上線：總覽、上游能力記憶（可逐渠道重設）、
+  請求追蹤（可展開看完整上下文與可複製的 hex）。
+
+**尚未定案**：§5.2 的 body 解析失敗 400 仍需**真實重現一次**才能定案 ——
+觀測設施已就位，但修正後的網關還沒遇到該情況，故診斷頁上
+「body 解析失敗」目前應為 0。這正是這一層的用途：下次它出現時會直接給出答案。
+
 ---
 
-#### 第 1 層：低風險直接命中（純函式 + 單測）
+#### 第 1 層：低風險直接命中（純函式 + 單測）—— ✅ 已於 Phase 1 完成
 
-| 項目 | 改動 | 風險 |
-|---|---|---|
-| B1 `strip_encrypted_content` | 新增純函式 + 呼叫點（見 §3 B1，程式碼已備妥） | 極低 |
-| B2 剝離記憶持久化 | `stripped` 改讀寫 `provider_stripped_fields` 表 | 低 |
-| B5 格式矩陣窮舉化 | 表驅動 + 20 格全測 | 極低 |
-| B6 補 `("openai","openai-responses")` 明確報錯 | 一個 match 分支 | 極低 |
-| B9 加 `connect_timeout` | 一行 | 低 |
-| B7 清理 dead code | 確認後刪除或降級可見性 | 極低 |
+| 項目 | 改動 | 風險 | 狀態 |
+|---|---|---|---|
+| B1 `strip_encrypted_content` | 新增純函式 + 呼叫點（見 §3 B1，程式碼已備妥） | 極低 | ✅ |
+| B2 剝離記憶持久化 | `stripped` 改讀寫 `provider_stripped_fields` 表 | 低 | ✅ |
+| B5 格式矩陣窮舉化 | 表驅動 + **30 格**全測（原估 20 格，實際是 5 入站 × 6 渠道協議） | 極低 | ✅ |
+| B6 補 `("openai","openai-responses")` 明確報錯 | 一個 match 分支 | 極低 | ✅ |
+| B9 加 `connect_timeout` | 一行 | 低 | ✅ |
+| B7 清理 dead code | 確認後刪除或降級可見性（採「降為測試 helper」） | 極低 | ✅ |
 
-**驗收標準**：`cargo test` ≥ 146 passed 且新增測試全綠；`cargo clippy` 零警告。
+**驗收結果**：`cargo test --offline` **179 passed / 0 failed / 8 ignored**（≥ 146 ✅）。
+`cargo clippy --all-targets` exit 0，`dead_code` 歸零（餘 5 條為既有風格提示，非新增）。
 
 ---
 
@@ -681,15 +778,44 @@ client: Client::builder()
 - [x] 殘留清理（§2.3）＋ 驗證腳本整理進 `scripts/`
 - [x] 決策：`target/` 保留（理由見 §6.1）
 
-### Phase 1：低風險命中 + 觀測設施（建議先做）
+### Phase 1 ✅ 已完成：低風險命中 + 觀測設施
 
-**目標**：把所有 400 變成可見，並修掉零風險的 bug。**不拆檔。**
+**目標**：把所有 400 變成可見，並修掉零風險的 bug。**不拆檔。**（未拆檔 ✅）
 
-- §5.3 第 0 層：`proxy_trace` 表 + hex 落庫 + 診斷頁
-- §5.3 第 1 層全部（B1、B2、B5、B6、B7、B9）
-- 補 `db.rs` migration 測試（B8 的一部分）
+- [x] §5.3 第 0 層：`proxy_trace` 表 + body hex 落庫 + 上游原文全存 + 診斷頁
+- [x] §5.3 第 1 層：B1（`encrypted_content`）、B2（記憶持久化）、
+      B5（矩陣編譯器窮舉）、B6（chat→responses 明確報錯）、
+      B7（dead code 處置）、B9（connect_timeout）
+- [x] 補 `db.rs` migration 測試（B8 的一部分，10 個）
+- [x] 新增 `provider_stripped_fields` 表（B2 的落地處）
+- [x] `provider_delete` 一併清掉該渠道的能力記憶（避免孤兒列）
+- [x] 前端「診斷」分頁（總覽 / 上游能力記憶 / 請求追蹤）
 
-**驗收**：`cargo test` ≥ 146 passed 且新增測試全綠；能查詢任一 400 的完整上下文。
+**驗收結果**：`cargo test --offline` **179 passed / 0 failed / 8 ignored**（≥ 146 ✅）；
+`npx tsc --noEmit` 0 錯誤；`npx vite build` 成功；`cargo clippy --all-targets`
+exit 0 且 `dead_code` 歸零；能查詢任一 400 的完整上下文（含原始 hex）✅
+
+**提交紀錄**（每個邏輯單元一顆，皆可獨立建置）
+
+| commit | 內容 |
+|---|---|
+| `b4561eb` | `db`: schema v8 + 10 個 migration 測試 |
+| `373a586` | `proxy`: B1/B2/B5/B6/B9 + 追蹤寫入路徑 |
+| `1c87a24` | `commands`: 診斷中心 API |
+| `f2118f5` | `providers`: 刪除渠道時清掉能力記憶 |
+| `8f2b81d` | `web`: 診斷中心頁面 |
+| `ab7ee6a` | `tools`: B7 dead code 處置 |
+
+**過程中發現、且值得記下的事**
+
+1. **B6 的修正當場抓到一個假陽性測試**（詳見 §3.2）。
+2. **我對 B7 的初判有錯**：它不是「同義重複」，`restore_backup_to` 傳
+   `migrate: false`、生產路徑傳 `migrate: true`，是語義差異。改寫後 7 個
+   測試立刻失敗即為證據（詳見 §3.2）。
+3. **尚未定案**：§5.2 的 body 解析失敗 400。觀測設施已就位，但需要
+   **真實重現一次**才能定案 —— 目前資料庫裡 `with_body_hex` 應為 0，
+   因為修正後的網關還沒遇到該情況。下一步是請你在實際使用中留意診斷頁
+   「body 解析失敗」那格是否變為非 0。
 
 ### Phase 2：拆 `proxy.rs`（最大技術債）
 
@@ -697,7 +823,8 @@ client: Client::builder()
 
 - 抽出 `proxy::auth` / `proxy::route` / `proxy::matrix` / `proxy::forward` / `proxy::retry` 五個模組
 - 抽出共用的錯誤回應建構子，消除 8 處 `log_reject + err_json` 重複
-- 格式矩陣表驅動化（B5）
+- （格式矩陣表驅動化已於 Phase 1 完成 —— B5 改為 enum + 30 格窮舉，
+  拆檔時把 `resolve_trans_kind` 整塊搬到 `proxy::matrix` 即可）
 - §5.3 第 2 層（`wire_api` A/B、能力宣告）
 
 **驗收**：146 個測試**一行不改**全部通過（這是「純重構」的證明）；`proxy.rs` < 600 行。
