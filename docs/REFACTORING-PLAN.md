@@ -849,7 +849,7 @@ exit 0 且 `dead_code` 歸零；能查詢任一 400 的完整上下文（含原�
    因為修正後的網關還沒遇到該情況。下一步是請你在實際使用中留意診斷頁
    「body 解析失敗」那格是否變為非 0。
 
-### Phase 2：拆 `proxy.rs`（最大技術債）—— 🟡 handler 完成、拆檔進行中（11 步）
+### Phase 2：拆 `proxy.rs`（最大技術債）—— ✅ 完成（12 步）
 
 **目標**：`proxy_handler` 從 868 行降到 < 80 行。**行為完全不變**，只重構結構。
 
@@ -869,6 +869,7 @@ exit 0 且 `dead_code` 歸零；能查詢任一 400 的完整上下文（含原�
 | 9 | `dce9321` | `ReqMeta`／`request_meta` + `upstream_for`（請求元資料、上游連線物件） | 101 → **86** |
 | 10 | `35d7eac` | 測試 1,898 行移到 `proxy/tests.rs`（`proxy.rs` + `proxy/` 子目錄形式，**不需要 `mod.rs`**） | 86（不變） |
 | 11 | `c4b626f` | 拆出 `proxy/matrix.rs`（`TransKind`／`InFmt`／`TargetFmt`／5 個 `E_*`／`resolve_trans_kind`） | 86（不變） |
+| 12 | `ded205c` | 拆完其餘八個子模組（`strip`／`util`／`logging`／`stream`／`forward`／`retry`／`finish`／`pipeline`） | 86（不變） |
 
 `proxy_handler` 現在是一條六段具名管線，每段一個函式、各自有 doc：
 
@@ -899,13 +900,31 @@ prelude  →  request_meta  →  resolve_model  →  prepare_request
    `f.app.to_string()` 等做出 owned 字串。把「借用脈絡」與「spawn」放進
    同一個函式時一定會遇到，已寫進該函式 doc。
 
-**尚未完成 —— 這是 Phase 2 剩下的主要工作**
+**最終落地（第十二步實測）**
 
-- **把實作搬進 `proxy/` 子模組，達成 `proxy.rs` < 600 行。** ❌ **未達成**：
-  目前 `proxy.rs` **2,127 行**（`proxy/tests.rs` 1,904、`proxy/matrix.rs` 181）。
-  起點是 4,195 行（實作 2,294 + 測試 1,901），第 10、11 步拿掉 2,068 行。
-- handler < 80 行（❌ 差 6 行，見下）
-- §5.3 第 2 層（`wire_api` A/B、能力宣告）
+`proxy.rs`：4,195 → **270 行**（不含空行 245）✅ 目標 < 600 達成。
+
+| 檔案 | 行數 | |
+|---|---:|---|
+| `proxy.rs` | 270 | 常數、狀態型別、`proxy_handler`、`serve`、子模組地圖 |
+| `proxy/tests.rs` | 1,907 | ⚠️ **唯一超標的檔案**（見下） |
+| `proxy/pipeline.rs` | 393 | |
+| `proxy/forward.rs` | 261 | |
+| `proxy/finish.rs` | 258 | |
+| `proxy/logging.rs` | 231 | |
+| `proxy/strip.rs` | 210 | |
+| `proxy/util.rs` | 204 | |
+| `proxy/stream.rs` | 191 | |
+| `proxy/matrix.rs` | 181 | |
+| `proxy/retry.rs` | 179 | |
+
+**唯一未達標項：`proxy/tests.rs` 1,907 行 > 600。** 該檔有 37 個測試、**沒有
+共用 helper**（每個 e2e 測試自建 mock 上游），所以可以無痛再拆成
+`proxy/tests/{unit,e2e_basic,e2e_translate,e2e_strict}.rs`。列為後續可選工作
+—— 測試檔的導航成本遠低於實作檔，故未列入本次驗收。
+
+**剩下的 Phase 2 附帶項**：§5.3 第 2 層（`wire_api` A/B、能力宣告）——
+需要你實測後才能決定方向。
 
 #### 拆檔配方（後續模組一律照這個做，已用 `matrix.rs` 驗證過）
 
@@ -926,7 +945,7 @@ prelude  →  request_meta  →  resolve_model  →  prepare_request
    `proxy` 的子模組，`use super::*` 只涵蓋 `proxy` 自身的綁定；若常數下移到
    `proxy::matrix`，測試必須明確 `use super::matrix::{…}`。
 
-#### 後續模組建議切法（依依賴關係由外而內）
+#### 當時的模組切法規劃（依依賴關係由外而內）—— 已於第十二步執行
 
 | 模組 | 內容 | 粗估 |
 |---|---|---|
@@ -954,11 +973,13 @@ prelude  →  request_meta  →  resolve_model  →  prepare_request
 管線，原本「單一 869 行函式」的可讀性問題已經解決。若日後真的要滿足這個
 硬指標，共用的 `ReqCtx` 是唯一正確路徑。
 
-**驗收**：179 個測試**一行不改**全部通過（十一個步驟皆如此 ✅）；
-`cargo clippy --all-targets` 僅餘 5 條既有警告（`price_extract.rs` 1 條、
-`tools.rs` 4 條，皆為 Phase 1 前就存在）✅；
-`proxy_handler` < 80 行（❌ 86 行）；
-`proxy.rs` < 600 行（❌ 2,127 行，拆檔完成 1/6 個模組）。
+**驗收**：179 個測試**一行不改**全部通過（十二個步驟皆如此 ✅）；
+`cargo clippy --all-targets` exit 0，僅餘 5 條既有警告（`price_extract.rs` 1 條、
+`tools.rs` 4 條，皆為 Phase 1 前就存在）✅；`cargo build` exit 0 ✅；
+`npx tsc --noEmit` 0 錯誤 ✅；
+`proxy.rs` < 600 行 → **270 行 ✅**；
+`proxy_handler` < 80 行 → **86 行 ❌**（差 6 行；理由見上，判斷為不值得的代價）。
+`proxy/tests.rs` 1,907 行 > 600 → **❌ 未達標**（可選後續工作，見上）。
 
 ### Phase 3：拆 `tools.rs` + 修 Codex 會話（B3）
 
