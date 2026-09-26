@@ -767,6 +767,17 @@ impl InFmt {
             InFmt::Unknown => "unknown",
         }
     }
+
+    /// 給使用者看的格式名（錯誤訊息用）。
+    fn label(self) -> &'static str {
+        match self {
+            InFmt::Anthropic => "Anthropic",
+            InFmt::Responses => "Responses",
+            InFmt::OpenAi => "OpenAI Chat",
+            InFmt::Gemini => "Gemini",
+            InFmt::Unknown => "入站",
+        }
+    }
 }
 
 /// 渠道協議（`providers.api_format`）。
@@ -1211,6 +1222,140 @@ struct AnthropicRelay {
     acc: SseUsage,
 }
 
+/// 翻譯決策（矩陣判定結果中，翻譯階段真正需要的部分）。
+#[derive(Debug, Clone, Copy)]
+struct TransSpec {
+    kind: TransKind,
+    /// 是否需要翻譯（`kind` 不是 None，且渠道協議不是原生同型）。
+    translated: bool,
+}
+
+/// 要送往上游的請求體。
+struct ForwardBody {
+    bytes: Vec<u8>,
+    /// 送往上游的實際模型名（翻譯或直通改寫時）；未改寫則為空字串。
+    model: String,
+}
+
+/// `translate_forward_body` 的結果。
+enum BodyPrep {
+    Ready(ForwardBody),
+    /// 需要翻譯，但請求體不是合法 JSON —— 呼叫端負責留痕與回應。
+    Unparsable,
+}
+
+/// 把客戶端請求體轉成要送上游的位元組。
+///
+/// - 翻譯路徑（Anthropic／Responses → chat）：以白名單重建 body，
+///   同時把 model 由顯示名換成 actual。
+/// - 直通路徑：只把 body 內既有的 `model` 字串由顯示名改寫成 actual
+///   （無映射則原樣不動；Gemini 原生等無 model 的 body 完全不碰）。
+/// - 最後若為 OpenAI chat 的串流請求，補 `stream_options.include_usage` ——
+///   Responses／Anthropic／Gemini 加這個欄位會被上游 400，故以
+///   `want_usage_opt` 區分。
+fn translate_forward_body(
+    conn: &rusqlite::Connection,
+    provider_id: i64,
+    raw: &[u8],
+    body_json: &Option<serde_json::Value>,
+    model_raw: &str,
+    fmt: TransSpec,
+    want_usage_opt: bool,
+) -> BodyPrep {
+    let mut fwd_value = body_json.clone();
+    let mut translated_model = String::new();
+    let mut rewritten = false;
+
+    if fmt.translated {
+        let Some(v) = fwd_value.as_ref().cloned() else {
+            return BodyPrep::Unparsable;
+        };
+        let actual = crate::models::resolve_actual(conn, provider_id, model_raw);
+        fwd_value = Some(if fmt.kind == TransKind::ResponsesToChat {
+            crate::translate::responses_to_openai(&v, &actual)
+        } else {
+            crate::translate::anthropic_to_openai(&v, &actual)
+        });
+        translated_model = actual;
+    } else if !model_raw.is_empty() {
+        // 直通改寫：僅當請求體本來就帶 model 字串才動
+        if let Some(obj) = fwd_value.as_mut().and_then(|v| v.as_object_mut()) {
+            if obj.get("model").and_then(|m| m.as_str()).is_some() {
+                let actual = crate::models::resolve_actual(conn, provider_id, model_raw);
+                if !actual.is_empty() && actual != model_raw {
+                    obj.insert(
+                        "model".to_string(),
+                        serde_json::Value::String(actual.clone()),
+                    );
+                    translated_model = actual;
+                    rewritten = true;
+                }
+            }
+        }
+    }
+
+    let mut bytes = if fmt.translated || rewritten {
+        serde_json::to_vec(fwd_value.as_ref().expect("forward body"))
+            .unwrap_or_else(|_| raw.to_vec())
+    } else {
+        raw.to_vec()
+    };
+    // 串流強制索取用量（僅 OpenAI chat 需要；見上方說明）
+    if want_usage_opt {
+        if let Some(v) = fwd_value.as_ref() {
+            if v.get("stream").and_then(|s| s.as_bool()).unwrap_or(false)
+                && v.get("stream_options").is_none()
+            {
+                let mut owned = v.clone();
+                if let Some(obj) = owned.as_object_mut() {
+                    obj.insert(
+                        "stream_options".to_string(),
+                        serde_json::json!({"include_usage": true}),
+                    );
+                    bytes = serde_json::to_vec(&owned).unwrap_or(bytes);
+                }
+            }
+        }
+    }
+    BodyPrep::Ready(ForwardBody {
+        bytes,
+        model: translated_model,
+    })
+}
+
+/// 依序套用所有「上游已知拒收」的剝離：
+/// ① 該渠道學到的拒收欄位（SQLite 持久化記憶，見 §3 B2）
+/// ② OpenAI 專屬推理簽章 `encrypted_content`（§3 B1）
+/// ③ 上游不支援的 tool types（Codex `custom` → DeepSeek 400）
+/// ④ 直通 chat 的歷史配對修復（舊 session 孤兒 tool_calls；有效歷史不動）
+///
+/// 每個步驟都是「有改才換、沒改不動」，所以全部 no-op 時 body 原樣送出。
+fn strip_for_upstream(
+    conn: &rusqlite::Connection,
+    provider_id: i64,
+    mut body: Vec<u8>,
+    in_fmt: InFmt,
+    translated: bool,
+) -> Vec<u8> {
+    for f in trace::load_stripped(conn, provider_id) {
+        if let Some(nb) = strip_json_field(&body, &f) {
+            body = nb;
+        }
+    }
+    if let Some(stripped) = strip_encrypted_content(&body) {
+        body = stripped;
+    }
+    if !translated {
+        if let Some(stripped) = strip_unsupported_tools(&body) {
+            body = stripped;
+        }
+        if let Some(fixed) = sanitize_passthrough_chat_body(&body, in_fmt, translated) {
+            body = fixed;
+        }
+    }
+    body
+}
+
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
@@ -1290,6 +1435,12 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     // 模型名（用於白名單 + 日誌；Gemini 原生請求體無 model，從 URL 回填）
     let body_json: Option<serde_json::Value> = parse_body_json(&bytes);
     let path_hint = parts.uri.path().to_string();
+    let content_type = parts
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let model_raw = body_json
         .as_ref()
         .and_then(|v| v.get("model"))
@@ -1411,106 +1562,56 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     // 模型改寫 display→actual：翻譯分支在轉換時做，直通分支（OpenAI / Responses）
     // 在此改寫 body.model；無映射時 resolve_actual 原樣返回，行為不變。
     // 若不改寫，工具送顯示名（如 deepseek-v4-flash-0731）會被上游以 invalid model ID 拒收。
-    let mut fwd_value = body_json.clone();
-    let mut translated_model = String::new();
-    let mut passthrough_rewritten = false;
-    if translated {
-        let v = match fwd_value.as_ref() {
-            Some(v) => v.clone(),
-            None => {
-                // ── §5.2 的關鍵修復 ──
-                // 本專案的「body 解析失敗 400」一直無法判定根因：docs/evidence/
-                // 的三份樣本裡，成功案例的 bytes_len 是原始長度，兩個失敗案例卻是
-                // 「去引號後」的長度，無法區分「真解析失敗」與「debug 儀器弄壞 body」。
-                // 這裡把**原始位元組前綴的 hex** 落庫，下次失敗即可直接定案。
-                let fmt_name = match in_fmt {
-                    InFmt::Anthropic => "Anthropic",
-                    InFmt::Responses => "Responses",
-                    InFmt::OpenAi => "OpenAI Chat",
-                    InFmt::Gemini => "Gemini",
-                    InFmt::Unknown => "入站",
-                };
-                trace::log_to(
-                    &ctx.db_path,
-                    &TraceRecord {
-                        app: app.clone(),
-                        model_raw: model_raw.clone(),
-                        in_fmt: in_fmt.as_str().to_string(),
-                        target_fmt: target_fmt.as_str().to_string(),
-                        trans_kind: kind.as_str().to_string(),
-                        upstream_status: 400,
-                        latency_ms: started.elapsed().as_millis() as i64,
-                        content_type: parts
-                            .headers
-                            .get("content-type")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("")
-                            .to_string(),
-                        note: format!(
-                            "請求體不是合法 JSON，無法翻譯（原始 {} bytes，已記錄 hex）",
-                            bytes.len()
-                        ),
-                        ..Default::default()
-                    }
-                    .with_body_hex(&bytes)
-                    .warn(),
-                );
-                return reject(
-                    &ctx,
-                    &started,
-                    &app,
-                    &model_raw,
-                    StatusCode::BAD_REQUEST,
-                    format!("{fmt_name} 請求體不是 JSON，無法轉換為上游格式"),
-                );
-            }
-        };
-        let actual = crate::models::resolve_actual(&conn, authed.provider_id, &model_raw);
-        if kind == TransKind::ResponsesToChat {
-            fwd_value = Some(crate::translate::responses_to_openai(&v, &actual));
-        } else {
-            fwd_value = Some(crate::translate::anthropic_to_openai(&v, &actual));
-        }
-        translated_model = actual;
-    } else if !model_raw.is_empty() {
-        // 直通改寫：僅當請求體本來就帶 model 字串才動（Gemini 原生等無 model 體不碰）
-        if let Some(obj) = fwd_value.as_mut().and_then(|v| v.as_object_mut()) {
-            if obj.get("model").and_then(|m| m.as_str()).is_some() {
-                let actual =
-                    crate::models::resolve_actual(&conn, authed.provider_id, &model_raw);
-                if !actual.is_empty() && actual != model_raw {
-                    obj.insert("model".to_string(), serde_json::Value::String(actual.clone()));
-                    translated_model = actual;
-                    passthrough_rewritten = true;
-                }
-            }
-        }
-    }
-
+    let spec = TransSpec { kind, translated };
     // 流式請求強制索取用量：僅 OpenAI chat（含翻譯後）需要顯式 stream_options；
     // Responses / Anthropic / Gemini 加此欄位會被上游 400。
     let want_usage_opt = should_inject_usage(translated, &path_hint);
-    let mut body_bytes = if translated || passthrough_rewritten {
-        serde_json::to_vec(fwd_value.as_ref().expect("forward body"))
-            .unwrap_or_else(|_| bytes.to_vec())
-    } else {
-        bytes.to_vec()
-    };
-    if let Some(ref v) = fwd_value {
-        if want_usage_opt
-            && v.get("stream").and_then(|s| s.as_bool()).unwrap_or(false)
-            && v.get("stream_options").is_none()
-        {
-            let mut owned = v.clone();
-            if let Some(obj) = owned.as_object_mut() {
-                obj.insert(
-                    "stream_options".to_string(),
-                    serde_json::json!({"include_usage": true}),
-                );
-                body_bytes = serde_json::to_vec(&owned).unwrap_or(body_bytes);
-            }
+    let (mut body_bytes, translated_model) = match translate_forward_body(
+        &conn,
+        authed.provider_id,
+        &bytes,
+        &body_json,
+        &model_raw,
+        spec,
+        want_usage_opt,
+    ) {
+        BodyPrep::Ready(fb) => (fb.bytes, fb.model),
+        BodyPrep::Unparsable => {
+            // ── §5.2 的關鍵修復 ──
+            // 本專案的「body 解析失敗 400」一直無法判定根因：docs/evidence/
+            // 的三份樣本裡，成功案例的 bytes_len 是原始長度，兩個失敗案例卻是
+            // 「去引號後」的長度，無法區分「真解析失敗」與「debug 儀器弄壞 body」。
+            // 這裡把**原始位元組前綴的 hex** 落庫，下次失敗即可直接定案。
+            trace::log_to(
+                &ctx.db_path,
+                &TraceRecord {
+                    app: app.clone(),
+                    model_raw: model_raw.clone(),
+                    in_fmt: in_fmt.as_str().to_string(),
+                    target_fmt: target_fmt.as_str().to_string(),
+                    trans_kind: kind.as_str().to_string(),
+                    upstream_status: 400,
+                    latency_ms: started.elapsed().as_millis() as i64,
+                    content_type: content_type.clone(),
+                    note: format!(
+                        "請求體不是合法 JSON，無法翻譯（原始 {} bytes，已記錄 hex）",
+                        bytes.len()
+                    ),
+                    ..Default::default()
+                }
+                .with_body_hex(&bytes)
+                .warn(),
+            );
+            return reject(
+                &ctx,
+                &started,
+                &app,
+                &model_raw,
+                StatusCode::BAD_REQUEST,
+                format!("{} 請求體不是 JSON，無法轉換為上游格式", in_fmt.label()),
+            );
         }
-    }
+    };
 
     // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
     let (url, fwd_headers) = build_upstream_target(&parts, &authed, translated, &app);
@@ -1522,30 +1623,8 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         b = b.header("accept-encoding", "identity");
         b.body(body).send()
     };
-    // 預先剝離該渠道已知拒收欄位。
-    // 記憶持久化於 SQLite 的 provider_stripped_fields：原實作只存在進程記憶體
-    // （`ProxyCtx.stripped`），網關每次停止／啟動即歸零，導致每個渠道的第一個
-    // 請求都要重踩一次 400 再重試（見 docs/REFACTORING-PLAN.md §3 B2）。
-    for f in trace::load_stripped(&conn, authed.provider_id) {
-        if let Some(nb) = strip_json_field(&body_bytes, &f) {
-            body_bytes = nb;
-        }
-    }
-    // 剝離 OpenAI 專屬推理簽章（第三方 responses 端點會 400，§3 B1）。
-    // 翻譯路徑已是白名單重建 body，此處靠位元組快掃短路，成本可忽略。
-    if let Some(stripped) = strip_encrypted_content(&body_bytes) {
-        body_bytes = stripped;
-    }
-    // 剝掉上游不支援的 tool types（Codex `custom` → DeepSeek 400）
-    if !translated {
-        if let Some(stripped) = strip_unsupported_tools(&body_bytes) {
-            body_bytes = stripped;
-        }
-        // 直通 chat 歷史配對修復（舊 session 孤兒 tool_calls；有效歷史不動）
-        if let Some(fixed) = sanitize_passthrough_chat_body(&body_bytes, in_fmt, translated) {
-            body_bytes = fixed;
-        }
-    }
+    // 預先剝離該渠道已知拒收欄位與已知不支援結構（詳見 strip_for_upstream）。
+    body_bytes = strip_for_upstream(&conn, authed.provider_id, body_bytes, in_fmt, translated);
 
     let mut upstream = match send_once(body_bytes.clone()).await {
         Ok(r) => r,
@@ -1568,12 +1647,6 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         // 客戶端訊息用截斷版；追蹤表存完整原文（§5.3 第 0 層）
         let upstream_text = upstream_err_text(&eb);
         let upstream_full = String::from_utf8_lossy(&eb).to_string();
-        let content_type = parts
-            .headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
         let mut retried: Option<reqwest::Response> = None;
         let mut applied: Vec<String> = vec![];
         let fields = parse_unknown_fields(&String::from_utf8_lossy(&eb));
