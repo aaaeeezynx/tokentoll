@@ -1232,6 +1232,34 @@ pub fn codex_inline_models(catalog: Option<&str>) -> Vec<(String, String)> {
     out
 }
 
+/// 這個 `base_url` 該用哪種 `wire_api`（Codex 送出時的協議形狀）。
+///
+/// **為什麼不能無差別寫 `responses`**：`wire_api` 決定 Codex 用哪種協議打
+/// `base_url` —— `responses` 走 `/v1/responses`、`chat` 走
+/// `/v1/chat/completions`。本網關**兩種都收**並代為轉譯，所以指向網關時用
+/// `responses` 沒問題（那也是 Codex 的原生形狀，能保留 reasoning 等欄位）。
+/// 但**直連第三方**時 `base_url` 是對方（`Providers.tsx` 的
+/// `base_url: via ? gatewayUrl(...) : provider.base_url`），而多數第三方只
+/// 實作 Chat Completions —— 硬寫 `responses` 會讓 Codex 打到不存在的端點而
+/// 404。
+///
+/// 這個問題原本**已經被發現過**（`restore_backup` 的提示文字寫著「該配置
+/// 直連第三方 URL 但走 responses 協議（直連 Chat 上游會 404）」），但當時只
+/// **警告、不修**。這裡改成寫入時就選對，讓那個警告不再需要出現。
+pub fn codex_wire_api(base_url: &str) -> &'static str {
+    let u = base_url.trim().to_ascii_lowercase();
+    // 指向本網關：兩種協議都收，用 Codex 原生的 responses（保留 reasoning 等）。
+    if u.contains(GATEWAY_HOST) {
+        return "responses";
+    }
+    // 官方 OpenAI：兩種都支援，維持 responses。
+    if u.contains("api.openai.com") {
+        return "responses";
+    }
+    // 其餘第三方：Chat Completions 是唯一普遍實作的形狀。
+    "chat"
+}
+
 fn gateway_section(
     base_url: &str,
     inline_models: &[(String, String)],
@@ -1249,7 +1277,7 @@ fn gateway_section(
             tbl["env_key"] = toml_edit::value(GATEWAY_ENV_KEY);
         }
     }
-    tbl["wire_api"] = toml_edit::value("responses");
+    tbl["wire_api"] = toml_edit::value(codex_wire_api(base_url));
     if !inline_models.is_empty() {
         let mut arr = toml_edit::Array::new();
         for (m, display) in inline_models {
@@ -1837,14 +1865,17 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             } else {
                 "env_key = TOKEN_GATEWAY_KEY"
             };
+            // 協議形狀由 `codex_wire_api` 依 base_url 決定；預覽必須顯示
+            // **實際會寫入的值**，否則預覽會騙人（直連第三方時尤其明顯）。
+            let wire_api = codex_wire_api(&req.base_url);
             if aliases.is_empty() {
                 plan.edits.push(format!(
-                    "[model_providers.{CODEX_SHARED_PROVIDER_ID}] 與 [model_providers.{GATEWAY_PROVIDER_ID}] base_url = {} / {auth_desc} / wire_api = responses",
+                    "[model_providers.{CODEX_SHARED_PROVIDER_ID}] 與 [model_providers.{GATEWAY_PROVIDER_ID}] base_url = {} / {auth_desc} / wire_api = {wire_api}",
                     req.base_url
                 ));
             } else {
                 plan.edits.push(format!(
-                    "[model_providers.{{custom, tokengateway{}}}] 共 {} 段 base_url = {} / {auth_desc} / wire_api = responses",
+                    "[model_providers.{{custom, tokengateway{}}}] 共 {} 段 base_url = {} / {auth_desc} / wire_api = {wire_api}",
                     if aliases.is_empty() {
                         String::new()
                     } else {
@@ -2970,6 +3001,87 @@ mod tests {
         assert!(out.contains("wire_api = \"responses\""), "{out}");
         assert!(out.contains("model = \"gpt-5.5\""), "{out}");
         assert!(out.contains("[mcp_servers]"), "無關段必須保留");
+    }
+
+    /// B4 迴歸測試：`wire_api` 不可無差別寫 `responses`。
+    ///
+    /// **直連第三方**時 `base_url` 是對方（`Providers.tsx`：
+    /// `base_url: via ? gatewayUrl(...) : provider.base_url`），而多數第三方
+    /// 只實作 Chat Completions；硬寫 `responses` 會讓 Codex 打到不存在的
+    /// 端點而 404。原本只**警告**、沒有修。
+    #[test]
+    fn codex_wire_api_matches_upstream_capability() {
+        // 指向本網關 → responses（網關兩種都收，且 responses 保留 reasoning）
+        assert_eq!(codex_wire_api("http://127.0.0.1:15722/v1"), "responses");
+        // 官方 OpenAI → responses
+        assert_eq!(codex_wire_api("https://api.openai.com/v1"), "responses");
+        // 第三方 → chat（唯一普遍實作的形狀）
+        assert_eq!(codex_wire_api("https://integrate.api.nvidia.com/v1"), "chat");
+        assert_eq!(codex_wire_api("https://api.deepseek.com/v1"), "chat");
+        assert_eq!(codex_wire_api("https://openrouter.ai/api/v1"), "chat");
+        // 大小寫與前後空白不影響判定
+        assert_eq!(codex_wire_api("  HTTPS://API.OPENAI.COM/v1  "), "responses");
+    }
+
+    /// B4 端到端：直連第三方時 `codex_apply` 產出的**每一個** provider 段
+    /// 都必須是 `wire_api = "chat"`；走網關時則維持 `responses`。
+    #[test]
+    fn codex_apply_picks_wire_api_per_upstream() {
+        let get = |out: &str| -> Vec<(String, String)> {
+            let v: toml_edit::DocumentMut = out.parse().unwrap();
+            v["model_providers"]
+                .as_table()
+                .unwrap()
+                .iter()
+                .map(|(k, sec)| {
+                    let w = sec
+                        .as_table()
+                        .and_then(|t| t.get("wire_api"))
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("<缺失>")
+                        .to_string();
+                    (k.to_string(), w)
+                })
+                .collect()
+        };
+
+        // 直連第三方 → 全部 chat
+        let out = codex_apply(
+            "model = \"m\"\n",
+            "https://integrate.api.nvidia.com/v1",
+            "m",
+            None,
+            None,
+            &["oldalias".to_string()],
+            &[],
+            Some("nv-key"),
+        )
+        .unwrap();
+        let got = get(&out);
+        assert!(!got.is_empty(), "應產出 provider 段：{out}");
+        for (name, w) in &got {
+            assert_eq!(w, "chat", "第三方直連時 [{name}] 應為 chat：{out}");
+        }
+        assert!(
+            got.iter().any(|(n, _)| n == "oldalias"),
+            "別名段也必須存在：{got:?}"
+        );
+
+        // 走網關 → 全部 responses
+        let out = codex_apply(
+            "model = \"m\"\n",
+            "http://127.0.0.1:15722/v1",
+            "m",
+            None,
+            None,
+            &[],
+            &[],
+            None,
+        )
+        .unwrap();
+        for (name, w) in get(&out) {
+            assert_eq!(w, "responses", "走網關時 [{name}] 應為 responses：{out}");
+        }
     }
 
     #[test]
