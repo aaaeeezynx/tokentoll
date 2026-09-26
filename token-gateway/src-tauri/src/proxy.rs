@@ -395,6 +395,28 @@ fn err_json(status: StatusCode, message: String) -> Response {
     (status, axum::Json(body)).into_response()
 }
 
+/// 拒絕請求：寫一筆被拒日誌，並回傳統一格式的錯誤 JSON。
+///
+/// 這個「記錄 + 回應」配對原本在 `proxy_handler` 內手寫了 11 次、每次 8–10 行，
+/// 是該函式膨脹到 900 行的主因之一（見 §2.1）。集中後每處只留一行。
+fn reject(
+    ctx: &ProxyCtx,
+    started: &Instant,
+    app: &str,
+    model: &str,
+    status: StatusCode,
+    message: impl Into<String>,
+) -> Response {
+    log_reject(
+        &ctx.db_path,
+        app,
+        model,
+        status.as_u16(),
+        started.elapsed().as_millis() as i64,
+    );
+    err_json(status, message.into())
+}
+
 /// 拒絕/失敗請求也落庫（key 未知記 NULL、零 token），否則用量頁完全看不到
 /// 被擋掉的流量，除錯只能靠猜。
 fn log_reject(db_path: &PathBuf, app: &str, model_raw: &str, status: u16, latency_ms: i64) {
@@ -881,6 +903,14 @@ struct ReroutedProvider {
     format: String,
 }
 
+/// 取渠道顯示名（僅用於錯誤訊息；查不到時給可讀的佔位字串）。
+fn provider_name(conn: &rusqlite::Connection, provider_id: i64) -> String {
+    conn.query_row("SELECT name FROM providers WHERE id=?1", [provider_id], |r| {
+        r.get(0)
+    })
+    .unwrap_or_else(|_| "（未知來源）".to_string())
+}
+
 /// 跨來源模型路由：在其他啟用來源的可用模型表中找 display/actual 命中
 ///（排除 Key 綁定來源，按來源優先級、id 取第一個）。
 fn resolve_model_provider(
@@ -946,81 +976,76 @@ fn responses_line_events(
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
+    // 來源判定只做一次（原本在每個拒絕分支各算一次，共 6 次）
+    let app = infer_app(&parts.headers);
 
     // ---- 鑑權
     let Some(secret) = bearer(&parts.headers) else {
-        log_reject(
-            &ctx.db_path,
-            &infer_app(&parts.headers),
+        return reject(
+            &ctx,
+            &started,
+            &app,
             "",
-            401,
-            started.elapsed().as_millis() as i64,
+            StatusCode::UNAUTHORIZED,
+            "缺少 Authorization：請填本地 sk-local-… 或該渠道的上游 Key",
         );
-        return err_json(StatusCode::UNAUTHORIZED, "缺少 Authorization：請填本地 sk-local-… 或該渠道的上游 Key".into());
     };
     let conn = match open_conn(&ctx.db_path) {
         Ok(c) => c,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, format!("資料庫不可用：{e}")),
+        Err(e) => {
+            return reject(
+                &ctx,
+                &started,
+                &app,
+                "",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("資料庫不可用：{e}"),
+            )
+        }
     };
     // 本地 Key 優先；401 再回退直連上游（Bearer 即渠道自身 api_key，不經本地 Key 轉發）
+    let key_err = |(code, msg): (u16, String)| {
+        reject(
+            &ctx,
+            &started,
+            &app,
+            "",
+            StatusCode::from_u16(code).unwrap_or(StatusCode::UNAUTHORIZED),
+            msg,
+        )
+    };
     let mut authed = match keys::auth_key(&conn, &secret) {
         Ok(k) => k,
         Err((401, _)) => match keys::auth_direct(&conn, &secret) {
             Ok(k) => k,
-            Err((code, msg)) => {
-                let status =
-                    StatusCode::from_u16(code).unwrap_or(StatusCode::UNAUTHORIZED);
-                log_reject(
-                    &ctx.db_path,
-                    &infer_app(&parts.headers),
-                    "",
-                    code,
-                    started.elapsed().as_millis() as i64,
-                );
-                return err_json(status, msg);
-            }
+            Err(e) => return key_err(e),
         },
-        Err((code, msg)) => {
-            let status =
-                StatusCode::from_u16(code).unwrap_or(StatusCode::UNAUTHORIZED);
-            log_reject(
-                &ctx.db_path,
-                &infer_app(&parts.headers),
-                "",
-                code,
-                started.elapsed().as_millis() as i64,
-            );
-            return err_json(status, msg);
-        }
+        Err(e) => return key_err(e),
     };
     if !ctx.rate.check(authed.id, authed.rate_limit_qpm) {
-        log_reject(
-            &ctx.db_path,
-            &infer_app(&parts.headers),
+        return reject(
+            &ctx,
+            &started,
+            &app,
             "",
-            429,
-            started.elapsed().as_millis() as i64,
-        );
-        return err_json(
             StatusCode::TOO_MANY_REQUESTS,
             format!("該 Key 限流中（{}次/分鐘）", authed.rate_limit_qpm),
         );
     }
-    let app = infer_app(&parts.headers);
 
     // 讀請求體
     const LIMIT: usize = 32 * 1024 * 1024;
     let bytes = match axum::body::to_bytes(body, LIMIT).await {
         Ok(b) => b,
         Err(_) => {
-            log_reject(
-                &ctx.db_path,
-                &infer_app(&parts.headers),
+            return reject(
+                &ctx,
+                &started,
+                &app,
                 "",
-                413,
-                started.elapsed().as_millis() as i64,
-            );
-            return err_json(StatusCode::PAYLOAD_TOO_LARGE, "請求體超過 32MB".into());
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "請求體超過 32MB",
+            )
         }
     };
 
@@ -1038,27 +1063,24 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         && !model_raw.is_empty()
         && !authed.allowed_models.iter().any(|m| m == &model_raw)
     {
-        log_reject(
-            &ctx.db_path,
+        return reject(
+            &ctx,
+            &started,
             &app,
             &model_raw,
-            403,
-            started.elapsed().as_millis() as i64,
-        );
-        return err_json(
             StatusCode::FORBIDDEN,
             format!("該 Key 不允許調用模型 {model_raw}"),
         );
     }
     if !authed.allowed_apps.is_empty() && app != "unknown" && !authed.allowed_apps.contains(&app) {
-        log_reject(
-            &ctx.db_path,
+        return reject(
+            &ctx,
+            &started,
             &app,
             &model_raw,
-            403,
-            started.elapsed().as_millis() as i64,
+            StatusCode::FORBIDDEN,
+            format!("該 Key 不允許來源 {app}"),
         );
-        return err_json(StatusCode::FORBIDDEN, format!("該 Key 不允許來源 {app}"));
     }
 
     // ---- 來源解析：先比對 Key 綁定來源的模型表；未命中再跨來源按模型路由
@@ -1076,21 +1098,12 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         });
         if !usable.is_empty() && !bound_hit {
             if authed.direct {
-                let pname: String = conn
-                    .query_row(
-                        "SELECT name FROM providers WHERE id=?1",
-                        [authed.provider_id],
-                        |r| r.get(0),
-                    )
-                    .unwrap_or_else(|_| "（未知來源）".to_string());
-                log_reject(
-                    &ctx.db_path,
+                let pname = provider_name(&conn, authed.provider_id);
+                return reject(
+                    &ctx,
+                    &started,
                     &app,
                     &model_raw,
-                    400,
-                    started.elapsed().as_millis() as i64,
-                );
-                return err_json(
                     StatusCode::BAD_REQUEST,
                     format!(
                         "直連模式僅允許來源「{pname}」登記的模型，{model_raw} 不在其清單內，請求不會轉發"
@@ -1107,21 +1120,12 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                     authed.provider_api_format = p.format;
                 }
                 None => {
-                    let pname: String = conn
-                        .query_row(
-                            "SELECT name FROM providers WHERE id=?1",
-                            [authed.provider_id],
-                            |r| r.get(0),
-                        )
-                        .unwrap_or_else(|_| "（未知來源）".to_string());
-                    log_reject(
-                        &ctx.db_path,
+                    let pname = provider_name(&conn, authed.provider_id);
+                    return reject(
+                        &ctx,
+                        &started,
                         &app,
                         &model_raw,
-                        400,
-                        started.elapsed().as_millis() as i64,
-                    );
-                    return err_json(
                         StatusCode::BAD_REQUEST,
                         format!(
                             "模型 {model_raw} 不在該 Key 綁定的來源「{pname}」模型清單內，請求不會轉發；請換用綁定正確來源的 Key；若該來源實際支援此模型，請先在來源的使用模型中新增對應映射"
@@ -1139,13 +1143,6 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     let kind = match resolve_trans_kind(in_fmt, target_fmt) {
         Ok(k) => k,
         Err(msg) => {
-            log_reject(
-                &ctx.db_path,
-                &app,
-                &model_raw,
-                400,
-                started.elapsed().as_millis() as i64,
-            );
             trace::log_to(
                 &ctx.db_path,
                 &TraceRecord {
@@ -1161,7 +1158,14 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                 }
                 .warn(),
             );
-            return err_json(StatusCode::BAD_REQUEST, msg.into());
+            return reject(
+                &ctx,
+                &started,
+                &app,
+                &model_raw,
+                StatusCode::BAD_REQUEST,
+                msg,
+            );
         }
     };
     let translated = kind != TransKind::None;
@@ -1176,13 +1180,6 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         let v = match fwd_value.as_ref() {
             Some(v) => v.clone(),
             None => {
-                log_reject(
-                    &ctx.db_path,
-                    &app,
-                    &model_raw,
-                    400,
-                    started.elapsed().as_millis() as i64,
-                );
                 // ── §5.2 的關鍵修復 ──
                 // 本專案的「body 解析失敗 400」一直無法判定根因：docs/evidence/
                 // 的三份樣本裡，成功案例的 bytes_len 是原始長度，兩個失敗案例卻是
@@ -1220,7 +1217,11 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                     .with_body_hex(&bytes)
                     .warn(),
                 );
-                return err_json(
+                return reject(
+                    &ctx,
+                    &started,
+                    &app,
+                    &model_raw,
                     StatusCode::BAD_REQUEST,
                     format!("{fmt_name} 請求體不是 JSON，無法轉換為上游格式"),
                 );
@@ -1383,14 +1384,14 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     let mut upstream = match send_once(body_bytes.clone()).await {
         Ok(r) => r,
         Err(e) => {
-            log_reject(
-                &ctx.db_path,
+            return reject(
+                &ctx,
+                &started,
                 &app,
                 &model_raw,
-                502,
-                started.elapsed().as_millis() as i64,
-            );
-            return err_json(StatusCode::BAD_GATEWAY, format!("上游連接失敗：{e}"));
+                StatusCode::BAD_GATEWAY,
+                format!("上游連接失敗：{e}"),
+            )
         }
     };
     // 400 且報拒收欄位 → 記住並剝離重發一次（New-API 系 unknown field；
@@ -1448,14 +1449,11 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                         retried = Some(r);
                     }
                     Err(e) => {
-                        log_reject(
-                            &ctx.db_path,
+                        return reject(
+                            &ctx,
+                            &started,
                             &app,
                             &model_raw,
-                            502,
-                            started.elapsed().as_millis() as i64,
-                        );
-                        return err_json(
                             StatusCode::BAD_GATEWAY,
                             format!("上游連接失敗：{e}"),
                         );
@@ -1471,13 +1469,6 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                 let st = r.status();
                 let eb2 = r.bytes().await.unwrap_or_default().to_vec();
                 let eb2_full = String::from_utf8_lossy(&eb2).to_string();
-                log_reject(
-                    &ctx.db_path,
-                    &app,
-                    &model_raw,
-                    st.as_u16(),
-                    started.elapsed().as_millis() as i64,
-                );
                 // 剝離後仍失敗 → 這是真正未解決的 400，完整留痕
                 trace::log_to(
                     &ctx.db_path,
@@ -1498,16 +1489,9 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                     .with_body(&body_bytes)
                     .with_upstream_error(&eb2_full),
                 );
-                return err_json(st, upstream_err_text(&eb2));
+                return reject(&ctx, &started, &app, &model_raw, st, upstream_err_text(&eb2));
             }
             None => {
-                log_reject(
-                    &ctx.db_path,
-                    &app,
-                    &model_raw,
-                    400,
-                    started.elapsed().as_millis() as i64,
-                );
                 // 無法從錯誤訊息解析出欄位名 → 相容策略失效，必須留痕才能改進
                 trace::log_to(
                     &ctx.db_path,
@@ -1531,7 +1515,14 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                     .with_body(&body_bytes)
                     .with_upstream_error(&upstream_full),
                 );
-                return err_json(StatusCode::BAD_REQUEST, upstream_text);
+                return reject(
+                    &ctx,
+                    &started,
+                    &app,
+                    &model_raw,
+                    StatusCode::BAD_REQUEST,
+                    upstream_text,
+                );
             }
         }
     }
@@ -1844,14 +1835,14 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     let resp_bytes = match upstream.bytes().await {
         Ok(b) => b,
         Err(e) => {
-            log_reject(
-                &ctx.db_path,
+            return reject(
+                &ctx,
+                &started,
                 &app,
                 &model_raw,
-                502,
-                started.elapsed().as_millis() as i64,
-            );
-            return err_json(StatusCode::BAD_GATEWAY, format!("讀取上游響應失敗：{e}"));
+                StatusCode::BAD_GATEWAY,
+                format!("讀取上游響應失敗：{e}"),
+            )
         }
     };
     let mut usage = SseUsage::default();
