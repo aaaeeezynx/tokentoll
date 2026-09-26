@@ -849,7 +849,7 @@ exit 0 且 `dead_code` 歸零；能查詢任一 400 的完整上下文（含原�
    因為修正後的網關還沒遇到該情況。下一步是請你在實際使用中留意診斷頁
    「body 解析失敗」那格是否變為非 0。
 
-### Phase 2：拆 `proxy.rs`（最大技術債）—— 🟡 handler 部分完成（9 步）
+### Phase 2：拆 `proxy.rs`（最大技術債）—— 🟡 handler 完成、拆檔進行中（11 步）
 
 **目標**：`proxy_handler` 從 868 行降到 < 80 行。**行為完全不變**，只重構結構。
 
@@ -867,6 +867,8 @@ exit 0 且 `dead_code` 歸零；能查詢任一 400 的完整上下文（含原�
 | 7 | `b6dc4ce` | `resolve_model`（模型／來源白名單 + 跨來源路由；4 個拒絕出口） | 237 → 165 |
 | 8 | `8c408e3` | `PrepareInput`／`Prepared` + `prepare_request`（矩陣判定 → 轉譯 → 剝離） | 165 → 101 |
 | 9 | `dce9321` | `ReqMeta`／`request_meta` + `upstream_for`（請求元資料、上游連線物件） | 101 → **86** |
+| 10 | `35d7eac` | 測試 1,898 行移到 `proxy/tests.rs`（`proxy.rs` + `proxy/` 子目錄形式，**不需要 `mod.rs`**） | 86（不變） |
+| 11 | `c4b626f` | 拆出 `proxy/matrix.rs`（`TransKind`／`InFmt`／`TargetFmt`／5 個 `E_*`／`resolve_trans_kind`） | 86（不變） |
 
 `proxy_handler` 現在是一條六段具名管線，每段一個函式、各自有 doc：
 
@@ -899,15 +901,46 @@ prelude  →  request_meta  →  resolve_model  →  prepare_request
 
 **尚未完成 —— 這是 Phase 2 剩下的主要工作**
 
-- **把實作搬進 `proxy/` 子模組，達成 `proxy.rs` < 600 行。** ❌ **未達成，
-  而且離目標很遠**：目前 `proxy.rs` 共 **4,195 行**（實作 2,294 + 測試 1,901）。
-  九個步驟只縮小了 `handler`，**檔案本身反而變大**（3,744 → 4,195）——
-  抽出的每個函式都自帶簽章與「為什麼」的註解，而這份程式碼的註解密度
-  極高（見 §2 的註記：註解是優點，不該為了行數刪減）。
-  **這是預期中的結果**：抽函式解決的是「單一巨型函式」，不是「巨型檔案」；
-  檔案行數只能靠拆模組解決，而拆模組還沒開始。
+- **把實作搬進 `proxy/` 子模組，達成 `proxy.rs` < 600 行。** ❌ **未達成**：
+  目前 `proxy.rs` **2,127 行**（`proxy/tests.rs` 1,904、`proxy/matrix.rs` 181）。
+  起點是 4,195 行（實作 2,294 + 測試 1,901），第 10、11 步拿掉 2,068 行。
 - handler < 80 行（❌ 差 6 行，見下）
 - §5.3 第 2 層（`wire_api` A/B、能力宣告）
+
+#### 拆檔配方（後續模組一律照這個做，已用 `matrix.rs` 驗證過）
+
+使用 Rust 2018 的 **`proxy.rs` + `proxy/` 子目錄**形式：`proxy.rs` 仍是模組根，
+子模組放 `proxy/xxx.rs`，**不需要 `proxy/mod.rs`**（也不需要搬動 `proxy.rs`）。
+
+1. 把要搬的**連續區塊**切到 `proxy/xxx.rs`。
+2. 對區塊內**頂層**的 `enum` / `fn` / `const` 加 `pub(super) ` 前綴。
+3. ⚠️ **`impl` 區塊不能加可見性限定符** —— `pub(super) impl X {}` 會編譯失敗
+   （`error[E0449]: visibility qualifiers are not permitted here`）。
+   可見性要加在 **impl 內的方法**上（`    pub(super) fn from_path(…)`）。
+4. 子模組開頭視需要加 `use super::*;`（子模組可存取父模組的私有項目，
+   glob import 也會帶入父層的私有 `use` 別名）。若該模組完全自足則不要加，
+   否則會多一條 `unused_imports`。
+5. ⚠️ **父模組要用 `use xxx::{…};` 把搬走的項目重新引進自己的 scope**，
+   否則 `proxy.rs` 內所有引用都會「找不到」。
+6. ⚠️ **孫模組的項目不會被 `use super::*` 帶進子模組。** `proxy/tests.rs` 是
+   `proxy` 的子模組，`use super::*` 只涵蓋 `proxy` 自身的綁定；若常數下移到
+   `proxy::matrix`，測試必須明確 `use super::matrix::{…}`。
+
+#### 後續模組建議切法（依依賴關係由外而內）
+
+| 模組 | 內容 | 粗估 |
+|---|---|---|
+| `proxy/strip.rs` | `parse_unknown_fields`／`parse_body_json`／`strip_json_field`／`strip_unsupported_tools`／`strip_encrypted_content`／`sanitize_passthrough_chat_body`／`upstream_err_text` | ~210 |
+| `proxy/util.rs` | `open_conn`／`normalize_model`／`infer_app`／`bearer`／`join_upstream`／`is_hop_header`／`should_inject_usage`／`strip_key_param`／`model_from_path`／`check_port` | ~250 |
+| `proxy/log.rs` | `extract_usage`／`SseAcc`／`insert_log`／`LogRow`／`recent_logs`／`err_json`／`reject`／`log_reject` | ~200 |
+| `proxy/stream.rs` | `responses_line_events`／`relay_sse`／`StreamLog`／`sse_response`／`ResponsesRelay`／`AnthropicRelay` | ~190 |
+| `proxy/forward.rs` | `build_upstream_target`／`provider_name`／`resolve_model_provider`／`ReroutedProvider`／`TransSpec`／`ForwardBody`／`BodyPrep`／`translate_forward_body`／`strip_for_upstream`／`Upstream`／`RetryCtx`／`send_with_strip_retry`／`FinishCtx`／`finish_response` | ~560 |
+| `proxy/pipeline.rs` | `Prelude`／`prelude`／`resolve_model`／`PrepareInput`／`Prepared`／`prepare_request`／`ReqMeta`／`request_meta`／`upstream_for` | ~390 |
+
+`proxy.rs` 最後留下：三個 const、`ProxyCtx`／`RateLimiter`／`ProxyState`／
+`RunningProxy`、`proxy_handler`（86 行）、`serve`，加上 `mod` 宣告與 `use`
+清單 —— 預期落在 **450–600 行**，剛好達到目標。
+
 
 **為何 handler 停在 86 行、不再往下壓**
 
@@ -921,11 +954,11 @@ prelude  →  request_meta  →  resolve_model  →  prepare_request
 管線，原本「單一 869 行函式」的可讀性問題已經解決。若日後真的要滿足這個
 硬指標，共用的 `ReqCtx` 是唯一正確路徑。
 
-**驗收**：179 個測試**一行不改**全部通過（九個步驟皆如此 ✅）；
+**驗收**：179 個測試**一行不改**全部通過（十一個步驟皆如此 ✅）；
 `cargo clippy --all-targets` 僅餘 5 條既有警告（`price_extract.rs` 1 條、
 `tools.rs` 4 條，皆為 Phase 1 前就存在）✅；
 `proxy_handler` < 80 行（❌ 86 行）；
-`proxy.rs` < 600 行（❌ 4,195 行，拆檔尚未開始）。
+`proxy.rs` < 600 行（❌ 2,127 行，拆檔完成 1/6 個模組）。
 
 ### Phase 3：拆 `tools.rs` + 修 Codex 會話（B3）
 
