@@ -186,6 +186,11 @@ pub fn provider_delete(app: AppHandle, db: State<DbState>, id: i64) -> Result<()
     // 本地 Key 故意保留：請求會走明確 500「綁定的上游渠道不存在」，比靜默失效好查。
     conn.execute("DELETE FROM provider_models WHERE provider_id=?1", [id])
         .map_err(|e| e.to_string())?;
+    // Phase 1：一併清掉該渠道學到的「上游拒收欄位」記憶，避免孤兒列。
+    // （providers.id 是 AUTOINCREMENT，id 不會被重用，故不會誤傷新渠道；
+    //   清掉純粹是不留死資料。）
+    conn.execute("DELETE FROM provider_stripped_fields WHERE provider_id=?1", [id])
+        .map_err(|e| e.to_string())?;
     drop(conn);
     // 順手清孤兒目錄（config 若仍指向它，Codex 回退內聯 models；下次接管即再生）。
     if let Ok(data) = app.path().app_data_dir() {
