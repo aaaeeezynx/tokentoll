@@ -1356,6 +1356,181 @@ fn strip_for_upstream(
     body
 }
 
+/// 上游連線資訊，並負責實際發送。
+///（把 client／method／url／headers 綁成一個物件，免得 send 變成一長串參數。）
+struct Upstream<'a> {
+    client: &'a reqwest::Client,
+    method: reqwest::Method,
+    url: String,
+    headers: Vec<(String, String)>,
+}
+
+impl Upstream<'_> {
+    async fn send(&self, body: Vec<u8>) -> Result<reqwest::Response, reqwest::Error> {
+        let mut b = self.client.request(self.method.clone(), &self.url);
+        for (k, v) in self.headers.iter() {
+            b = b.header(k, v);
+        }
+        // 強制 identity：上游若壓縮，我們得先解壓才能解析 SSE。
+        b = b.header("accept-encoding", "identity");
+        b.body(body).send().await
+    }
+}
+
+/// 400 重試階段所需的請求脈絡（留痕與拒絕都要用）。
+struct RetryCtx<'a> {
+    ctx: &'a ProxyCtx,
+    started: &'a Instant,
+    app: &'a str,
+    model_raw: &'a str,
+    content_type: &'a str,
+    in_fmt: InFmt,
+    target_fmt: TargetFmt,
+    kind: TransKind,
+}
+
+impl RetryCtx<'_> {
+    /// 建立一筆本請求的追蹤記錄（尚未寫入）。
+    /// `retry_count` 由「有沒有真的剝掉東西」推導 —— 有剝才叫重試。
+    fn trace(&self, status: u16, stripped: Vec<String>, note: &str) -> TraceRecord {
+        TraceRecord {
+            app: self.app.to_string(),
+            model_raw: self.model_raw.to_string(),
+            in_fmt: self.in_fmt.as_str().to_string(),
+            target_fmt: self.target_fmt.as_str().to_string(),
+            trans_kind: self.kind.as_str().to_string(),
+            upstream_status: status,
+            latency_ms: self.started.elapsed().as_millis() as i64,
+            retry_count: if stripped.is_empty() { 0 } else { 1 },
+            stripped_fields: stripped,
+            content_type: self.content_type.to_string(),
+            note: note.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn connect_failed(&self, e: &reqwest::Error) -> Response {
+        reject(
+            self.ctx,
+            self.started,
+            self.app,
+            self.model_raw,
+            StatusCode::BAD_GATEWAY,
+            format!("上游連接失敗：{e}"),
+        )
+    }
+}
+
+/// 送出請求；若上游回 400 且能從錯誤訊息解析出拒收欄位名，記住該欄位、
+/// 剝離後重試一次。回傳最終要用的上游響應，或已備好的拒絕回應
+/// （`Box<Response>`：`Response` 很大，直接當 Err 會讓 Result 過胖，
+/// 見 clippy::result_large_err）。
+///
+/// 學到的欄位持久化於 SQLite 的 `provider_stripped_fields`：原實作只存在
+/// 進程記憶體，網關每次停止／啟動即歸零，導致每個渠道的第一個請求都要
+/// 重踩一次 400 再重試（見 §3 B2）。正常情況下 `strip_for_upstream` 已先
+/// 套用這份記憶，所以不會走到這裡。
+async fn send_with_strip_retry(
+    rc: &RetryCtx<'_>,
+    provider_id: i64,
+    up: &Upstream<'_>,
+    body: Vec<u8>,
+) -> Result<reqwest::Response, Box<Response>> {
+    let upstream = match up.send(body.clone()).await {
+        Ok(r) => r,
+        Err(e) => return Err(Box::new(rc.connect_failed(&e))),
+    };
+    if upstream.status() != StatusCode::BAD_REQUEST {
+        return Ok(upstream);
+    }
+    // 400 且報拒收欄位 → 記住並剝離重發一次（New-API 系 unknown field；
+    // OpenRouter 系 Unsupported parameter(s)；多個一次全剝離）；
+    // 仍失敗或無法解析則透出上游原文，不再吞錯。
+    let eb: Vec<u8> = upstream.bytes().await.unwrap_or_default().to_vec();
+    // 客戶端訊息用截斷版；追蹤表存完整原文（§5.3 第 0 層）
+    let upstream_text = upstream_err_text(&eb);
+    let upstream_full = String::from_utf8_lossy(&eb).to_string();
+    let mut retried: Option<reqwest::Response> = None;
+    let mut applied: Vec<String> = vec![];
+    let fields = parse_unknown_fields(&String::from_utf8_lossy(&eb));
+    if !fields.is_empty() {
+        let mut nb = body.clone();
+        // 用短命連線寫記憶，而不是借用呼叫端的連線：
+        // `rusqlite::Connection` 是 Send 但**不是 Sync**，所以 `&Connection`
+        // 跨 await 會讓整個 future 變成 !Send，axum 的 Handler 就不成立。
+        // 開新連線也與 `trace::log_to` 的既有做法一致。
+        let mem = open_conn(&rc.ctx.db_path).ok();
+        for field in &fields {
+            if let Some(n) = strip_json_field(&nb, field) {
+                match mem.as_ref().map(|c| trace::remember_stripped(c, provider_id, field)) {
+                    Some(Err(e)) => eprintln!("gateway: 記錄拒收欄位失敗: {e}"),
+                    None => eprintln!("gateway: 記錄拒收欄位失敗: 資料庫不可用"),
+                    Some(Ok(())) => {}
+                }
+                nb = n;
+                applied.push(field.clone());
+            }
+        }
+        drop(mem);
+        if !applied.is_empty() {
+            // 剝離事件留痕：這是回答「這個 400 到底剝了什麼」的唯一來源。
+            // 記的是**原始** body，不是剝完的 nb（否則看不出剝了什麼）。
+            let rec = rc
+                .trace(400, applied.clone(), "上游 400 拒收欄位，已剝離並重試")
+                .with_body(&body)
+                .with_upstream_error(&upstream_full);
+            trace::log_to(&rc.ctx.db_path, &rec);
+            match up.send(nb).await {
+                Ok(r) => retried = Some(r),
+                Err(e) => return Err(Box::new(rc.connect_failed(&e))),
+            }
+        }
+    }
+    match retried {
+        Some(r) if !r.status().is_client_error() => Ok(r),
+        Some(r) => {
+            let st = r.status();
+            let eb2 = r.bytes().await.unwrap_or_default().to_vec();
+            let eb2_full = String::from_utf8_lossy(&eb2).to_string();
+            // 剝離後仍失敗 → 這是真正未解決的 400，完整留痕
+            let rec = rc
+                .trace(st.as_u16(), applied.clone(), "剝離後重試仍失敗（未解決）")
+                .with_body(&body)
+                .with_upstream_error(&eb2_full);
+            trace::log_to(&rc.ctx.db_path, &rec);
+            Err(Box::new(reject(
+                rc.ctx,
+                rc.started,
+                rc.app,
+                rc.model_raw,
+                st,
+                upstream_err_text(&eb2),
+            )))
+        }
+        None => {
+            // 無法從錯誤訊息解析出欄位名 → 相容策略失效，必須留痕才能改進
+            let note = if applied.is_empty() {
+                "上游 400 且無法解析出拒收欄位名（相容策略失效）"
+            } else {
+                "上游 400（剝離未命中任何欄位）"
+            };
+            let rec = rc
+                .trace(400, applied.clone(), note)
+                .with_body(&body)
+                .with_upstream_error(&upstream_full);
+            trace::log_to(&rc.ctx.db_path, &rec);
+            Err(Box::new(reject(
+                rc.ctx,
+                rc.started,
+                rc.app,
+                rc.model_raw,
+                StatusCode::BAD_REQUEST,
+                upstream_text,
+            )))
+        }
+    }
+}
+
 async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Body>) -> Response {
     let started = Instant::now();
     let (parts, body) = req.into_parts();
@@ -1615,156 +1790,29 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
 
     // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
     let (url, fwd_headers) = build_upstream_target(&parts, &authed, translated, &app);
-    let send_once = |body: Vec<u8>| {
-        let mut b = ctx.client.request(parts.method.clone(), &url);
-        for (k, v) in fwd_headers.iter() {
-            b = b.header(k, v);
-        }
-        b = b.header("accept-encoding", "identity");
-        b.body(body).send()
+    let up = Upstream {
+        client: &ctx.client,
+        method: parts.method.clone(),
+        url,
+        headers: fwd_headers,
     };
     // 預先剝離該渠道已知拒收欄位與已知不支援結構（詳見 strip_for_upstream）。
     body_bytes = strip_for_upstream(&conn, authed.provider_id, body_bytes, in_fmt, translated);
 
-    let mut upstream = match send_once(body_bytes.clone()).await {
-        Ok(r) => r,
-        Err(e) => {
-            return reject(
-                &ctx,
-                &started,
-                &app,
-                &model_raw,
-                StatusCode::BAD_GATEWAY,
-                format!("上游連接失敗：{e}"),
-            )
-        }
+    let rc = RetryCtx {
+        ctx: &ctx,
+        started: &started,
+        app: &app,
+        model_raw: &model_raw,
+        content_type: &content_type,
+        in_fmt,
+        target_fmt,
+        kind,
     };
-    // 400 且報拒收欄位 → 記住並剝離重發一次（New-API 系 unknown field；
-    // OpenRouter 系 Unsupported parameter(s)；多個一次全剝離）；
-    // 仍失敗或無法解析則透出上游原文，不再吞錯。
-    if upstream.status() == StatusCode::BAD_REQUEST {
-        let eb: Vec<u8> = upstream.bytes().await.unwrap_or_default().to_vec();
-        // 客戶端訊息用截斷版；追蹤表存完整原文（§5.3 第 0 層）
-        let upstream_text = upstream_err_text(&eb);
-        let upstream_full = String::from_utf8_lossy(&eb).to_string();
-        let mut retried: Option<reqwest::Response> = None;
-        let mut applied: Vec<String> = vec![];
-        let fields = parse_unknown_fields(&String::from_utf8_lossy(&eb));
-        if !fields.is_empty() {
-            let mut nb = body_bytes.clone();
-            for field in &fields {
-                if let Some(n) = strip_json_field(&nb, field) {
-                    // 持久化到 SQLite：網關重啟後不必再對同一渠道試錯（§3 B2）
-                    if let Err(e) = trace::remember_stripped(&conn, authed.provider_id, field) {
-                        eprintln!("gateway: 記錄拒收欄位失敗: {e}");
-                    }
-                    nb = n;
-                    applied.push(field.clone());
-                }
-            }
-            if !applied.is_empty() {
-                // 剝離事件留痕：這是回答「這個 400 到底剝了什麼」的唯一來源
-                trace::log_to(
-                    &ctx.db_path,
-                    &TraceRecord {
-                        app: app.clone(),
-                        model_raw: model_raw.clone(),
-                        in_fmt: in_fmt.as_str().to_string(),
-                        target_fmt: target_fmt.as_str().to_string(),
-                        trans_kind: kind.as_str().to_string(),
-                        upstream_status: 400,
-                        latency_ms: started.elapsed().as_millis() as i64,
-                        retry_count: 1,
-                        stripped_fields: applied.clone(),
-                        content_type: content_type.clone(),
-                        note: "上游 400 拒收欄位，已剝離並重試".to_string(),
-                        ..Default::default()
-                    }
-                    .with_body(&body_bytes)
-                    .with_upstream_error(&upstream_full),
-                );
-                match send_once(nb).await {
-                    Ok(r) => {
-                        retried = Some(r);
-                    }
-                    Err(e) => {
-                        return reject(
-                            &ctx,
-                            &started,
-                            &app,
-                            &model_raw,
-                            StatusCode::BAD_GATEWAY,
-                            format!("上游連接失敗：{e}"),
-                        );
-                    }
-                }
-            }
-        }
-        match retried {
-            Some(r) if !r.status().is_client_error() => {
-                upstream = r;
-            }
-            Some(r) => {
-                let st = r.status();
-                let eb2 = r.bytes().await.unwrap_or_default().to_vec();
-                let eb2_full = String::from_utf8_lossy(&eb2).to_string();
-                // 剝離後仍失敗 → 這是真正未解決的 400，完整留痕
-                trace::log_to(
-                    &ctx.db_path,
-                    &TraceRecord {
-                        app: app.clone(),
-                        model_raw: model_raw.clone(),
-                        in_fmt: in_fmt.as_str().to_string(),
-                        target_fmt: target_fmt.as_str().to_string(),
-                        trans_kind: kind.as_str().to_string(),
-                        upstream_status: st.as_u16(),
-                        latency_ms: started.elapsed().as_millis() as i64,
-                        retry_count: 1,
-                        stripped_fields: applied.clone(),
-                        content_type: content_type.clone(),
-                        note: "剝離後重試仍失敗（未解決）".to_string(),
-                        ..Default::default()
-                    }
-                    .with_body(&body_bytes)
-                    .with_upstream_error(&eb2_full),
-                );
-                return reject(&ctx, &started, &app, &model_raw, st, upstream_err_text(&eb2));
-            }
-            None => {
-                // 無法從錯誤訊息解析出欄位名 → 相容策略失效，必須留痕才能改進
-                trace::log_to(
-                    &ctx.db_path,
-                    &TraceRecord {
-                        app: app.clone(),
-                        model_raw: model_raw.clone(),
-                        in_fmt: in_fmt.as_str().to_string(),
-                        target_fmt: target_fmt.as_str().to_string(),
-                        trans_kind: kind.as_str().to_string(),
-                        upstream_status: 400,
-                        latency_ms: started.elapsed().as_millis() as i64,
-                        stripped_fields: applied.clone(),
-                        content_type: content_type.clone(),
-                        note: if applied.is_empty() {
-                            "上游 400 且無法解析出拒收欄位名（相容策略失效）".to_string()
-                        } else {
-                            "上游 400（剝離未命中任何欄位）".to_string()
-                        },
-                        ..Default::default()
-                    }
-                    .with_body(&body_bytes)
-                    .with_upstream_error(&upstream_full),
-                );
-                return reject(
-                    &ctx,
-                    &started,
-                    &app,
-                    &model_raw,
-                    StatusCode::BAD_REQUEST,
-                    upstream_text,
-                );
-            }
-        }
-    }
+    let upstream = match send_with_strip_retry(&rc, authed.provider_id, &up, body_bytes).await {
+        Ok(r) => r,
+        Err(resp) => return *resp,
+    };
     let status = upstream.status();
     let latency_ms = started.elapsed().as_millis() as i64;
     let is_sse = upstream
