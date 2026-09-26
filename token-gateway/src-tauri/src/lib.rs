@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod error;
 mod db;
 #[allow(dead_code)]
 mod fsutil;

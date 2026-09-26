@@ -231,7 +231,7 @@ type AuthRow = (
     i64,
 );
 
-pub(crate) fn auth_key(conn: &Connection, secret: &str) -> Result<AuthedKey, (u16, String)> {
+pub(crate) fn auth_key(conn: &Connection, secret: &str) -> Result<AuthedKey, (u16, crate::error::CmdError)> {
     let hash = sha256_hex(secret);
     let row: rusqlite::Result<AuthRow> = conn.query_row(
         "SELECT k.id, k.quota_tokens, k.used_tokens, k.rate_limit_qpm,
@@ -259,20 +259,20 @@ pub(crate) fn auth_key(conn: &Connection, secret: &str) -> Result<AuthedKey, (u1
         },
     );
     let (id, quota, used, qpm, models_json, apps_json, pid, base_url, api_key, scheme, format, expires, enabled) =
-        row.map_err(|_| (401u16, "無效的本地 Key".to_string()))?;
+        row.map_err(|_| (401u16, crate::error::CmdError::auth("無效的本地 Key")))?;
     if enabled == 0 {
-        return Err((401, "該 Key 已被停用".to_string()));
+        return Err((401, crate::error::CmdError::conflict("該 Key 已被停用")));
     }
     if let Some(exp) = expires {
         if now_ms() > exp {
-            return Err((401, "該 Key 已過期".to_string()));
+            return Err((401, crate::error::CmdError::conflict("該 Key 已過期")));
         }
     }
     if quota >= 0 && used >= quota {
-        return Err((429, "該 Key 配額已用完".to_string()));
+        return Err((429, crate::error::CmdError::conflict("該 Key 配額已用完")));
     }
-    let pid = pid.ok_or((500, "該 Key 未綁定上游渠道".to_string()))?;
-    let base_url: String = base_url.ok_or((500, "綁定的上游渠道不存在".to_string()))?;
+    let pid = pid.ok_or((500, crate::error::CmdError::internal("該 Key 未綁定上游渠道")))?;
+    let base_url: String = base_url.ok_or((500, crate::error::CmdError::internal("綁定的上游渠道不存在")))?;
     Ok(AuthedKey {
         id,
         rate_limit_qpm: qpm,
@@ -291,9 +291,9 @@ pub(crate) fn auth_key(conn: &Connection, secret: &str) -> Result<AuthedKey, (u1
 /// 視為該渠道的直連請求，不經本地 Key 轉發、僅允許該渠道；
 /// 用量照常記入 request_logs（tokens/cost/provider 歸因，僅不計本地 Key 配額）。
 /// 本地 Key 優先：先走 [`auth_key`]，401 才回退到此。
-pub(crate) fn auth_direct(conn: &Connection, secret: &str) -> Result<AuthedKey, (u16, String)> {
+pub(crate) fn auth_direct(conn: &Connection, secret: &str) -> Result<AuthedKey, (u16, crate::error::CmdError)> {
     if secret.trim().is_empty() {
-        return Err((401, "無效的 Key".to_string()));
+        return Err((401, crate::error::CmdError::auth("無效的 Key")));
     }
     let row: rusqlite::Result<(i64, String, String, String, String)> = conn.query_row(
         "SELECT id, base_url, api_key, auth_scheme, api_format FROM providers
@@ -302,7 +302,7 @@ pub(crate) fn auth_direct(conn: &Connection, secret: &str) -> Result<AuthedKey, 
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
     );
     let (pid, base_url, api_key, scheme, format) =
-        row.map_err(|_| (401u16, "無效的 Key（既非本地 Key，也非已登記渠道的上游 Key）".to_string()))?;
+        row.map_err(|_| (401u16, crate::error::CmdError::auth("無效的 Key（既非本地 Key，也非已登記渠道的上游 Key）")))?;
     Ok(AuthedKey {
         id: -1,
         rate_limit_qpm: 0,

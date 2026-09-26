@@ -53,14 +53,16 @@ pub(super) async fn prelude(
         }
     };
     // 本地 Key 優先；401 再回退直連上游（Bearer 即渠道自身 api_key，不經本地 Key 轉發）
-    let key_err = |(code, msg): (u16, String)| {
+    // 錯誤已改為具型別的 `CmdError`（Phase 5）：`Display` 逐字輸出原訊息，
+    // 因此 HTTP 回應內容不變，但這裡多了 `kind()` 可供後續分支使用。
+    let key_err = |(code, err): (u16, crate::error::CmdError)| {
         reject(
             ctx,
             started,
             app,
             "",
             StatusCode::from_u16(code).unwrap_or(StatusCode::UNAUTHORIZED),
-            msg,
+            err.to_string(),
         )
     };
     let authed = match keys::auth_key(&conn, &secret) {
