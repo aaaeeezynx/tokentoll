@@ -31,7 +31,7 @@
 | NSIS 安裝檔（你目前用的形式） | `token-gateway\src-tauri\target\release\bundle\nsis\token-gateway_0.1.0_x64-setup.exe` |
 | MSI 安裝檔 | `token-gateway\src-tauri\target\release\bundle\msi\token-gateway_0.1.0_x64_en-US.msi` |
 
-三者都是同一次建置（`2026-09-27 03:09`）的產物，且已確認**都比所有原始碼新**。
+三者都是同一次建置（`2026-09-27 03:57`）的產物，且已確認**都比所有原始碼新**。
 
 ---
 
