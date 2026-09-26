@@ -114,7 +114,7 @@
 
 | 檢查 | 指令 | 結果 |
 |---|---|---|
-| 後端測試 | `cargo test --offline` | ✅ **181 passed / 0 failed / 9 ignored**，exit 0 |
+| 後端測試 | `cargo test --offline` | ✅ **189 passed / 0 failed / 9 ignored**，exit 0 |
 | 前端型別 | `npx tsc --noEmit` | ✅ **0 錯誤**，exit 0 |
 | 前端建置 | `npx vite build` | ✅ 成功（主 chunk 542 kB，gzip 150 kB） |
 | Clippy（含測試） | `cargo clippy --offline --all-targets` | ✅ exit 0；仍為同 5 條既有風格提示（`tools.rs` ×4、`price_extract.rs` ×1） |
@@ -423,7 +423,7 @@ CREATE TABLE provider_stripped_fields (
 
 ---
 
-### B3 🔴 Codex 舊會話 provider 別名段會靜默消失
+### B3 🔴 Codex 舊會話 provider 別名段會靜默消失 —— ✅ 已修（`695696d`）
 
 **這是「無法繼續使用舊的對話 session」最可能的技術根因。**
 
@@ -489,7 +489,7 @@ Codex 現在有 **7 個 SQLite**，檔名**全部帶遞增版本號**，而且�
 
 ---
 
-### B4 🟠 無差別強制 `wire_api = "responses"`
+### B4 🟠 無差別強制 `wire_api = "responses"` —— ✅ 已修（`ce06aa5`、`c222100`）
 
 **證據**（`tools.rs:1110`，位於 `gateway_section()` 內，供所有被接管的 Codex provider 使用）：
 
@@ -1037,7 +1037,92 @@ prelude  →  request_meta  →  resolve_model  →  prepare_request
 `proxy_handler` < 80 行 → **86 行 ❌**（差 6 行；理由見上，判斷為不值得的代價）。
 `proxy/tests.rs` 1,907 行 > 600 → **❌ 未達標**（可選後續工作，見上）。
 
-### Phase 3：拆 `tools.rs` + 修 Codex 會話（B3）
+### Phase 2.5 ✅ 已完成：三項實質修復（B3、B4、§5.3 第 2 層）
+
+這一輪把原本列為「之後再處理」的 bug 全部做完。三項都不是重構，是**真的會
+讓使用者踩到**的問題，而且都先用證據定位再動手。
+
+#### B3（`695696d`）：Codex 舊會話 provider 別名靜默消失
+
+使用者症狀「無法繼續使用舊的 conversation session」。先蒐集證據再動手，結果
+找到**四層問題疊在一起、互相掩蓋**：
+
+1. **檔名寫死** `state_5.sqlite`。實測 `%USERPROFILE%\.codex\` 的**所有**檔案
+   都帶版本後綴（`state_5`、`logs_2`、`goals_1`、`queue_1`、`memories_1`、
+   `thread_history_1`）—— 那是 Codex 的 schema 版號。升版換成 `state_6` 的那
+   一天，這個函式會靜默回傳空 vec。**這是定時炸彈，不是理論問題。**
+2. **沒有 `busy_timeout`**。實測 `state_5.sqlite-wal` 1.9 MB、`-shm` 在觀測當
+   下（03:11:52）仍在變動 —— Codex 隨時在寫這個檔。一遇鎖就失敗，而且無聲。
+3. **管理清單只來自 DB，而且會縮小**。`codex_apply` 只刪除「在管理清單裡」的
+   段；清單來自 `SELECT DISTINCT model_provider FROM threads`。使用者
+   **封存對話**之後該 provider 可能不再出現 → 別名段被剔除 → 舊會話失去
+   provider。症狀與「無法封存」同時出現，不是巧合。
+4. **`codex_doctor` 把失敗報成通過**（放大器）。讀不到 → 空 vec → 體檢顯示
+   **「✅ 歷史會話無第三方 provider 殘留」**。唯一的診斷工具在真正的失敗上給
+   綠色勾勾，這是最難查的一層。
+
+外加 `rows.flatten()` 是第 5 條靜默路徑（單列錯誤被吞掉）。
+
+修法：`codex_state_db_candidates()` 掃描所有 `state*.sqlite` 依版號高低逐一
+嘗試；加 `busy_timeout(3000ms)`；新增 `LegacyProviders` 列舉明確區分
+`Ok`／`Failed`（並**移除**舊的寬鬆包裝，不留再次吞錯的入口）；
+`codex_alias_ids()` 讓管理清單 = DB ∪ **已指向本網關**的既有段（只增不減，
+且不劫持使用者想直連的 provider）；`codex_doctor` 失敗一律 ❌；
+接管預覽讀失敗時推入 `warnings`。
+
+#### B4（`ce06aa5`）：`wire_api` 依上游能力選擇
+
+`gateway_section()` 對每個 provider 段硬寫 `wire_api = "responses"`。指向本
+網關沒問題，但 `Providers.tsx` 有**直連模式**：
+
+```ts
+base_url: via ? gatewayUrl(port, tool.app) : provider.base_url,
+```
+
+`via = false` 時 `base_url` 是第三方，而多數第三方只實作 Chat Completions ——
+硬寫 `responses` 會讓 Codex 打到不存在的端點而 **404**。
+
+**這個坑原本已經被發現過**：`restore_backup` 的提示寫著「直連第三方 URL 但走
+responses 協議（直連 Chat 上游會 404）」，但只**警告、不修** —— 明知會壞還照
+寫。這才是 B4 的真正內容。修法：`codex_wire_api(base_url)` 成為唯一判定來源；
+預覽文字同步顯示實際會寫入的值（預覽騙人比不預覽更糟）。
+
+#### §5.3 第 2 層（`c222100`）：宣告優先於猜測
+
+**宣告其實已經存在**：`providers.api_format` 是使用者對渠道的明確宣告，且
+`SwitchRequest` 早就帶著它（`provider_format`），只是沒被用在協議選擇上。
+
+`codex_wire_api_declared()`：`openai-chat` → `chat`、`mixed`／
+`openai-responses` → `responses`、`anthropic`／`gemini`／未宣告 → `None`
+（Codex 說不了這兩種協議）。`gateway_section()` 的優先序改為**宣告 → URL
+推定**，預覽同步。
+
+**「事前剝離」那一半其實早就有了**：`provider_stripped_fields`（Phase 1）把各
+渠道拒收過的欄位持久化，`strip_for_upstream` 每次請求先套用，不必等到 400。
+所以「事前選協議」與「事前剝離」現在都在了。
+
+剩下的是把其他維度（tool 型別、`stream_options`…）也納入同一張能力表，並在
+診斷中心攤開「這個渠道學到了什麼」。
+
+#### 這一輪的測試增量
+
+| 測試 | 釘住什麼 |
+|---|---|
+| `codex_state_db_follows_versioned_filename` | 同時有 `state_5`／`state_7` 時必須選 `state_7` |
+| `codex_legacy_read_failure_is_not_reported_as_empty` | 沒有 DB、缺 `threads` 表 → 必須 `Failed`，不可 `Ok(空)` |
+| `codex_alias_ids_never_shrinks_existing_gateway_aliases` | DB 回空時既有網關別名段仍保留；第三方 provider 不被劫持 |
+| `codex_alias_ids_unions_db_and_existing` | 聯集且不重複 |
+| `codex_wire_api_matches_upstream_capability` | 網關／官方 OpenAI／NVIDIA／DeepSeek／OpenRouter |
+| `codex_apply_picks_wire_api_per_upstream` | 端到端：直連第三方全 `chat`、走網關全 `responses` |
+| `codex_wire_api_prefers_declared_format` | 同一 URL，宣告 `openai-responses` 可推翻 URL 推定 |
+| `codex_wire_api_falls_back_to_url_when_undeclared` | 宣告為 `anthropic` 時回退，不可變成無值 |
+
+181 → **189 passed**／0 failed／9 ignored；clippy exit 0 維持同 5 條既有警告。
+
+**未定案**：仍缺使用者的 Codex 原始錯誤文字，故無法斷定他實際撞到 B3 的哪一
+條。三條都修了、各有一條迴歸測試；若再現，`codex_doctor` 現在會給出可用訊息。
+
+### Phase 3：拆 `tools.rs`（B3 已於 Phase 2.5 修畢）
 
 - 拆為 `tools/{mod,claude,codex,opencode,hermes,dsh,cursor,antigravity}.rs`
 - B3 五項修法全部執行

@@ -168,6 +168,57 @@ try {
 
 ---
 
+## 6.5 測試 D：Codex 舊會話別名（B3，已修）
+
+這一項針對「**無法繼續使用舊的 conversation session**」。修好的四條成因見
+計畫書 Phase 2.5，但**你要測的只有一件事**：體檢會不會誠實回報。
+
+1. **完全關閉 Codex**（重要 —— 成因之一就是 Codex 正在寫 DB 時的競爭）。
+2. 在 App 的 Codex 接管頁跑**接管前體檢**。
+
+**通過標準**：
+
+- [ ] 若一切正常，會看到
+      **「ℹ️ 歷史會話用過 N 個別名 provider（讀自 state_5.sqlite）：…」**
+      ——注意它會**標明讀自哪個檔案**
+- [ ] 若讀不到，會看到
+      **「❌ 讀不到 Codex 歷史會話的 provider 名：…」** 並附原因與處置建議
+- [ ] **最關鍵**：絕對不會在讀不到的情況下看到
+      「✅ 歷史會話無第三方 provider 殘留」
+
+第三條是這次修的核心。**修正前，讀取失敗會顯示那個 ✅** —— 唯一的診斷工具
+在真正的失敗上給你綠色勾勾。
+
+若要自己確認資料面是否一致（唯讀）：
+
+```powershell
+py -c "import sqlite3,os;h=os.path.join(os.environ['USERPROFILE'],'.codex');c=sqlite3.connect(f'file:{h}/state_5.sqlite?mode=ro',uri=True);print(sorted({r[0] for r in c.execute('SELECT DISTINCT model_provider FROM threads')}))"
+```
+
+把印出的 provider 名與 `~/.codex/config.toml` 裡的 `[model_providers.*]` 段名
+對照：**thread 用過的每一個都應該在 config.toml 裡有對應段**。少任何一個，
+那個舊會話就會失效。
+
+## 6.6 測試 E：`wire_api` 是否跟著上游（B4，已修）
+
+這一項只在**直連模式**（接管頁取消勾選「經由網關」，`base_url` 直接指向第三
+方）下有意義。
+
+1. 選一個**第三方**渠道（例如 `https://integrate.api.nvidia.com/v1`），走直連。
+2. 看**接管預覽**的文字。
+
+**通過標準**：
+
+- [ ] 預覽顯示 `wire_api = chat`（**不是** `responses`）
+- [ ] 接管後打開 `~/.codex/config.toml`，每個 `[model_providers.*]` 段都是
+      `wire_api = "chat"`
+- [ ] 換成經由網關接管時，同一欄位是 `wire_api = "responses"`
+- [ ] 若該渠道的 `api_format` 被宣告為 `openai-responses`，即使 base_url 是
+      第三方，也應該寫 `responses`（**宣告優先於 URL 猜測**）
+
+`wire_api` 決定 Codex 用哪種協議打 `base_url`。寫錯的話 Codex 會打到不存在的
+端點而 **404** —— 修正前直連第三方一律被寫成 `responses`，明知會壞還照寫。
+
 ## 7. 回報方式
 
 跑這個（**唯讀開啟，不會改動資料庫**）：
@@ -194,11 +245,11 @@ py scripts\dump_traces.py --problems -n 100
 
 **未修**（依你的指示或尚未授權）：
 
-- **B3**：Codex 舊會話 provider 別名段靜默消失。`tools.rs` 裡有四條獨立的
-  靜默失敗路徑都回傳空陣列，與「真的沒有歷史」無法區分，且沒有
-  `busy_timeout`。**已寫進計畫書 §3 / Phase 3，未動**。
-- **B4**：無差別強制 `wire_api = "responses"`（§5.3 第 2 層的 A/B 實驗）
-  —— **需要你的實測結果才能決定方向**。
+- ~~**B3**：Codex 舊會話 provider 別名段靜默消失。~~ **已修** —— 見下方測試 D。
+  共 4 條成因（檔名寫死 `state_5.sqlite`、缺 `busy_timeout`、管理清單會縮小、
+  `codex_doctor` 把失敗報成 ✅）加上第 5 條 `rows.flatten()` 靜默吞錯。
+- ~~**B4**：無差別強制 `wire_api = "responses"`。~~ **已修** —— 見下方測試 E。
+- ~~**§5.3 第 2 層**：能力宣告。~~ **已實作一半**（協議選擇改為宣告優先）。
 - **§5.2 的 body 解析 400**：仍未定案。三份證據用了兩種不同的
   `bytes_len` 算法，無法區分「真的解析失敗」與「舊的除錯儀器弄壞了 body」。
   觀測設施已就位，等真實重現一次。
@@ -215,7 +266,7 @@ py scripts\dump_traces.py --problems -n 100
 
 **已驗證但你可能想自己再看一次**：
 
-- `cargo test --offline` → **181 passed / 0 failed / 9 ignored**
+- `cargo test --offline` → **189 passed / 0 failed / 9 ignored**
 - `cargo clippy --offline --all-targets` → exit 0，僅 5 條**既有**風格提示
   （`tools.rs` ×4、`price_extract.rs` ×1，皆非本次新增）
 - `npx tsc --noEmit` → 0 錯誤
