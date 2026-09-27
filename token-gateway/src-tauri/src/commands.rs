@@ -702,7 +702,7 @@ pub fn switch_apply(
     normalize_switch_request(&db, &mut req, port)?;
     // 直連上游模式：Key 欄留空 → 以所選來源的上游 Key 直連（不經本地 Key）。
     // 此處從庫中取出上游 Key 注入請求；config 側明文寫入（計劃頁已警告）。
-    // 對所有工具一致：claude/hermes 寫入自家配置，codex/opencode 寫 provider 段。
+    // 對所有工具一致：claude 寫入自家配置，codex/opencode 寫 provider 段。
     if req.direct_upstream {
         let pid = req.provider_id.ok_or("直連模式需先選擇來源")?;
         let conn = db.conn.lock().map_err(|e| e.to_string())?;

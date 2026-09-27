@@ -17,7 +17,7 @@ pub struct ToolVersion {
     pub update_argv: Vec<String>,
     /// 更新命令的人類可讀展示。
     pub update_label: Option<String>,
-    /// 是否已是最新（hermes 直接由 --version 輸出判定；npm 包由 tool_latest 填）。
+    /// 是否已是最新（由 `tool_latest` 填；`tool_versions` 一律留 None）。
     pub up_to_date: Option<bool>,
 }
 
@@ -240,29 +240,12 @@ pub(crate) fn probe_tool_version(app: &str) -> (bool, Option<String>) {
         }
         return (false, None);
     }
-    if app == "hermes" {
-        // 獨立 exe（PATH 或 HERMES_HOME\bin），直接執行。
-        let bin = which_bin(&["hermes"]).or_else(|| {
-            let q = hermes_home().join("bin").join("hermes.exe");
-            q.is_file().then_some(q)
-        });
-        if let Some(b) = bin {
-            let argv = vec![b.to_string_lossy().to_string(), "--version".to_string()];
-            if let Some(out) = run_capture_lenient(&argv, 20_000) {
-                if let Some(v) = first_line(&out) {
-                    return (true, Some(v));
-                }
-            }
-            return (true, None);
-        }
-        // 僅有 config.yaml 也算"裝過"（detect 同口徑），但無二進制可問版本。
-        return (hermes_home().join("config.yaml").exists(), None);
-    }
+    // hermes（第一階段 F 移除）與未知工具都走這裡：沒有可問版本的二進制。
     (false, None)
 }
 
 
-/// 單工具更新命令（argv 直接可執行；npm 走 `cmd /C npm …`，hermes 走自身 update）。
+/// 單工具更新命令（argv 直接可執行；npm 走 `cmd /C npm …`）。
 pub(crate) fn tool_update_argv(app: &str) -> (Vec<String>, Option<String>) {
     if let Some(pkg) = npm_package(app) {
         if which_bin(&[app]).is_none() {
@@ -280,37 +263,7 @@ pub(crate) fn tool_update_argv(app: &str) -> (Vec<String>, Option<String>) {
             Some(format!("npm i -g {pkg}@latest")),
         );
     }
-    if app == "hermes" {
-        let bin = which_bin(&["hermes"]).or_else(|| {
-            let q = hermes_home().join("bin").join("hermes.exe");
-            q.is_file().then_some(q)
-        });
-        if let Some(b) = bin {
-            return (
-                vec![b.to_string_lossy().to_string(), "update".to_string()],
-                Some("hermes update".to_string()),
-            );
-        }
-    }
     (vec![], None)
-}
-
-
-/// hermes 是否已是最新：`--version` 輸出自帶 "Update available / behind" 提示。
-/// 有提示 = false；無提示 = true；問不到 = None。
-pub(crate) fn hermes_up_to_date() -> Option<bool> {
-    let bin = which_bin(&["hermes"]).or_else(|| {
-        let q = hermes_home().join("bin").join("hermes.exe");
-        q.is_file().then_some(q)
-    })?;
-    let argv = vec![bin.to_string_lossy().to_string(), "--version".to_string()];
-    let out = run_capture_lenient(&argv, 20_000)?;
-    let low = out.to_lowercase();
-    if low.contains("update available") || low.contains("behind") {
-        Some(false)
-    } else {
-        Some(true)
-    }
 }
 
 
@@ -343,7 +296,7 @@ pub(crate) fn cmp_version(a: &str, b: &str) -> std::cmp::Ordering {
 
 
 /// 從人類可讀版本行提純番號（`codex-cli 0.153.4`→`0.153.4`，
-/// `Hermes Agent v0.21.1 (2026.9.7)…`→`0.21.1`，`0.1.2-rc.1` 保留後綴）。
+/// `0.1.2-rc.1` 保留後綴）。
 pub(crate) fn clean_version(s: &str) -> Option<String> {
     let b = s.as_bytes();
     let mut i = 0;
@@ -393,11 +346,11 @@ pub(crate) fn npm_latest(pkg: &str) -> Option<String> {
 
 
 pub fn tool_versions() -> Vec<ToolVersion> {
-    const APPS: [(&str, &str); 5] = [
+    // 第一階段 A／F：只列「有接管/檢測意義」的工具（hermes 於 F 移除）。
+    const APPS: [(&str, &str); 4] = [
         ("claude", "Claude Code"),
         ("codex", "Codex"),
         ("opencode", "OpenCode"),
-        ("hermes", "Hermes Agent"),
         ("dsh", "DeepSeek Harness"),
     ];
     APPS.iter()
@@ -408,11 +361,6 @@ pub fn tool_versions() -> Vec<ToolVersion> {
             } else {
                 (vec![], None)
             };
-            let up_to_date = if *app == "hermes" && installed {
-                hermes_up_to_date()
-            } else {
-                None
-            };
             ToolVersion {
                 app: app.to_string(),
                 display: display.to_string(),
@@ -420,14 +368,14 @@ pub fn tool_versions() -> Vec<ToolVersion> {
                 version,
                 update_argv,
                 update_label,
-                up_to_date,
+                up_to_date: None,
             }
         })
         .collect()
 }
 
 
-/// 各 npm 包最新版（並行查 registry；hermes 用本地輸出判定）。
+/// 各 npm 包最新版（並行查 registry）。
 /// 前端獨立調用，不擋版本顯示。
 pub fn tool_latest() -> Vec<ToolLatest> {
     const NPM_APPS: [&str; 4] = ["claude", "codex", "opencode", "dsh"];
@@ -464,7 +412,7 @@ pub fn tool_latest() -> Vec<ToolLatest> {
             .map(|(app, h)| (app, h.join().unwrap_or(None)))
             .collect()
     });
-    let mut out: Vec<ToolLatest> = NPM_APPS
+    let out: Vec<ToolLatest> = NPM_APPS
         .iter()
         .map(|app| {
             let l = latest.get(app).cloned().flatten();
@@ -481,18 +429,13 @@ pub fn tool_latest() -> Vec<ToolLatest> {
             }
         })
         .collect();
-    out.push(ToolLatest {
-        app: "hermes".to_string(),
-        latest: None,
-        up_to_date: hermes_up_to_date(),
-    });
     out
 }
 
 
-/// 執行一鍵更新（600 秒超時；返回輸出尾部；npm/hermes 各走自家官方通道）。
+/// 執行一鍵更新（600 秒超時；返回輸出尾部；npm 走自家官方通道）。
 pub fn tool_update_run(app: &str) -> Result<String, String> {
-    let known = ["claude", "codex", "opencode", "hermes", "dsh"];
+    let known = ["claude", "codex", "opencode", "dsh"];
     if !known.contains(&app) {
         return Err(format!("未知工具：{app}"));
     }

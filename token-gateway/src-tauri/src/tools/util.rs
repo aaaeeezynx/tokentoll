@@ -40,19 +40,6 @@ pub(crate) fn read_text(p: &Path) -> Option<String> {
 }
 
 
-pub(crate) fn strip_quotes(s: &str) -> String {
-    let t = s.trim();
-    if t.len() >= 2
-        && ((t.starts_with('"') && t.ends_with('"'))
-            || (t.starts_with('\'') && t.ends_with('\'')))
-    {
-        t[1..t.len() - 1].to_string()
-    } else {
-        t.to_string()
-    }
-}
-
-
 pub(crate) fn is_gateway(url: &str, port: u16) -> bool {
     reqwest::Url::parse(url).ok().is_some_and(|u| {
         u.scheme() == "http"

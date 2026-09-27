@@ -449,7 +449,7 @@ export function ToolVersions() {
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="min-w-0 truncate text-xs text-white/30">
-          版本取自本機實際安裝；最新版查 registry（hermes 看自身輸出）；更新走官方通道，單次最長 10 分鐘
+          版本取自本機實際安裝；最新版查 registry；更新走官方通道，單次最長 10 分鐘
         </p>
         <button
           className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 px-2.5 py-0.5 text-[11px] text-white/50 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
@@ -468,7 +468,7 @@ export function ToolVersions() {
         <p className="text-sm text-red-400">讀取失敗：{String(vers.error)}</p>
       )}
       {(vers.data || []).map((v) => {
-        // 最新態：優先用 registry 比對，其次 hermes 自身輸出；都沒有=檢查中。
+        // 最新態：用 registry 比對；比不到＝檢查中。
         const l = latestMap.get(v.app);
         const upToDate = l?.up_to_date ?? v.up_to_date ?? null;
         const latest = l?.latest ?? null;
@@ -499,9 +499,6 @@ export function ToolVersions() {
                 {v.version ?? "未知版本"}
                 {upToDate === false && latest != null && (
                   <span className="text-amber-300/90"> → {latest}</span>
-                )}
-                {upToDate === false && latest == null && v.app === "hermes" && (
-                  <span className="text-amber-300/90">（有更新可用）</span>
                 )}
                 {upToDate == null && (
                   <span className="text-white/25">

@@ -13,7 +13,7 @@ pub fn config_path_for(app: &str) -> Result<PathBuf, String> {
             .join(".config")
             .join("opencode")
             .join("opencode.json")),
-        "hermes" => Ok(hermes_home().join("config.yaml")),
+        "hermes" => Err("Hermes 已於第一階段（F）移除支援：只保留用量歸屬標籤，不再寫入它的設定".into()),
         "dsh" => Err("DSH 暫不支援自動寫入：endpoint 由 profile bundle 決定，M2 僅檢測 + 金鑰環境變量指引".into()),
         _ => Err(format!("未知工具：{app}")),
     }

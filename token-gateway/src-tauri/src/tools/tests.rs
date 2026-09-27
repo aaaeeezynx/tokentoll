@@ -33,18 +33,9 @@ pub(crate) use crate::tools::codex::codex_wire_api_declared;
 pub(crate) use crate::tools::consts::BACKUP_KEEP;
 pub(crate) use crate::tools::consts::CODEX_SHARED_PROVIDER_ID;
 pub(crate) use crate::tools::consts::GATEWAY_PROVIDER_ID;
-pub(crate) use crate::tools::consts::HERMES_CUSTOM_ENV_KEY;
 
 // ---- detect ----
 pub(crate) use crate::tools::detect::detect_tools;
-
-// ---- hermes ----
-pub(crate) use crate::tools::hermes::dotenv_set;
-pub(crate) use crate::tools::hermes::ensure_hermes_provider;
-pub(crate) use crate::tools::hermes::hermes_apply;
-pub(crate) use crate::tools::hermes::hermes_home;
-pub(crate) use crate::tools::hermes::hermes_provider_base;
-pub(crate) use crate::tools::hermes::parse_hermes_model;
 
 // ---- switch ----
 pub(crate) use crate::tools::switch::SwitchRequest;
@@ -119,8 +110,8 @@ fn live_upstream(app_data: &std::path::Path, pid: i64) -> String {
     up
 }
 
-/// 復刻前端開關 ON 的請求（經網關；claude/hermes 填上游 Key 明文，
-/// opencode 空 Key 走 direct_upstream 由後端注入）。
+/// 復刻前端開關 ON 的請求（經網關；claude 填上游 Key 明文，
+/// codex／opencode 空 Key 走 direct_upstream 由後端注入）。
 fn live_req(app: &str, base_url: &str, key: String, direct: bool) -> SwitchRequest {
     SwitchRequest {
         app: app.into(),

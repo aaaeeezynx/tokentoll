@@ -11,8 +11,9 @@ fn version_cmp_and_clean() {
     use std::cmp::Ordering;
     assert_eq!(clean_version("codex-cli 0.153.4"), Some("0.153.4".to_string()));
     assert_eq!(clean_version("2.1.263 (Claude Code)"), Some("2.1.263".to_string()));
+    // 前綴 + `v` + 日期後綴：挑一個仍會被 `probe_tool_version` 產生的形狀。
     assert_eq!(
-        clean_version("Hermes Agent v0.21.1 (2026.9.7) · upstream abc"),
+        clean_version("some-cli v0.21.1 (2026.9.7) · upstream abc"),
         Some("0.21.1".to_string())
     );
     assert_eq!(clean_version("0.1.2-rc.1"), Some("0.1.2-rc.1".to_string()));

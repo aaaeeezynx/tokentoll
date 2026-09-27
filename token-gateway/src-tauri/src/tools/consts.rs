@@ -17,9 +17,6 @@ pub const GATEWAY_PROVIDER_ID: &str = "tokengateway";
 /// 永遠存在且指向網關，舊會話才不會因段被刪而「Model provider not found」。
 pub const CODEX_SHARED_PROVIDER_ID: &str = "custom";
 
-/// Hermes 自定義渠道按其自有約定讀取的 Key 名：`HERMES_CUSTOM_<PROVIDER>_API_KEY`。
-pub const HERMES_CUSTOM_ENV_KEY: &str = "HERMES_CUSTOM_TOKENGATEWAY_API_KEY";
-
 /// 每個工具保留的 `{stem}.bak-*` 備份份數（第一階段 E：10 → 1）。
 ///
 /// **為什麼只留 1 份是安全的**：真正保命的是 `{stem}.baseline-*`（接管前的乾淨

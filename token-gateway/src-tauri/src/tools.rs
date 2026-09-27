@@ -1,13 +1,15 @@
-//! M2：五工具渠道檢測與切換適配。
+//! M2：工具渠道檢測與切換適配。
 //!
 //! 安全約定：
 //! - 金鑰一律走環境變量 [`GATEWAY_ENV_KEY`]（Codex `env_key` / OpenCode `{env:}` /
 //!   終端機 export），絕不寫入各工具設定檔；唯一的例外是 Claude settings.json 的
-//!   `env`（靜態值，無引用語法，只能寫明文——網關模式下請使用可吊銷的本地 sk key）
-//!   與 Hermes `.env`（其自有約定，復刻 flatkey 模式）。
+//!   `env`（靜態值，無引用語法，只能寫明文——網關模式下請使用可吊銷的本地 sk key）。
 //! - 每次寫入前自動備份到應用程式數據目錄 `backups/<app>/`，保留 [`BACKUP_KEEP`] 份。
 //! - 所有檔案改寫都是純函數（輸入舊文本 → 輸出新文本），可單測；IO 只在
 //!   [`apply_switch`] 一處發生。
+//!
+//! **支援範圍（2026-09-28 第一階段後）**：可接管／還原 = Claude Code、Codex、
+//! OpenCode；只檢測不接管 = DSH；Cursor／Antigravity／Hermes 僅作為用量歸屬標籤。
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -18,7 +20,6 @@ mod detect;
 mod versions;
 mod apply;
 mod codex;
-mod hermes;
 mod switch;
 mod backup;
 
@@ -38,13 +39,11 @@ pub(crate) use {
     consts::GATEWAY_ENV_KEY,
     consts::GATEWAY_HOST,
     consts::GATEWAY_PROVIDER_ID,
-    consts::HERMES_CUSTOM_ENV_KEY,
 
     // ---- util ----
     util::is_gateway,
     util::on_path,
     util::read_text,
-    util::strip_quotes,
     util::user_home,
 
     // ---- detect ----
@@ -78,14 +77,6 @@ pub(crate) use {
     codex::codex_wire_api,
     codex::codex_wire_api_declared,
     codex::gateway_url,
-
-    // ---- hermes ----
-    hermes::dotenv_set,
-    hermes::hermes_apply,
-    hermes::hermes_home,
-    hermes::hermes_provider_base,
-    hermes::parse_hermes_model,
-    hermes::restore_hermes_env,
 
     // ---- switch ----
     switch::SwitchPlan,

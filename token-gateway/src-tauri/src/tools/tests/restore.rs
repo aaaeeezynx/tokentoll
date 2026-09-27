@@ -221,7 +221,8 @@ fn keep_one_still_restores_original_after_repeated_takeover() {
 
 
 /// 第一階段 E 的安全網：使用者現況就是「沒有 baseline、只有一串歷史備份」
-/// （claude 10 份、opencode 10 份、hermes 6 份，全部沒有 baseline），
+/// （claude 10 份、opencode 10 份，全部沒有 baseline；hermes 原本也是如此，
+/// 已於第一階段 F 隨 hermes 支援一起移除），
 /// `keep = 1` 的輪換會把舊的砍掉——所以在砍之前必須先把**最乾淨的歷史備份**
 /// 存成 baseline，否則最初的原始設定（可能只存在於最舊那份 bak 裡）會消失。
 #[test]
@@ -339,66 +340,6 @@ fn backup_name_unique_within_same_second() {
     v.sort();
     v.reverse();
     assert!(v[0].to_string_lossy().ends_with("-2"));
-}
-
-
-#[test]
-fn hermes_restore_brings_env_back() {
-    // Hermes OFF 必須連帶還原 .env（tempdir 沙盒：cfg 父目錄即 .env 歸屬）。
-    let dir = tempfile::tempdir().unwrap();
-    let app_data = dir.path();
-    let cfg = dir.path().join("config.yaml");
-    std::fs::write(&cfg, "current").unwrap();
-    std::fs::write(&cfg.parent().unwrap().join(".env"), "HERMES_CUSTOM_TOKENGATEWAY_API_KEY=up-now\n").unwrap();
-    let bdir = app_data.join("backups").join("hermes");
-    std::fs::create_dir_all(&bdir).unwrap();
-    let clean_cfg = "model:\n  provider: flatkey\n";
-    let clean_env = "# user env\nFLAT=1\n";
-    std::fs::write(bdir.join("config.yaml.bak-20260101-000000"), clean_cfg).unwrap();
-    std::fs::write(bdir.join(".env.bak-20260101-000000"), clean_env).unwrap();
-    std::fs::write(
-        bdir.join("config.yaml.bak-20260201-000000"),
-        "providers:\n  tokengateway:\n    base_url: http://127.0.0.1:15722/v1\n",
-    )
-    .unwrap();
-    std::fs::write(
-        bdir.join(".env.bak-20260201-000000"),
-        "HERMES_CUSTOM_TOKENGATEWAY_API_KEY=up-then\n",
-    )
-    .unwrap();
-    let msg = restore_backup_to(app_data, "hermes", &cfg).expect("restore");
-    assert!(msg.contains(".env 已還原自 .env.bak-20260101-000000"), "{msg}");
-    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), clean_cfg);
-    assert_eq!(
-        std::fs::read_to_string(cfg.parent().unwrap().join(".env")).unwrap(),
-        clean_env
-    );
-}
-
-
-#[test]
-fn hermes_env_all_tainted_keeps_current() {
-    // .env 無乾淨備份時：保持現狀並注記，不猜不刪。
-    let dir = tempfile::tempdir().unwrap();
-    let app_data = dir.path();
-    let cfg = dir.path().join("config.yaml");
-    std::fs::write(&cfg, "current").unwrap();
-    let cur = "FLAT=1\nHERMES_CUSTOM_TOKENGATEWAY_API_KEY=up\n";
-    std::fs::write(cfg.parent().unwrap().join(".env"), cur).unwrap();
-    let bdir = app_data.join("backups").join("hermes");
-    std::fs::create_dir_all(&bdir).unwrap();
-    std::fs::write(bdir.join("config.yaml.bak-20260101-000000"), "model:\n  provider: flatkey\n").unwrap();
-    std::fs::write(
-        bdir.join(".env.bak-20260101-000000"),
-        "HERMES_CUSTOM_TOKENGATEWAY_API_KEY=up-old\n",
-    )
-    .unwrap();
-    let msg = restore_backup_to(app_data, "hermes", &cfg).expect("restore");
-    assert!(msg.contains(".env 無乾淨備份，保持現狀"), "{msg}");
-    assert_eq!(
-        std::fs::read_to_string(cfg.parent().unwrap().join(".env")).unwrap(),
-        cur
-    );
 }
 
 

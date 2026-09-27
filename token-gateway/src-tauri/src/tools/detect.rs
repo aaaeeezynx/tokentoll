@@ -134,34 +134,6 @@ pub(crate) fn detect_opencode(port: u16) -> ToolStatus {
 }
 
 
-pub(crate) fn detect_hermes(port: u16) -> ToolStatus {
-    let home = hermes_home();
-    let p = home.join("config.yaml");
-    let mut st = ToolStatus {
-        app: "hermes".into(),
-        display: "Hermes Agent".into(),
-        installed: on_path(&["hermes"]) || p.exists(),
-        config_path: p.exists().then(|| p.to_string_lossy().to_string()),
-        current_base_url: None,
-        current_model: None,
-        gateway_active: false,
-        supported_switch: true,
-    };
-    if let Some(text) = read_text(&p) {
-        let (provider, default) = parse_hermes_model(&text);
-        st.current_model = default;
-        if let Some(name) = provider {
-            st.current_base_url = hermes_provider_base(&text, &name);
-        }
-    }
-    st.gateway_active = st
-        .current_base_url
-        .as_deref()
-        .is_some_and(|u| is_gateway(u, port));
-    st
-}
-
-
 pub(crate) fn detect_dsh() -> ToolStatus {
     let mut st = ToolStatus {
         app: "dsh".into(),
@@ -183,21 +155,23 @@ pub(crate) fn detect_dsh() -> ToolStatus {
 }
 
 
-/// Cursor 與 Antigravity 已不再檢測（2026-09-28，第一階段 A）。
+/// Cursor 與 Antigravity 已不再檢測（2026-09-28，第一階段 A）；
+/// Hermes 已不再檢測（2026-09-28，第一階段 F）。
 ///
-/// 理由（實查）：兩者本來就**只能檢測、不能接管**（`supported_switch: false`），
-/// 而且都沒安裝、0 筆請求、0 份備份。
+/// 理由（實查）：
+/// - cursor／antigravity 本來就**只能檢測、不能接管**（`supported_switch: false`），
+///   而且都沒安裝、0 筆請求、0 份備份。
+/// - hermes 只有 1 筆請求，卻為了它養了 367 行專屬 YAML 邏輯。
 ///
-/// ⚠️ `APPS`／`APP_META`／`APP_COLORS`／`infer_app` 裡的 cursor／antigravity
-/// **刻意保留**：那四處是**用量歸屬與顯示**用的，不是工具偵測用的。刪掉的話，
-/// 歷史資料若有 cursor 請求會變成 `unknown`，用量篩選下拉也會少兩個選項
+/// ⚠️ `APPS`／`APP_META`／`APP_COLORS`／`infer_app` 裡的 cursor／antigravity／
+/// hermes **刻意保留**：那四處是**用量歸屬與顯示**用的，不是工具偵測用的。刪掉的話，
+/// 歷史資料若有這些請求會變成 `unknown`，用量篩選下拉也會少選項
 /// —— 這正是「精簡不可以犧牲資訊」的落點。
 pub fn detect_tools(port: u16) -> Vec<ToolStatus> {
     vec![
         detect_claude(port),
         detect_codex(port),
         detect_opencode(port),
-        detect_hermes(port),
         detect_dsh(),
     ]
 }

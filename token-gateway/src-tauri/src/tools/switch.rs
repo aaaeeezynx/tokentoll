@@ -18,7 +18,7 @@ pub struct SwitchRequest {
     pub base_url: String,
     /// 要使用的密鑰取值：網關模式=本地 sk key；Key 欄留空時＝上游 Key
     /// （見 `direct_upstream`）。僅 codex/opencode/dsh 用於生成環境變量指引；
-    /// claude 寫入文件（見警告）；hermes 寫入自家 .env。
+    /// claude 寫入文件（見警告）。
     pub api_key: String,
     pub model: String,
     /// 選中的渠道（產生 Codex 目錄時必填）。
@@ -240,20 +240,6 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
                 req.model
             ));
         }
-        "hermes" => {
-            plan.edits.push(format!(
-                "providers.{GATEWAY_PROVIDER_ID}.base_url = {}",
-                req.base_url
-            ));
-            plan.edits.push(format!("model.provider = {GATEWAY_PROVIDER_ID}"));
-            plan.edits.push(format!("model.default = {}", req.model));
-            plan.edits.push(format!(
-                "providers.{GATEWAY_PROVIDER_ID}.key_env = {HERMES_CUSTOM_ENV_KEY}（憑證指針，hermes 據此讀 .env）"
-            ));
-            plan.edits.push(format!(
-                ".env 寫入 {HERMES_CUSTOM_ENV_KEY}=***（復刻其 flatkey 自有約定）"
-            ));
-        }
         "dsh" => {
             plan.supported = false;
             plan.will_backup = false;
@@ -265,10 +251,11 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             );
             return Ok(plan);
         }
-        // cursor／antigravity：仍列在 APPS（用量歸屬與篩選要用），但**不提供
-        // 自動接管**，而且已經不再出現在工具偵測清單裡（第一階段 A）。
-        // 原本這裡各有專屬的「請手工配置」提示，但那兩條路在 UI 上已走不到，
-        // 第一階段 A 一併刪除，改成這一條誠實的拒絕。
+        // cursor／antigravity／hermes：仍列在 APPS（用量歸屬與篩選要用），但
+        // **不提供自動接管**，而且已不再出現在工具偵測清單裡
+        // （cursor／antigravity 為第一階段 A，hermes 為第一階段 F）。
+        // 原本這裡各有專屬的接管/提示分支，那幾條路在 UI 上已走不到，
+        // 一併刪除，改成這一條誠實的拒絕。
         app => {
             plan.supported = false;
             plan.will_backup = false;
@@ -372,13 +359,6 @@ pub fn apply_switch(
             };
             opencode_apply(existing.as_deref(), &req.base_url, &req.model, req.context_window, direct_key)?
         }
-        "hermes" => hermes_apply(
-            existing
-                .as_deref()
-                .ok_or("hermes config.yaml 不存在，無法切換（請先執行一次 hermes 完成初始化）")?,
-            &req.base_url,
-            &req.model,
-        )?,
         _ => unreachable!(),
     };
 
@@ -407,29 +387,5 @@ pub fn apply_switch(
         result.backup_path = Some(dest.to_string_lossy().to_string());
     }
     crate::fsutil::atomic_write(&cfg, new_text.as_bytes()).map_err(|e| format!("寫入失敗：{e}"))?;
-
-    // Hermes 金鑰進自家 .env（行式追加/替換，同樣先備份）。
-    if req.app == "hermes" {
-        let env_path = hermes_home().join(".env");
-        let old = read_text(&env_path).unwrap_or_default();
-        if !old.is_empty() {
-            let dir = backups_root.join("hermes");
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let dest = crate::fsutil::unique_backup_name(
-                &dir,
-                &format!(".env.bak-{}", crate::fsutil::backup_stamp()),
-            );
-            std::fs::write(&dest, &old).map_err(|e| format!(".env 備份失敗：{e}"))?;
-            crate::fsutil::rotate_backups(&dir, ".env", BACKUP_KEEP)
-                .map_err(|e| e.to_string())?;
-            result
-                .backup_path
-                .get_or_insert(dest.to_string_lossy().to_string());
-        }
-        let new_env = dotenv_set(&old, HERMES_CUSTOM_ENV_KEY, &req.api_key);
-        crate::fsutil::atomic_write(&env_path, new_env.as_bytes())
-            .map_err(|e| format!(".env 寫入失敗：{e}"))?;
-        result.extra_files.push(env_path.to_string_lossy().to_string());
-    }
     Ok(result)
 }

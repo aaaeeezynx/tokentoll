@@ -43,14 +43,6 @@ pub(crate) fn backup_is_tainted(app: &str, text: &str, port: u16) -> bool {
                     .map(|u| is_gateway(u, port))
             })
             .unwrap_or(false),
-        "hermes" => {
-            let (provider, _) = parse_hermes_model(text);
-            provider
-                .as_deref()
-                .and_then(|name| hermes_provider_base(text, name))
-                .is_some_and(|u| is_gateway(&u, port))
-                || text.contains(&format!("  {GATEWAY_PROVIDER_ID}:\n"))
-        }
         _ => false,
     }
 }
@@ -100,8 +92,8 @@ pub(crate) fn prune_backups_keep_clean(
 /// 基準備份存在。
 ///
 /// 為什麼需要它：`prune_backups_keep_clean(keep = 1)` 會把舊的 `bak-` 砍掉。
-/// 對「沒有 baseline、只有一串歷史備份」的工具目錄（實際上 claude／opencode／
-/// hermes 就是這樣）而言，**最初的原始設定可能只存在於最舊的那份 bak 裡**，
+/// 對「沒有 baseline、只有一串歷史備份」的工具目錄（實際上 claude／opencode
+/// 就是這樣）而言，**最初的原始設定可能只存在於最舊的那份 bak 裡**，
 /// 一旦被砍就再也還原不回去。所以輪換前先做一次基準備份：
 ///
 /// - 當前內容本來就乾淨 → 直接用它寫 baseline（原本 `apply_switch` 的行為）
@@ -153,13 +145,6 @@ pub(crate) fn backup_has_known_route(app: &str, text: &str) -> bool {
                     .map(|_| true)
             })
             .unwrap_or(false),
-        "hermes" => {
-            let (provider, _) = parse_hermes_model(text);
-            provider
-                .as_deref()
-                .and_then(|name| hermes_provider_base(text, name))
-                .is_some()
-        }
         _ => false,
     }
 }
@@ -291,7 +276,7 @@ pub(crate) fn restore_backup_to_inner(
     port: u16,
     migrate: bool,
 ) -> Result<String, String> {
-    if !["claude", "codex", "opencode", "hermes"].contains(&app) {
+    if !["claude", "codex", "opencode"].contains(&app) {
         return Err("該工具不支援一鍵還原".into());
     }
     let stem = cfg
@@ -349,12 +334,6 @@ pub(crate) fn restore_backup_to_inner(
         } else {
             String::new()
         };
-        // Hermes 連帶還原 .env（接管時寫入了我方 Key 行；只還主配置會殘留）。
-        let env_note = if app == "hermes" {
-            restore_hermes_env(app_data, cfg)?
-        } else {
-            String::new()
-        };
         // 還原到 cc-switch 託管態：能用才算數（需啟動 cc-switch），明確告知。
         let switch_note = if text.contains("127.0.0.1:15721") || text.contains("localhost:15721") {
             "｜⚠️ 還原後走 cc-switch（15721），請先啟動 cc-switch，否則工具連不上"
@@ -365,7 +344,7 @@ pub(crate) fn restore_backup_to_inner(
             remove_stale_baselines(&dir, stem);
         }
         return Ok(format!(
-            "{}｜還原自 {name}{skip_note}{env_note}{switch_note}｜{summary}",
+            "{}｜還原自 {name}{skip_note}{switch_note}｜{summary}",
             cfg.to_string_lossy()
         ));
     }

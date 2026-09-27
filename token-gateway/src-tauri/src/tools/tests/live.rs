@@ -139,67 +139,11 @@ fn live_opencode_roundtrip() {
 
 
 #[test]
-#[ignore = "live: writes real hermes config + .env (auto-restored)"]
-fn live_hermes_roundtrip() {
-    let (_home, app_data) = live_dirs();
-    let cfg = config_path_for("hermes").expect("hermes path");
-    let envp = hermes_home().join(".env");
-    let snap_cfg = std::fs::read(&cfg).expect("read config.yaml");
-    let snap_env = std::fs::read(&envp).expect("read .env");
-    let before = live_bak_names(&app_data, "hermes");
-    // 用另一來源的 Key（17）確保 ON 真改動 .env，否則測試是空轉的
-    //（當前 .env 已含 15 的 Key，同值寫入位元組不變）。
-    let up = live_upstream(&app_data, 17);
-    // T1 ON（hermes 取上游 Key 直寫自家 .env）
-    let r1 = apply_switch(&app_data, live_req("hermes", "http://127.0.0.1:15722/v1", up.clone(), false), 15722, None).expect("on#1");
-    println!("on#1: {r1:?}");
-    let on_cfg = String::from_utf8(std::fs::read(&cfg).expect("read")).expect("utf8");
-    let on_env = String::from_utf8(std::fs::read(&envp).expect("read")).expect("utf8");
-    let on_ok = on_cfg.contains(GATEWAY_PROVIDER_ID)
-        && on_env.contains(&format!("{HERMES_CUSTOM_ENV_KEY}={up}"));
-    // T2 ON→ON
-    std::thread::sleep(std::time::Duration::from_millis(1200));
-    apply_switch(&app_data, live_req("hermes", "http://127.0.0.1:15722/v1", up.clone(), false), 15722, None).expect("on#2");
-    // OFF
-    let msg = restore_backup(&app_data, "hermes").expect("restore");
-    println!("off: {msg}");
-    let off_cfg = std::fs::read(&cfg).expect("read");
-    let off_env = std::fs::read(&envp).expect("read");
-    // teardown → 斷言
-    live_rm_new_baks(&app_data, "hermes", &before);
-    std::fs::write(&cfg, &snap_cfg).expect("teardown cfg");
-    std::fs::write(&envp, &snap_env).expect("teardown env");
-    assert!(on_ok, "ON#1 未正確接管");
-    assert_eq!(off_cfg, snap_cfg, "T1/T2：config.yaml 未還原");
-    // .env 判據（本機 .env 自上次乾淨備份後另有合法漂移，不與快照比字節）：
-    // 1) 接管殘留 Key 行必須消失；2) 內容等於最新乾淨備份（獨立掃描，不調恢復函數）。
-    let off_env_s = String::from_utf8(off_env.clone()).expect("utf8");
-    assert!(
-        !off_env_s.contains(HERMES_CUSTOM_ENV_KEY),
-        "T1/T2：.env 殘留接管 Key 行"
-    );
-    let dir = app_data.join("backups").join("hermes");
-    let mut names = live_bak_names(&app_data, "hermes");
-    names.retain(|n| n.starts_with(".env.bak-"));
-    names.reverse();
-    let newest_clean = names
-        .iter()
-        .map(|n| std::fs::read(dir.join(n)).expect("read bak"))
-        .find(|b| {
-            let s = String::from_utf8_lossy(b);
-            !s.contains(HERMES_CUSTOM_ENV_KEY)
-        })
-        .expect("a clean .env backup");
-    assert_eq!(off_env, newest_clean, "T1/T2：.env 未還原到最新乾淨備份");
-}
-
-
-#[test]
 #[ignore = "live: temporarily relocates real backup dirs (auto-moved-back)"]
 fn live_restore_no_backup() {
     // T3：無可用備份時，OFF 必須明確報錯且不碰配置文件。
     let (_home, app_data) = live_dirs();
-    for app in ["claude", "opencode", "hermes"] {
+    for app in ["claude", "opencode"] {
         let cfg = config_path_for(app).expect("cfg path");
         let snap = std::fs::read(&cfg).expect("read cfg");
         let dir = app_data.join("backups").join(app);
@@ -230,9 +174,10 @@ fn live_tool_latest_print() {
 #[test]
 #[ignore = "live: probes real installed tool versions (read-only)"]
 fn live_tool_versions_shape() {
-    // 契約：5 工具各一條；已安裝的有更新命令（cursor/antigravity 不在列）。
+    // 契約：4 工具各一條；已安裝的有更新命令
+    //（cursor／antigravity 第一階段 A、hermes 第一階段 F 都不在列）。
     let vs = tool_versions();
-    assert_eq!(vs.len(), 5);
+    assert_eq!(vs.len(), 4);
     for v in &vs {
         println!("{} installed={} version={:?} update={:?}", v.app, v.installed, v.version, v.update_label);
         if v.installed {
