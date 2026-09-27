@@ -3,8 +3,10 @@
 > 狀態（**2026-09-28 更新**）：
 > - **第二階段（用量資訊強化）已完成、已重新建置、已實機驗證** —— 程式 commit
 >   `d417b02`，安裝版 2026-09-28 02:43，證據見 §10 與 `TESTING.md` §0.1。
-> - **第一階段（工具區精簡 A／E／F／D-1）尚未動任何程式碼**，等 §8 的決定點
->   確認後才動工。
+> - **第一階段：D-1、A、E 三個方向已完成**（各自一個 commit：`3908fcd`／
+>   `71d51a6`／`38c5bcd`，見 §10.4–10.6），並已重新建置＋安裝＋實機驗證
+>   （§10.7、`TESTING.md` §0.2）。
+> - **F（移除 hermes）仍未動任何一行** —— 等你從 §10.3 的三條路選一條。
 >
 > 擬定日期：2026-09-27
 
@@ -118,6 +120,12 @@
 
 **省：約 50 行**
 
+**執行結果（2026-09-28，見 §10.5）**：實際 −68／+20 行（commit `71d51a6`）。
+`APPS`／`APP_META`／`APP_COLORS`／`infer_app`／`APP_ORDER` **全部照建議保留**。
+另外發現並順手修掉一個潛在崩潰：兩個 arm 一刪，`plan_switch` 的
+`_ => unreachable!()` 就會被 cursor／antigravity 命中而 panic（因為 `APPS`
+仍留著這兩個 id），所以改寫成一個誠實的拒絕 arm。
+
 ---
 
 ### 4.2 E —— 備份只留最新一份
@@ -143,6 +151,20 @@
 
 **省：約 30–60 行**（老實說不多）。
 **E 的價值主要在磁碟與心智簡化**（你現在 claude 10 份、codex 11 份），不是大幅瘦身。
+
+**執行結果（2026-09-28，見 §10.6）—— 與上面的計畫有兩處不同，如實記錄**：
+
+1. **輪換迴圈沒有精簡**：讀完程式後確認那不是可砍的複雜度，而是**必要語意**
+   （優先淘汰污染備份、乾淨的留到最後）。`keep = 1` 讓它**更重要**，所以邏輯
+   一字不動，只改常數。
+2. **多了一個安全網**（原方案沒有）：查核你的備份目錄後發現
+   **claude／opencode／hermes 都沒有 baseline 檔**（只有 codex 有），它們的還原
+   完全依賴那串 `bak-`。因此在輪換前新增 `ensure_baseline_before_prune()`：
+   當前內容乾淨 → 直接寫 baseline；當前是接管態 → 從歷史備份遷移最新的乾淨
+   備份成 baseline。失敗不報錯（盡力而為）。
+
+實際 **−10／+187 行**（測試佔多數）：**沒有省到行數，但換到「只留 1 份也不會
+失去還原能力」**，這才是這個方向該有的成果。新增 4 條回歸測試釘住它。
 
 ---
 
@@ -195,6 +217,11 @@ Providers.tsx:301、361 —— 也寫死 via_gateway: true
 | `lib/api.ts:77` | 刪型別欄位 |
 
 **省：約 60–80 行**
+
+**執行結果（2026-09-28，見 §10.4）**：實際 −107／+67 行（commit `3908fcd`）。
+除了上表，還一併刪掉兩個只可能在 `via_gateway = false` 時出現的警告字串，
+以及在 `plan_switch` 裡**唯一**的 `detect_tools()` 呼叫。`direct_upstream`
+（Key 欄留空＝用上游 Key）刻意保留：那是獨立機制，與「經網關／直連」無關。
 
 **附帶效果**：程式中「經網關／直連」的雙模式概念消失，只剩一條路。**你目前唯一真正直連的是 DSH，而那是你手動改 `settings.yaml` 造成的，不受影響。**
 
@@ -316,7 +343,7 @@ pub struct AppStat {
 | # | 決定點 | 現況 |
 |---|---|---|
 | 1 | 「本機工具」做成獨立鏡頭還是塞進概覽？ | **已決定並完成**：做成獨立鏡頭「工具」（`UsageAppsLens.tsx`） |
-| 2 | D-1、E 是否確認要做？ | **待你確認**（我建議做；D-1 純死碼清理、E 需實測「接管→還原」） |
+| 2 | D-1、E 是否確認要做？ | **已完成**：D-1（`3908fcd`）、A（`71d51a6`）、E（`38c5bcd`），見 §10.4–10.7 |
 | 3 | F 動手前先查 hermes 現況？ | **已查，結果在 §10.3** —— hermes **目前正被本網關接管**，所以這一項需要你先決定怎麼處理 |
 | 4 | 「渠道」與「模型」鏡頭要不要一併補快取欄位？ | **已完成**（兩者都補上快取讀／快取建／總計／命中率） |
 
@@ -346,9 +373,10 @@ pub struct AppStat {
 - 驗收數字：`cargo test --offline` → **219 passed / 0 failed / 9 ignored**（exit 0）；
   畫面數字與獨立重算的 SQLite 值逐格相符（詳表見 `TESTING.md` §0.1）。
 
-### 10.2 尚未動：第一階段（工具區精簡）
+### 10.2 已完成：第一階段 D-1／A／E（工具區精簡）
 
-A／E／F／D-1 **一行都還沒改**。依 §7 的順序，確認後會一個方向一個 commit。
+三個方向各一個 commit，詳見 §10.4–10.6；建置／安裝／實機驗證見 §10.7。
+**F（移除 hermes）仍一行未動**，等 §10.3 的決定。
 
 ### 10.3 F 的前置查核結果（hermes 現況）—— **需要你先決定**
 
@@ -375,3 +403,88 @@ A／E／F／D-1 **一行都還沒改**。依 §7 的順序，確認後會一個�
    `config.yaml` 內容印給你留存）。
 
 **在你選之前，我不會動 F 的任何一行。**
+
+---
+
+### 10.4 D-1 執行紀錄（commit `3908fcd`，11 檔、+67/−107）
+
+**刪掉的**：`SwitchRequest.via_gateway` 欄位、後端 11 處分支、兩段只可能在
+`via_gateway = false` 時出現的警告（「疑似 cc-switch 接管」與「直連第三方…無用量
+審計」）、`plan_switch` 裡**唯一**的 `detect_tools()` 呼叫、`normalize_switch_request`
+的「直連模式需先選擇來源」錯誤與對 `providers.base_url` 的查詢。
+
+**改成無條件**：`base_url` 一律覆寫為 `gateway_url(port, app)`（`plan_switch`／
+`apply_switch`）、接管前基準備份一定寫、格式相容提示一定評估。
+
+**刻意保留**：`direct_upstream`（Key 欄留空＝用上游來源 Key）。它是獨立機制，
+與「經網關／直連」無關，計畫裡也沒有要動它。
+
+**驗證**：`cargo test --offline` → 219 passed（當時的數字）／0 failed／9 ignored，
+exit 0；`npx tsc --noEmit` exit 0；全域搜尋 `via_gateway` 只剩 4 處說明性註解；
+**實機**：新 binary 內已找不到 `via_gateway` 字串。
+
+### 10.5 A 執行紀錄（commit `71d51a6`，3 檔、+20/−68）
+
+**刪掉的**：`detect_cursor()`／`detect_antigravity()` 與 `detect_tools()` 裡的兩個
+呼叫（工具偵測清單 7 → 5）、`switch.rs` 兩個「請手工配置」arm。
+
+**順手修的**：那兩個 arm 一刪，`plan_switch` 的 `_ => unreachable!()` 就會被
+cursor／antigravity 命中而 **panic**（`APPS` 仍保留這兩個 id）。改成一個誠實的
+拒絕 arm（`supported = false` ＋ 說明）。
+
+**保留的**：`APPS`／`APP_META`／`APP_COLORS`／`infer_app`／`APP_ORDER` 裡的
+cursor／antigravity —— 用量歸屬、篩選選項、歷史資料一個不少（見 §4.1）。
+
+**驗證**：219 passed／`tsc` exit 0／`scripts/check_app_labels.py` 前後端 7 個顯示名
+一致；**實機**：上游來源頁籤讀到「**本機工具（2/5 接管中）**」（原本會是 7），
+五張卡片是 Claude Code／Codex／OpenCode／Hermes Agent／DeepSeek Harness，
+底部文案讀到「Cursor／Antigravity 不提供接管…」。
+
+### 10.6 E 執行紀錄（commit `38c5bcd`，6 檔、+187/−10）
+
+- `BACKUP_KEEP: 10 → 1`。
+- **新增 `ensure_baseline_before_prune()`**：輪換前先確保接管前基準備份存在
+  （當前乾淨→用它；當前是接管態→從歷史備份遷移最新的乾淨備份）。這是因為查核
+  發現 **claude／opencode／hermes 都沒有 baseline、只有 codex 有**，它們的還原
+  完全靠那串 `bak-`。
+- **輪換邏輯一字不動**（見 §4.2 的執行結果說明）。
+- 新增 4 條測試：`prune_keep_one_keeps_the_clean_backup`、
+  `keep_one_still_restores_original_after_repeated_takeover`、
+  `keep_one_salvages_baseline_from_history_before_prune`、
+  `backup_keep_is_one_by_design`。
+- **驗證**：`cargo test --offline` → **223 passed**／0 failed／9 ignored，exit 0；
+  `cargo clippy --offline --all-targets` → 5 個警告（與基線相同、皆在既有程式碼）。
+- 過程中一條新測試先失敗，暴露一個既有性質：原始設定若太簡略（沒有
+  `model_provider`／`base_url`），`migrate_gateway_baseline` 會視為「不是已知路由」
+  而不採用。已把這個性質寫進測試註解（**不是本階段改的**）。
+- **對你現有備份的影響**：下次對某工具按「接管」時，該工具的 `bak-` 會被輪換到
+  1 份（乾淨那份或最新那份），baseline 不受影響。不想被輪換就不要按接管。
+
+### 10.7 建置／安裝／實機驗證（2026-09-28 03:28 產物）
+
+| 項目 | 結果 |
+|---|---|
+| 原始碼最新時間 | 03:11:50（`tools.rs`） |
+| exe | 2026-09-28 03:28:11、9,046,528 bytes（8,835 KB） |
+| MSI | 03:27:41、7,364,608 bytes（7,192 KB） |
+| NSIS setup | 03:28:11、3,842,393 bytes（3,752 KB） |
+| 前端資源 | `index-BAemutFc.js`（前版 `index-BtK0gyS1.js`）、`index-DnRx7SDk.css`（未變） |
+| 安裝 | NSIS `/S` exit 0；安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` 為 03:27:52、同一組資源 |
+| 舊字串已消失 | exe 內搜不到 `via_gateway`（D-1 真的進了產物） |
+| 工具清單 | 實機讀到「本機工具（2/5 接管中）」＝ **5 個**（A 生效） |
+| 切換對話框（方案路徑） | 點 Claude Code 卡片開出對話框，方案區讀到 `C:\Users\luluna\.claude\settings.json · 自動備份`、`8 項寫入`、以及「⚠ ANTHROPIC_AUTH_TOKEN 將明文寫入 settings.json…網關模式下請使用可吊銷的本地 sk Key」→ **新產物的 `switch_plan` 仍能生成方案**（這條警告在 D-1 後改為無條件出現；舊版因前端一律送 `true` 也會出現，所以本項證明的是「方案路徑在新產物上正常」，D-1 本身由上一列的 `via_gateway` 消失來證明） |
+| 未寫入任何設定 | 全程沒按「套用／接管」；驗證前後備份目錄完全相同（claude 10／codex 11＋baseline 1／hermes 6／opencode 10），`app.db` mtime 仍是 2026-09-27 17:09:05 |
+| **沒能 GUI 驗證的** | 用量頁那個自製「本機工具」下拉，我的滑鼠事件打不開它的彈出層；範圍切換也沒點動。改用**程式碼與 diff 證明**：三次 commit 都沒動 `APP_META`／`APP_ORDER`／用量頁任何一行，`Usage.tsx` 的選項來源就是 `APP_META`（含 cursor／antigravity），所以選項一個不少 |
+
+### 10.8 行數對照（誠實版）
+
+| 方向 | 計畫估算 | 實際 | 說明 |
+|---|---:|---:|---|
+| D-1 | 60–80 | **−40**（+67/−107） | 達成 |
+| A | ~50 | **−48**（+20/−68） | 達成，並修掉一個 panic 風險 |
+| E | 30–60 | **+177**（+187/−10） | **沒省到**：輪換邏輯必須留，新增的是安全網＋測試＋註解 |
+| F | ~490 | 未動 | 等你決定 |
+| 合計（已完成的三項） | ~140–190 | **+89 淨增** | 這一階段的價值是「少一條走不到的路、少兩個沒用的工具、備份不再堆積」，不是行數 |
+
+> 如果你在意行數：真正的大刀仍是 **F（~490 行）**，而它正好是你還沒決定的那一項。
+> 我不會為了衝行數去砍 E 的必要語意或測試。

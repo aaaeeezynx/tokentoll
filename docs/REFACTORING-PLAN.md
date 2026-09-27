@@ -1258,7 +1258,7 @@ enum 會同時改動 108 個呼叫點與所有顯示文案，風險大於收益�
 | 純重構不小心改了行為 | Phase 2 的驗收標準是「測試一行不改就通過」——若必須改測試，代表不是純重構 |
 | 上游行為無法在 CI 重現 | 用 mock 上游（`proxy.rs` 已有 `axum` mock 測試基礎設施，見 L1885 起的 `#[tokio::test]`） |
 | 誤刪 Codex／icon 資產 | 已全部在 zip 快照內；`codex/` 與 `icon-lab/` 僅是 gitignore，**檔案仍在磁碟** |
-| 改壞使用者真實設定 | `apply_switch` 前自動備份到 `backups/<app>/`（保留 10 份，`tools.rs:25`）；8 個 live 測試會真的寫入 `~/.claude` 等，**執行前務必確認備份存在** |
+| 改壞使用者真實設定 | `apply_switch` 前自動備份到 `backups/<app>/`（**2026-09-28 第一階段 E 起輪換為保留 1 份**，`tools/consts.rs` 的 `BACKUP_KEEP`；接管前的乾淨設定另存 `*.baseline-*`，不受輪換影響）；8 個 live 測試會真的寫入 `~/.claude` 等，**執行前務必確認備份存在** |
 | 資料庫 migration 出錯 | `db.rs` fail-fast（`lib.rs:27`）；Phase 1 起補 migration 測試 |
 
 **回滾指令**：

@@ -38,6 +38,10 @@
 > **安裝到 `%LOCALAPPDATA%\token-gateway`（2026-09-28 02:43）並實機驗證**。
 > 後端測試 **219 passed / 0 failed / 9 ignored**。詳細證據見 §0.1 與 §9.1。
 
+> **2026-09-28 03:28 更新（第一階段：工具區精簡 D-1／A／E）**：三個方向的程式
+> 改動已完成並重新建置、安裝、實機驗證。後端測試 **223 passed / 0 failed /
+> 9 ignored**。詳細證據見 §0.2 與 §9.3。**F（移除 hermes）尚未動**。
+
 ---
 
 ## 0.1 2026-09-28：用量「工具」視角（已實機驗證）
@@ -91,6 +95,48 @@
 >
 > 也就是說：**表上沒有任何一格是「推論」來的**；OCR 讀不清的格子，我用寬度量測
 > 定案。若你實機看到某一格與上表不符，那是我的驗證方法仍有漏洞，請直接告訴我。
+
+---
+
+## 0.2 2026-09-28：第一階段工具區精簡（D-1／A／E，已實機驗證）
+
+**做了什麼**（每個方向一個 commit，細節見 `SIMPLIFICATION-PLAN.md` §10.4–10.8）：
+
+| commit | 方向 | 一句話 |
+|---|---|---|
+| `3908fcd` | D-1 | 刪掉走不到的「真·直連上游」分支（`via_gateway`），只剩「經網關」一條路 |
+| `71d51a6` | A | 移除 cursor／antigravity 的偵測與接管 arm，工具清單 7 → 5 |
+| `38c5bcd` | E | 輪換備份 `BACKUP_KEEP` 10 → 1，並新增「輪換前先保住接管前設定」的安全網 |
+
+**驗證方式與結果**（下表都是**實跑**，不是推論）：
+
+| 驗證項 | 方法 | 結果 |
+|---|---|---|
+| 產物比原始碼新 | 時間戳（最新原始碼 03:11:50、exe 03:28:11） | ✅ |
+| 前端真的換新 | exe 內資源鍵 `index-BAemutFc.js`（前版 `index-BtK0gyS1.js`）、`index-DnRx7SDk.css` 未變 | ✅ |
+| 安裝檔真的換新 | NSIS `/S` exit 0；安裝後 exe 03:27:52、同一組資源 | ✅ |
+| D-1 真的進了產物 | 在 exe 內搜 `via_gateway` → **找不到** | ✅ |
+| A 的工具清單 | 上游來源頁的頁籤讀到「本機工具（**2/5** 接管中）」，五張卡是 Claude Code／Codex／OpenCode／Hermes Agent／DeepSeek Harness | ✅ |
+| A 的文案 | 工具區底部讀到「Cursor／Antigravity 不提供接管…」 | ✅ |
+| D-1 的方案路徑 | 點 Claude Code 卡片開對話框 → 讀到 `…\.claude\settings.json · 自動備份`、`8 項寫入`、「⚠ ANTHROPIC_AUTH_TOKEN 將明文寫入 settings.json…網關模式下請使用可吊銷的本地 sk Key」（證明新產物的 `switch_plan` 仍能生成方案；D-1 本身由上面「`via_gateway` 消失」證明） | ✅ |
+| 沒有誤寫任何設定 | 全程未按「套用／接管」；驗證前後備份目錄完全相同（claude 10／codex 11＋baseline 1／hermes 6／opencode 10），`app.db` mtime 未變 | ✅ |
+| **沒能 GUI 驗證** | 用量頁那個自製「本機工具」下拉，滑鼠事件打不開它的彈出層 | ⚠️ 改用程式碼與 diff 證明：三次 commit 都沒動 `APP_META`／`APP_ORDER`／用量頁任何一行，選項來源就是 `APP_META`（含 cursor／antigravity），所以「選項一個不少」成立 |
+
+**自動化測試**：`cargo test --offline` → **223 passed / 0 failed / 9 ignored**（exit 0）；
+`cargo clippy --offline --all-targets` → 5 個警告，與基線相同；
+`npx tsc --noEmit` exit 0；`scripts/check_app_labels.py` 前後端顯示名一致。
+
+**E 的 4 條新測試**（`src-tauri/src/tools/tests/restore.rs`）：
+
+| 測試 | 釘住什麼 |
+|---|---|
+| `prune_keep_one_keeps_the_clean_backup` | `keep=1` 時淘汰的是污染備份，留下來的仍是乾淨那份 |
+| `keep_one_still_restores_original_after_repeated_takeover` | 「接管 → 再接管 → 還原」仍回到最初內容（走 baseline） |
+| `keep_one_salvages_baseline_from_history_before_prune` | 沒有 baseline、只有一串歷史備份時，輪換前先把最乾淨的存成 baseline |
+| `backup_keep_is_one_by_design` | 把「1」釘成刻意決定，避免被隨手改掉 |
+
+> **對你備份的實際影響**：下次對某工具按「接管」時，該工具的 `bak-` 會被輪換到
+> 1 份（乾淨那份或最新那份），`baseline` 不受影響。不想被輪換就不要按接管。
 
 ---
 
@@ -494,7 +540,40 @@ py scripts\dump_traces.py --problems -n 100
 
 ## 9. 建置資訊
 
-### 9.1 最新建置（2026-09-28 02:43）—— 你目前安裝的就是這一個
+### 9.3 最新建置（2026-09-28 03:28，第一階段 D-1／A／E）—— 你目前安裝的就是這一個
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | **2026-09-28 03:28**（release 編譯 12 分 14 秒） |
+| 執行檔大小 | 9,046,528 bytes（8,835 KB） |
+| MSI 大小 | 7,364,608 bytes（7,192 KB） |
+| NSIS 大小 | 3,842,393 bytes（3,752 KB） |
+| 後端測試 | **223 passed / 0 failed / 9 ignored**（本輪實跑 `cargo test --offline`，exit 0） |
+| clippy | 5 個警告，與基線相同（皆在既有程式碼） |
+| 前端型別檢查 | `npx tsc --noEmit` exit 0 |
+| 前端資源指紋 | `index-BAemutFc.js`（前版 `index-BtK0gyS1.js`）、`index-DnRx7SDk.css`（未變） |
+
+**已驗證三種產物都比所有原始碼新**（最新原始碼 `tools.rs` 為 `03:11:50`，產物 `03:28:11`）。
+
+**二進位內容抽查**：
+
+| 字串 | 結果 | 意義 |
+|---|---|---|
+| `index-BAemutFc.js` / `index-DnRx7SDk.css` | ✅ 存在 | 內嵌的是本次建置的前端（含 A 的文案改動） |
+| `via_gateway` | ❌ **不存在** | D-1 真的編進去了（唯一模式） |
+| `usage_by_app` / `tools_detect` | ✅ 存在 | 第二階段與工具偵測命令仍在 |
+
+**安裝驗證**：
+
+| 檢查 | 結果 |
+|---|---|
+| 安裝前 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 2026-09-28 02:43，內含 `index-BtK0gyS1.js`（前一版） |
+| 執行 NSIS 安裝檔（`/S`） | exit code 0 |
+| 安裝後同一路徑 | 2026-09-28 03:27:52、9,046,528 bytes，內含 `index-BAemutFc.js`、且沒有 `via_gateway` ✅ |
+| 實機 GUI | 見 §0.2（工具清單 5 個、切換對話框方案可生成、全程未寫入任何設定） |
+| 你的備份與資料庫 | 驗證前後完全相同（claude 10／codex 11＋baseline 1／hermes 6／opencode 10；`app.db` mtime 未變） |
+
+### 9.1 前一次建置（2026-09-28 02:43，已被 9.3 取代）
 
 | 項目 | 值 |
 |---|---|
@@ -525,7 +604,7 @@ py scripts\dump_traces.py --problems -n 100
 | 執行 NSIS 安裝檔（`/S`） | exit code 0 |
 | 安裝後同一路徑 | 2026-09-28 02:43，內含 `index-BtK0gyS1.js` 與 `usage_by_app` ✅ |
 
-### 9.2 前一次建置（2026-09-27 05:11，Phase 1～5 第一次建置，已被 9.1 取代）
+### 9.2 更早的建置（2026-09-27 05:11，Phase 1～5 第一次建置，已被 9.1／9.3 取代）
 
 | 項目 | 值 |
 |---|---|
