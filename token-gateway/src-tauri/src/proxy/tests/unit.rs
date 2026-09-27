@@ -254,6 +254,23 @@
         }
     }
 
+    /// 短名 `dsh` 也要能勝過較長的 `codex`。
+    ///
+    /// 這條是回歸測試：我第一版修法用「字串長度」排序，`dsh`（3 字元）因此被
+    /// 排到 `codex`（5 字元）後面，這個案例還是壞的。優先序必須明講。
+    #[test]
+    fn infer_app_short_dsh_beats_longer_codex() {
+        for ua in ["codex_cli_rs/0.20.0 (dsh)", "dsh/1.0 codex", "codex (dsh)"] {
+            let mut h = HeaderMap::new();
+            h.insert("user-agent", HeaderValue::from_str(ua).unwrap());
+            assert_eq!(
+                infer_app(&h),
+                "dsh",
+                "短名 dsh 必須勝過 codex，不可依長度排序：{ua}"
+            );
+        }
+    }
+
     /// `X-TG-App` 顯式聲明永遠優先於任何 UA 猜測。
     ///
     /// 這是唯一能 100% 確定歸屬的機制，也是未來若再有第三方客戶端

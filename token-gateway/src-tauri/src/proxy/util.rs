@@ -105,9 +105,11 @@ pub(crate) fn normalize_model(raw: &str) -> String {
 /// 命中 `codex`，把 DSH 的用量記成 Codex 的用量 —— 兩者都回傳合法名稱，
 /// 所以錯誤不會有任何跡象。
 ///
-/// 修法：先比對**最具體的**樣式，再退回一般樣式。長度就是具體度的代理指標
-/// —— `deepseek-harness` 比 `deepseek` 具體，`opencode` 比 `codex` 具體。
-/// 這樣「同時命中多個」時會選到最明確的那個，而不是清單裡排最前面的。
+/// 修法：分兩層比對 —— 先看「產品自報名」（DSH 家族、opencode…），再看
+/// 「相容性字樣」（`codex`，最容易被別人順帶提到，所以最後比）。
+///
+/// 我曾經用「字串長度＝具體度」來排序，那是錯的：裸的 `dsh`（3 字元）會被排到
+/// `codex`（5 字元）後面。優先序必須明講，不能靠長度巧合。
 pub(crate) fn infer_app(headers: &HeaderMap) -> String {
     if let Some(v) = headers
         .get("x-tg-app")
@@ -124,31 +126,33 @@ pub(crate) fn infer_app(headers: &HeaderMap) -> String {
         .unwrap_or("")
         .to_lowercase();
 
-    // (樣式, app)。順序＝優先序：最具體的放前面。
+    // 比對分兩層，**不是**靠字串長度排序。
     //
-    // `deepseek-harness` / `deepseek` 必須排在 codex／opencode **之前**：
-    // DSH 的產品識別就是 deepseek，而它的 UA 可能同時帶相容性字串。
-    // 反過來，若 UA 是 codex 但網址指向 deepseek（不會發生，但防禦性處理），
-    // 也應該以產品名為準而非路徑。
-    const PATTERNS: [(&str, &str); 9] = [
-        // 最具體：DSH 的完整產品名
-        ("deepseek-harness", "dsh"),
-        ("deepseek", "dsh"),
-        // 各工具的自報名稱
+    // 我一開始用「長度＝具體度」來排序，但那是錯的：裸的 `dsh` 只有 3 個字元，
+    // 會被排到 `codex`（5 個字元）之後，於是 `codex_cli_rs/1.0 (dsh)` 又會落回
+    // codex。長度只是巧合地適用於 `deepseek-harness` vs `codex`，不是可靠的通則。
+    //
+    // 正確的做法是明講優先序：
+    //
+    //   第 1 層（產品自報名）：DSH 家族與其他工具自己講出來的產品名。
+    //     這些字串出現就代表「我就是這個工具」，優先權最高。
+    //   第 2 層（相容性字樣）：`codex`。很多非 Codex 的客戶端會在自己的 UA
+    //     裡附加 codex 以示相容，所以它最容易被順帶命中，必須最後才比。
+    const SPECIFIC: [(&str, &str); 7] = [
+        ("deepseek-harness", "dsh"), // DSH 的完整產品名
+        ("deepseek", "dsh"),         // DSH 的產品線名
+        ("dsh", "dsh"),              // 客戶端可能只用短名自稱
         ("opencode", "opencode"),
         ("hermes", "hermes"),
         ("antigravity", "antigravity"),
         ("cursor", "cursor"),
-        // codex 放最後：它的字串最短、最容易被別人的 UA 順帶命中
-        ("codex", "codex"),
-        // claude 系列（含 anthropic SDK）
+    ];
+    const GENERIC: [(&str, &str); 3] = [
+        ("codex", "codex"), // 最容易被別人順帶提到 → 最後比
         ("claude", "claude"),
         ("anthropic", "claude"),
     ];
-    // 依「由長到短」排序後比對：同時命中多個時，選最具體的那個。
-    let mut ordered: Vec<(&str, &str)> = PATTERNS.to_vec();
-    ordered.sort_by_key(|(pat, _)| std::cmp::Reverse(pat.len()));
-    for (pat, app) in ordered {
+    for (pat, app) in SPECIFIC.iter().chain(GENERIC.iter()) {
         if ua.contains(pat) {
             return app.to_string();
         }
