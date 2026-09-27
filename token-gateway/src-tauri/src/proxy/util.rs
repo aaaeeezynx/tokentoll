@@ -91,6 +91,23 @@ pub(crate) fn normalize_model(raw: &str) -> String {
     s
 }
 /// 從 UA 推斷來源應用程式；允許客戶端用 `X-TG-App` 顯式聲明（取值為 app id）。
+///
+/// # 為什麼要比對「最具體」的字串，而不是照固定順序找第一個命中
+///
+/// 原本的寫法是按固定順序（codex, opencode, hermes, dsh, deepseek…）找第一個
+/// `contains`。那在單一命中的 UA 上沒問題，但只要 UA 同時出現兩個關鍵字就會
+/// 歸錯邊 —— 而且是**靜默歸錯**，因為任何命中都會回傳一個合法 app 名稱。
+///
+/// 真實案例：DSH 的 `dsh-llm` 套件會用 `attributionHeaders()` 送出
+/// `deepseek-harness/<ver> (+https://github.com/deepseek-ai/deepseek-harness)`。
+/// 這個字串本身命中 `deepseek`（正確）。但只要客戶端在 UA 後面再接任何含
+/// `codex`／`opencode` 的字（例如 profile 名稱、相容性標註），舊寫法就會先
+/// 命中 `codex`，把 DSH 的用量記成 Codex 的用量 —— 兩者都回傳合法名稱，
+/// 所以錯誤不會有任何跡象。
+///
+/// 修法：先比對**最具體的**樣式，再退回一般樣式。長度就是具體度的代理指標
+/// —— `deepseek-harness` 比 `deepseek` 具體，`opencode` 比 `codex` 具體。
+/// 這樣「同時命中多個」時會選到最明確的那個，而不是清單裡排最前面的。
 pub(crate) fn infer_app(headers: &HeaderMap) -> String {
     if let Some(v) = headers
         .get("x-tg-app")
@@ -106,21 +123,35 @@ pub(crate) fn infer_app(headers: &HeaderMap) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_lowercase();
-    for pat in [
-        "codex",
-        "opencode",
-        "hermes",
-        "dsh",
-        "deepseek",
-        "cursor",
-        "antigravity",
-    ] {
+
+    // (樣式, app)。順序＝優先序：最具體的放前面。
+    //
+    // `deepseek-harness` / `deepseek` 必須排在 codex／opencode **之前**：
+    // DSH 的產品識別就是 deepseek，而它的 UA 可能同時帶相容性字串。
+    // 反過來，若 UA 是 codex 但網址指向 deepseek（不會發生，但防禦性處理），
+    // 也應該以產品名為準而非路徑。
+    const PATTERNS: [(&str, &str); 9] = [
+        // 最具體：DSH 的完整產品名
+        ("deepseek-harness", "dsh"),
+        ("deepseek", "dsh"),
+        // 各工具的自報名稱
+        ("opencode", "opencode"),
+        ("hermes", "hermes"),
+        ("antigravity", "antigravity"),
+        ("cursor", "cursor"),
+        // codex 放最後：它的字串最短、最容易被別人的 UA 順帶命中
+        ("codex", "codex"),
+        // claude 系列（含 anthropic SDK）
+        ("claude", "claude"),
+        ("anthropic", "claude"),
+    ];
+    // 依「由長到短」排序後比對：同時命中多個時，選最具體的那個。
+    let mut ordered: Vec<(&str, &str)> = PATTERNS.to_vec();
+    ordered.sort_by_key(|(pat, _)| std::cmp::Reverse(pat.len()));
+    for (pat, app) in ordered {
         if ua.contains(pat) {
-            return if pat == "deepseek" { "dsh".into() } else { pat.into() };
+            return app.to_string();
         }
-    }
-    if ua.contains("claude") || ua.contains("anthropic") {
-        return "claude".into();
     }
     "unknown".into()
 }

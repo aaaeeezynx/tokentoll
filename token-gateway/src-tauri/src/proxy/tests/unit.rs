@@ -194,6 +194,94 @@
         assert_eq!(infer_app(&h2), "antigravity");
     }
 
+    /// DSH 的**真實** User-Agent 必須歸為 `dsh`，不可被別人攔截。
+    ///
+    /// 這個字串取自 DSH 的 `dsh-llm` 套件原始碼：`attributionHeaders()` 會送出
+    /// `product/version (+url)`，其中 product 為 `deepseek-harness`、url 指向
+    /// `github.com/deepseek-ai/deepseek-harness`。
+    #[test]
+    fn infer_app_dsh_real_user_agent() {
+        let mut h = HeaderMap::new();
+        h.insert(
+            "user-agent",
+            HeaderValue::from_static(
+                "deepseek-harness/0.1.5-rc.3 (+https://github.com/deepseek-ai/deepseek-harness)",
+            ),
+        );
+        assert_eq!(infer_app(&h), "dsh");
+    }
+
+    /// **這是實際回報的 bug。**
+    ///
+    /// 舊寫法按固定順序（codex 在最前面）找第一個 `contains`，所以只要 UA
+    /// 同時含 `codex` 與 DSH 的識別字，就會被記成 Codex —— 而且因為回傳的是
+    /// 合法的 app 名稱，畫面上完全看不出歸錯了。
+    ///
+    /// DSH 本身會載入 `dsh-hooks-codex` 等套件；一旦客戶端把這些名字併進 UA，
+    /// 就會踩到。修法後以「最具體的字串」優先，`deepseek-harness` 勝過 `codex`。
+    #[test]
+    fn infer_app_dsh_wins_over_codex_when_both_present() {
+        for ua in [
+            // DSH 的 UA 後面被接上 codex 相容標註
+            "deepseek-harness/0.1.5-rc.3 (+https://github.com/deepseek-ai/deepseek-harness) codex",
+            "codex_cli_rs/0.20.0 (deepseek-harness)",
+            // 使用者回報的實際形狀：打網關的其實是 DSH，但帶著 codex 字樣
+            "codex/1.0 deepseek-harness/0.1.5",
+            // opencode 同理：dsh-opencode-session 若洩漏進 UA
+            "deepseek-harness/0.1.5 opencode",
+        ] {
+            let mut h = HeaderMap::new();
+            h.insert("user-agent", HeaderValue::from_str(ua).unwrap());
+            assert_eq!(
+                infer_app(&h),
+                "dsh",
+                "UA 同時含 DSH 與他人字樣時應歸 dsh：{ua}"
+            );
+        }
+    }
+
+    /// 純 Codex 的 UA 不受影響（修法不可為了修 DSH 而弄壞 Codex）。
+    #[test]
+    fn infer_app_pure_codex_still_codex() {
+        for ua in [
+            "codex_cli_rs/0.20.0",
+            "codex/1.0",
+            "OpenAI/Codex 1.0",
+        ] {
+            let mut h = HeaderMap::new();
+            h.insert("user-agent", HeaderValue::from_str(ua).unwrap());
+            assert_eq!(infer_app(&h), "codex", "純 Codex UA 應維持 codex：{ua}");
+        }
+    }
+
+    /// `X-TG-App` 顯式聲明永遠優先於任何 UA 猜測。
+    ///
+    /// 這是唯一能 100% 確定歸屬的機制，也是未來若再有第三方客戶端
+    /// 撞名時的正解 —— 不必再來改這張表。
+    #[test]
+    fn infer_app_explicit_header_beats_ambiguous_ua() {
+        let mut h = HeaderMap::new();
+        h.insert(
+            "user-agent",
+            HeaderValue::from_static("codex/1.0 deepseek-harness/0.1.5"),
+        );
+        h.insert("x-tg-app", HeaderValue::from_static("dsh"));
+        assert_eq!(infer_app(&h), "dsh");
+        // 反過來也一樣：聲明 codex 就以 codex 為準
+        h.insert("x-tg-app", HeaderValue::from_static("codex"));
+        assert_eq!(infer_app(&h), "codex");
+    }
+
+    /// 沒有任何線索時回 `unknown`，不可亂猜成某個工具。
+    #[test]
+    fn infer_app_unknown_when_no_signal() {
+        let mut h = HeaderMap::new();
+        h.insert("user-agent", HeaderValue::from_static("python-requests/2.31"));
+        assert_eq!(infer_app(&h), "unknown");
+        let empty = HeaderMap::new();
+        assert_eq!(infer_app(&empty), "unknown");
+    }
+
 
     #[test]
     fn extract_gemini_usage_metadata() {
