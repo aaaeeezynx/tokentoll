@@ -183,54 +183,15 @@ pub(crate) fn detect_dsh() -> ToolStatus {
 }
 
 
-/// Cursor：主設定在 SQLite（state.vscdb）中，不做自動寫入，僅檢測。
-pub(crate) fn detect_cursor() -> ToolStatus {
-    let mut st = ToolStatus {
-        app: "cursor".into(),
-        display: "Cursor".into(),
-        installed: on_path(&["cursor", "cursor-agent"]),
-        config_path: None,
-        current_base_url: None,
-        current_model: None,
-        gateway_active: false,
-        supported_switch: false,
-    };
-    if let Ok(home) = user_home() {
-        // Windows: %APPDATA%\Cursor；macOS/Linux: ~/.cursor
-        let win_cfg = dirs::data_dir().map(|d| d.join("Cursor")).unwrap_or_default();
-        if home.join(".cursor").exists() || win_cfg.exists() {
-            st.installed = true;
-        }
-    }
-    st
-}
-
-
-/// Antigravity：CLI 設定 schema 未定，不做自動寫入，僅檢測。
-pub(crate) fn detect_antigravity() -> ToolStatus {
-    let mut st = ToolStatus {
-        app: "antigravity".into(),
-        display: "Antigravity".into(),
-        installed: on_path(&["agy", "antigravity"]),
-        config_path: None,
-        current_base_url: None,
-        current_model: None,
-        gateway_active: false,
-        supported_switch: false,
-    };
-    if let Ok(home) = user_home() {
-        let cfg = home.join(".gemini").join("antigravity-cli").join("settings.json");
-        if cfg.exists() {
-            st.installed = true;
-            st.config_path = Some(cfg.to_string_lossy().to_string());
-        } else if home.join(".gemini").exists() {
-            st.installed = true;
-        }
-    }
-    st
-}
-
-
+/// Cursor 與 Antigravity 已不再檢測（2026-09-28，第一階段 A）。
+///
+/// 理由（實查）：兩者本來就**只能檢測、不能接管**（`supported_switch: false`），
+/// 而且都沒安裝、0 筆請求、0 份備份。
+///
+/// ⚠️ `APPS`／`APP_META`／`APP_COLORS`／`infer_app` 裡的 cursor／antigravity
+/// **刻意保留**：那四處是**用量歸屬與顯示**用的，不是工具偵測用的。刪掉的話，
+/// 歷史資料若有 cursor 請求會變成 `unknown`，用量篩選下拉也會少兩個選項
+/// —— 這正是「精簡不可以犧牲資訊」的落點。
 pub fn detect_tools(port: u16) -> Vec<ToolStatus> {
     vec![
         detect_claude(port),
@@ -238,8 +199,6 @@ pub fn detect_tools(port: u16) -> Vec<ToolStatus> {
         detect_opencode(port),
         detect_hermes(port),
         detect_dsh(),
-        detect_cursor(),
-        detect_antigravity(),
     ]
 }
 

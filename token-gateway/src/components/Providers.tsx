@@ -710,9 +710,9 @@ export default function ProvidersPage() {
           ))}
         </div>
         <p className="mt-3 text-xs text-white/15">
-          Cursor / Antigravity / DSH 僅檢測不寫入設定（Cursor 設定在 SQLite、
-          Antigravity 格式未定、DSH endpoint 由 profile bundle 決定）。
-          這些工具請手動把 base_url 指向本網關，並在請求頭帶 x-tg-app 標識。
+          DSH 僅檢測不寫入設定（endpoint 由 profile bundle 決定）；請手動把
+          base_url 指向本網關，並在請求頭帶 x-tg-app 標識。
+          Cursor／Antigravity 不提供接管，只作為用量歸屬標籤出現在用量頁。
         </p>
           </>
         )}

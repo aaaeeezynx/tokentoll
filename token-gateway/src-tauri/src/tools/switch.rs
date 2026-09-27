@@ -265,25 +265,18 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             );
             return Ok(plan);
         }
-        "cursor" => {
+        // cursor／antigravity：仍列在 APPS（用量歸屬與篩選要用），但**不提供
+        // 自動接管**，而且已經不再出現在工具偵測清單裡（第一階段 A）。
+        // 原本這裡各有專屬的「請手工配置」提示，但那兩條路在 UI 上已走不到，
+        // 第一階段 A 一併刪除，改成這一條誠實的拒絕。
+        app => {
             plan.supported = false;
             plan.will_backup = false;
-            plan.warnings.push(
-                "Cursor 主設定在 SQLite（state.vscdb），請手工在 設定 → Models 中填 OpenAI API Key 並勾選 Override OpenAI Base URL 指向本網關"
-                    .to_string(),
-            );
+            plan.warnings.push(format!(
+                "{app} 不支援自動接管：本 App 只把它當作用量歸屬標籤顯示，不會寫入它的設定檔"
+            ));
             return Ok(plan);
         }
-        "antigravity" => {
-            plan.supported = false;
-            plan.will_backup = false;
-            plan.warnings.push(
-                "Antigravity CLI 設定格式未定，請手工配置 ~/.gemini/antigravity-cli/settings.json 指向本網關"
-                    .to_string(),
-            );
-            return Ok(plan);
-        }
-        _ => unreachable!(),
     }
     // 格式相容提示（`direct_upstream` 只是 Key 的來源不同，流量仍經網關）
     if let Some(pf) = req.provider_format.as_deref() {
