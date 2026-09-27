@@ -40,3 +40,64 @@ pub(crate) const CODEX_ALIAS_CAP: usize = 32;
 
 /// provider 段內聯 models 上限（桌面版選擇器顯示用）。
 pub(crate) const CODEX_INLINE_MODELS_CAP: usize = 200;
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `APPS` 的顯示名是**使用者看得到的字**，而且前端 `logos.tsx` 的
+    /// `APP_META` 必須與它一致。
+    ///
+    /// 這條測試的由來：使用者回報「本機工具應該是顯示 DSH 或 DeepSeek Harness，
+    /// 而不是 DeepSeek」。查證後發現後端早就寫 `"DeepSeek Harness"`，是前端
+    /// 寫成 `"DeepSeek"` —— 兩份清單各寫各的，遲早會再漂移。
+    ///
+    /// 這裡釘住後端；前端由 `scripts/check_app_labels.py` 比對。
+    #[test]
+    fn apps_display_names_are_stable() {
+        let got: Vec<(&str, &str)> = APPS.to_vec();
+        assert_eq!(
+            got,
+            vec![
+                ("claude", "Claude Code"),
+                ("codex", "Codex"),
+                ("opencode", "OpenCode"),
+                ("hermes", "Hermes Agent"),
+                ("dsh", "DeepSeek Harness"),
+                ("cursor", "Cursor"),
+                ("antigravity", "Antigravity"),
+            ],
+            "APPS 的顯示名異動時，請同步更新前端 logos.tsx 的 APP_META"
+        );
+    }
+
+    /// `dsh` 的顯示名必須是完整的產品名，不可簡寫成 `DeepSeek`。
+    ///
+    /// 這一格指的是**本機工具**（DeepSeek Harness CLI），不是模型或廠商；
+    /// 寫成 `DeepSeek` 會讓使用者以為那是模型名稱。
+    #[test]
+    fn dsh_label_is_full_product_name() {
+        let label = APPS
+            .iter()
+            .find(|(a, _)| *a == "dsh")
+            .map(|(_, l)| *l)
+            .expect("APPS 必須包含 dsh");
+        assert_eq!(label, "DeepSeek Harness");
+        assert_ne!(label, "DeepSeek", "不可簡寫成廠商名");
+    }
+
+    /// app id 不可重複，且每個都是非空字串。
+    #[test]
+    fn app_ids_are_unique_and_non_empty() {
+        let mut ids: Vec<&str> = APPS.iter().map(|(a, _)| *a).collect();
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "app id 有重複");
+        for (a, l) in APPS {
+            assert!(!a.is_empty(), "app id 不可為空");
+            assert!(!l.is_empty(), "顯示名不可為空：{a}");
+        }
+    }
+}

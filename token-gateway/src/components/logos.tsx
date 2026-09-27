@@ -24,8 +24,11 @@ export const APP_META: { id: LogoName; label: string }[] = [
   { id: "claude", label: "Claude Code" },
   { id: "codex", label: "Codex" },
   { id: "opencode", label: "OpenCode" },
-  { id: "hermes", label: "Hermes" },
-  { id: "dsh", label: "DeepSeek" },
+  // 以下兩項的顯示名必須與後端 `tools::consts::APPS` 一致。
+  // 這裡指的是**本機工具**（CLI），不是模型或廠商名稱 —— 所以是
+  // 「DeepSeek Harness」而非容易誤解的「DeepSeek」。
+  { id: "hermes", label: "Hermes Agent" },
+  { id: "dsh", label: "DeepSeek Harness" },
   { id: "cursor", label: "Cursor" },
   { id: "antigravity", label: "Antigravity" },
 ];
