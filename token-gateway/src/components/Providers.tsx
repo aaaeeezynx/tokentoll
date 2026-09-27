@@ -709,6 +709,17 @@ export default function ProvidersPage() {
             </div>
           ))}
         </div>
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold tracking-wider text-white/40 uppercase">
+              本機工具版本
+            </span>
+            <span className="text-[11px] text-white/25">
+              可接管／還原：Claude Code、Codex、OpenCode
+            </span>
+          </div>
+          <ToolVersions />
+        </div>
         <p className="mt-3 text-xs text-white/15">
           DSH 僅檢測不寫入設定（endpoint 由 profile bundle 決定）；請手動把
           base_url 指向本網關，並在請求頭帶 x-tg-app 標識。

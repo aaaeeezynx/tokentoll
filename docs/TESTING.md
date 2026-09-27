@@ -40,7 +40,13 @@
 
 > **2026-09-28 03:28 更新（第一階段：工具區精簡 D-1／A／E）**：三個方向的程式
 > 改動已完成並重新建置、安裝、實機驗證。後端測試 **223 passed / 0 failed /
-> 9 ignored**。詳細證據見 §0.2 與 §9.3。**F（移除 hermes）尚未動**。
+> 9 ignored**。詳細證據見 §0.2 與 §9.3。
+
+> **2026-09-28 04:2x 更新（第一階段：F 移除 hermes 支援）**：hermes 支援已整塊
+> 移除（−783 行），並先把 hermes 自己的設定檔殘留外科清理乾淨。後端測試
+> **216 passed / 0 failed / 8 ignored**（少掉的 7 條正是 hermes 專屬）。
+> 工具的用量歸屬標籤**完整保留**。詳細證據見 §0.3、§9.4 與
+> `SIMPLIFICATION-PLAN.md` §10.9。
 
 ---
 
@@ -137,6 +143,50 @@
 
 > **對你備份的實際影響**：下次對某工具按「接管」時，該工具的 `bak-` 會被輪換到
 > 1 份（乾淨那份或最新那份），`baseline` 不受影響。不想被輪換就不要按接管。
+
+---
+
+## 0.3 2026-09-28：第一階段 F —— 移除 hermes 支援（已實機驗證）
+
+**你的決定**：先把 hermes 從網關殘留中解套，再移除整塊支援。
+
+**動手前的查核（推翻了先前的假設，誠實記錄）**：
+
+| 查核項 | 結果 |
+|---|---|
+| hermes 走哪條路 | `model.provider = opencode-go`、`https://opencode.ai/zen/go/v1` → **沒走網關** |
+| App 的判定 | 工具頁只有 Claude Code／Codex 標「網關接管中」 |
+| hermes 用量 | **1 筆 / 24,632 tokens**，時間 09-23（歷史紀錄） |
+| 真正殘留 | `config.yaml` 一段未被引用的 `providers.tokengateway`＋`.env` 一行 Key |
+
+⇒ 不能「還原到 09-23 備份」（那會把目前可用的 opencode-go／gpt-6-luna 換成舊的
+nvidia／flatkey）。改採**外科清理**（你選的 A）。
+
+**外科清理（可完全回復）**：
+
+| 步驟 | 結果 |
+|---|---|
+| 先備份 | `backups/hermes/config.yaml.bak-20260928-035729`、`.env.bak-20260928-035729`（不經輪換，不會被 `BACKUP_KEEP=1` 砍） |
+| `config.yaml` | 6 行 provider 區塊 → `providers: {}`（349 → 343 行） |
+| `.env` | 刪掉那 1 行（550 → 549 行） |
+| 驗證 | YAML 可解析、`model` 段未動、全檔無 `tokengateway`／`15722` |
+| `hermes doctor` | 配置區全綠（API key ✓／No deprecated keys ✓）、42 項連線檢查中 **OpenCode Go ✓ (key configured)**、`hermes --version` 正常 |
+
+> 想回頭：把那兩份 `*.bak-20260928-035729` 覆蓋回 `%LOCALAPPDATA%\hermes\` 即可。
+
+**程式改動與驗證**：
+
+| 驗證項 | 方法 | 結果 |
+|---|---|---|
+| 測試 | `cargo test --offline` | **216 passed / 0 failed / 8 ignored**（exit 0） |
+| lint | `cargo clippy --offline --all-targets` | **4 個警告**（原為 5，少的那個在被刪的測試裡） |
+| 型別 | `npx tsc --noEmit` | exit 0 |
+| 顯示名一致 | `scripts/check_app_labels.py` | 前後端 7 個顯示名一致（含 hermes） |
+| 產物不含 hermes 程式 | exe 內搜 `hermes_home`／`parse_hermes_model`／`HERMES_CUSTOM_TOKENGATEWAY_API_KEY` | 全部 **False** |
+| 產物仍含用量設施 | exe 內搜 `usage_by_app` | **True** |
+| 工具清單縮減 | 工具頁頁籤讀到「本機工具（**2/4** 接管中）」，四張卡：Claude Code／Codex／OpenCode／DeepSeek Harness | ✅ |
+| 用量歸屬未縮減 | `APP_META`／`APP_ORDER`／`infer_app` 的 hermes 全部保留 | ✅（你的 1 筆 hermes 請求仍歸屬 hermes） |
+| 版本面板 | 工具頁新增「本機工具版本」面板，列出 4 個可接管工具 | ✅ |
 
 ---
 

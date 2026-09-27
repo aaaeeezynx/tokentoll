@@ -3,10 +3,10 @@
 > 狀態（**2026-09-28 更新**）：
 > - **第二階段（用量資訊強化）已完成、已重新建置、已實機驗證** —— 程式 commit
 >   `d417b02`，安裝版 2026-09-28 02:43，證據見 §10 與 `TESTING.md` §0.1。
-> - **第一階段：D-1、A、E 三個方向已完成**（各自一個 commit：`3908fcd`／
->   `71d51a6`／`38c5bcd`，見 §10.4–10.6），並已重新建置＋安裝＋實機驗證
->   （§10.7、`TESTING.md` §0.2）。
-> - **F（移除 hermes）仍未動任何一行** —— 等你從 §10.3 的三條路選一條。
+> - **第一階段：D-1、A、E、F 四個方向全部完成**（各自一個 commit：`3908fcd`／
+>   `71d51a6`／`38c5bcd`／`c0c3f41`，見 §10.4–10.9）；D-1／A／E 已重新建置＋
+>   安裝＋實機驗證（§10.7、`TESTING.md` §0.2），F 的產物驗證見 §10.9.5。
+> - **hermes 已從網關殘留中外科清理乾淨**（你的 opencode-go 設定未動），詳見 §10.9.2。
 >
 > 擬定日期：2026-09-27
 
@@ -191,6 +191,32 @@
 
 **省：約 490 行** ← 這是最大的一刀
 
+**執行結果（2026-09-28，見 §10.9）—— 實際 −733 行（+50／−783），比估計更多，
+而且動手前的查核推翻了原本的假設**：
+
+先查核後發現三件事：
+
+1. **hermes 現在根本沒走網關**：`model.provider` 是 `opencode-go`（base_url 指向
+   `https://opencode.ai/zen/go/v1`），App 自己也沒把它標成「網關接管中」。
+   資料庫那 1 筆 hermes 請求是 **09-23 的歷史紀錄**。（我先前口頭說的「正被接管」
+   是錯的，這裡更正。）
+2. 真正殘留的只有兩處：`config.yaml` 裡一段**沒有任何地方引用**的
+   `providers.tokengateway`（第 25–30 行）與 `.env` 的
+   `HERMES_CUSTOM_TOKENGATEWAY_API_KEY`（第 549 行）。
+3. 因此「先還原到 09-23 備份」是**錯的解法** —— 那會把你目前可用的
+   opencode-go／gpt-6-luna 設定換回舊的 nvidia／flatkey 設定。
+
+**實際做法（你選的 A）**：以外科方式只切掉那兩處殘留（動手前先把兩個檔備份到
+App 的 `backups/hermes/`，並用 `hermes doctor` 驗證改完仍正常），**你的
+opencode-go 設定一個字都沒動**。詳見 §10.9.1。
+
+**保留項全部照原計畫**：`APPS`／`APP_META`／`APP_COLORS`／`APP_ORDER`／
+`infer_app` 的 hermes 都留著 —— 用量歸屬、篩選選項、歷史資料一個不少
+（`scripts/check_app_labels.py` 驗證前後端 7 個顯示名仍一致）。
+
+**額外發現**：`tools/util.rs` 的 `strip_quotes` 只被 hermes 用到，一起刪（−13 行）；
+工具版本清單從 5 項變 4 項，`live_tool_versions_shape` 的契約數字同步更新。
+
 ---
 
 ### 4.4 D-1 —— 刪掉「真·直連上游」這條死路
@@ -334,6 +360,9 @@ pub struct AppStat {
 | 4 | E（備份留 1 份） | 低（需驗還原） |
 | 5 | F（移除 hermes） | 中（先查你現況） |
 
+> **執行順序（實際）**：0 → 1 → 2（D-1）→ 3（A）→ 4（E）→ 5（F），全部完成。
+> 每一項都是獨立 commit，任何一項都能單獨 `git revert`。
+
 **為什麼用量強化先做？** 因為它是**只加不減**的改動，先做完並讓你確認「資訊齊全」之後，再動精簡 —— 這樣你才能清楚區分「精簡造成的變化」與「新功能的變化」。
 
 ---
@@ -344,7 +373,7 @@ pub struct AppStat {
 |---|---|---|
 | 1 | 「本機工具」做成獨立鏡頭還是塞進概覽？ | **已決定並完成**：做成獨立鏡頭「工具」（`UsageAppsLens.tsx`） |
 | 2 | D-1、E 是否確認要做？ | **已完成**：D-1（`3908fcd`）、A（`71d51a6`）、E（`38c5bcd`），見 §10.4–10.7 |
-| 3 | F 動手前先查 hermes 現況？ | **已查，結果在 §10.3** —— hermes **目前正被本網關接管**，所以這一項需要你先決定怎麼處理 |
+| 3 | F 動手前先查 hermes 現況？ | **已查、已處理、已完成**（`c0c3f41`）。查核推翻了「正被接管」的假設：hermes 走的是 opencode-go，真正殘留只有一段沒被引用的 provider 與一行 `.env` Key，已外科清理，見 §10.3 與 §10.9 |
 | 4 | 「渠道」與「模型」鏡頭要不要一併補快取欄位？ | **已完成**（兩者都補上快取讀／快取建／總計／命中率） |
 
 ---
@@ -373,36 +402,38 @@ pub struct AppStat {
 - 驗收數字：`cargo test --offline` → **219 passed / 0 failed / 9 ignored**（exit 0）；
   畫面數字與獨立重算的 SQLite 值逐格相符（詳表見 `TESTING.md` §0.1）。
 
-### 10.2 已完成：第一階段 D-1／A／E（工具區精簡）
+### 10.2 已完成：第一階段全部四個方向（工具區精簡）
 
-三個方向各一個 commit，詳見 §10.4–10.6；建置／安裝／實機驗證見 §10.7。
-**F（移除 hermes）仍一行未動**，等 §10.3 的決定。
+D-1／A／E／F 各一個 commit，詳見 §10.4–10.6、§10.9；建置／安裝／實機驗證見
+§10.7（D-1／A／E）與 §10.9.5（F）。
 
-### 10.3 F 的前置查核結果（hermes 現況）—— **需要你先決定**
+### 10.3 F 的前置查核結果（hermes 現況）—— **已更正並結案**
 
-查核時間 2026-09-28，實際讀檔結果：
+**第一次查核（2026-09-28 初）的結論是錯的**，原文如下（保留以示負責）：
+
+> hermes 現在正被本網關接管。若照原方案移除 hermes 支援（F），App 就再也無法幫
+> hermes 還原成接管前的設定。
+
+**錯在哪**：我只看到 `config.yaml` 裡**存在** `tokengateway` 這個 provider 區塊，
+就推論「hermes 在走網關」。但 `model.provider` 是 **`opencode-go`** —— 那個區塊
+**沒有任何地方引用**，App 自己也從來沒把 hermes 標成「網關接管中」。
+
+**複查（實際讀檔）**：
 
 | 檢查 | 結果 |
 |---|---|
 | hermes 家目錄 | `%LOCALAPPDATA%\hermes`（不是 `~/.hermes`） |
-| `config.yaml` 是否指向本網關 | **是**：第 25–28 行 `tokengateway` provider，`base_url = http://127.0.0.1:15722/v1`，`key_env = HERMES_CUSTOM_TOKENGATEWAY_API_KEY` |
-| `.env` 是否含網關 Key | **是**：第 549 行 `HERMES_CUSTOM_TOKENGATEWAY_API_KEY=…` |
-| 本 App 的備份 | `%APPDATA%\com.tokencounter.gateway\backups\`：claude 10 份、codex 11 份、opencode 10 份、hermes **6 份** |
+| `model.provider` / `base_url` | **`opencode-go` / `https://opencode.ai/zen/go/v1`** ← 沒走網關 |
+| App 的判定 | 工具頁只有 Claude Code／Codex 顯示「網關接管中」 |
+| 真正的殘留 | `config.yaml` 第 25–30 行未被引用的 `providers.tokengateway`；`.env` 第 549 行那一行 Key |
+| hermes 用量 | DB：**1 筆 / 24,632 tokens**，時間是 **09-23**（歷史紀錄，不是現在） |
+| 備份 | claude 10／codex 11（＋baseline 1）／opencode 10／hermes 6 |
 
-**這代表什麼**：hermes 現在正被本網關接管。若照原方案移除 hermes 支援（F），
-**App 就再也無法幫 hermes 還原成接管前的設定**（`hermes.rs` 就是那份還原邏輯）。
-你的 hermes 從此會一直指著 `127.0.0.1:15722`，除非你手動改 `config.yaml`。
+**因此原「三條路」的第 1 條（先還原到 09-23 備份）是錯的解法** —— 那會把你目前
+可用的 opencode-go／gpt-6-luna 設定，換成 09-23 的 nvidia／flatkey 舊設定。
 
-**我建議的三條路，請你選一條**：
-
-1. **先還原、再移除**：我用 App 把 hermes 還原成接管前設定（會用到那 6 份備份），
-   確認 `config.yaml` 不再指向網關之後，才做 F。最乾淨，但要動你的 hermes 設定。
-2. **保留 F、但保留「還原」**：只移除「接管」能力，保留 `hermes.rs` 的還原路徑。
-   行數少省一些（約 490 → 省不到 200），但不會讓你卡住。
-3. **照原方案全砍**：你接受 hermes 之後要自己手動改回設定（我可以先把正確的
-   `config.yaml` 內容印給你留存）。
-
-**在你選之前，我不會動 F 的任何一行。**
+**你最終選的做法（A）**：只外科清掉那兩處殘留，**你的 opencode-go 設定一字不動**，
+`hermes doctor` 驗證通過後才做 F。實際執行與可回復方式見 §10.9.1–10.9.2。
 
 ---
 
@@ -483,8 +514,91 @@ cursor／antigravity —— 用量歸屬、篩選選項、歷史資料一個不�
 | D-1 | 60–80 | **−40**（+67/−107） | 達成 |
 | A | ~50 | **−48**（+20/−68） | 達成，並修掉一個 panic 風險 |
 | E | 30–60 | **+177**（+187/−10） | **沒省到**：輪換邏輯必須留，新增的是安全網＋測試＋註解 |
-| F | ~490 | 未動 | 等你決定 |
-| 合計（已完成的三項） | ~140–190 | **+89 淨增** | 這一階段的價值是「少一條走不到的路、少兩個沒用的工具、備份不再堆積」，不是行數 |
+| F | ~490 | **−733**（+50/−783） | 超額達成：連帶刪掉只服務 hermes 的 `strip_quotes` 與測試 |
+| **合計** | ~630–680 | **−644** | 第一階段四項全部完成 |
 
-> 如果你在意行數：真正的大刀仍是 **F（~490 行）**，而它正好是你還沒決定的那一項。
-> 我不會為了衝行數去砍 E 的必要語意或測試。
+> 唯一「沒省到」的是 E，而那是刻意的：我沒有為了行數去砍它的必要語意。
+> F 一項就把整個第一階段的淨行數從 +89 翻成 −644。
+
+---
+
+### 10.9 F 執行紀錄（commit `c0c3f41`，17 檔、+50/−783）
+
+#### 10.9.1 動手前的查核（推翻了原本的假設）
+
+| 查核項 | 結果 |
+|---|---|
+| hermes 目前走哪條路 | `model.provider = opencode-go`、base_url = `https://opencode.ai/zen/go/v1` → **根本沒走網關** |
+| App 怎麼看它 | 工具頁只有 Claude Code／Codex 是「網關接管中」，hermes 不是 |
+| 那 1 筆請求 | DB 查詢：hermes 共 **1 筆／24,632 tokens**，是 09-23 的歷史紀錄 |
+| 真正的殘留 | `config.yaml` 第 25–30 行未被引用的 `providers.tokengateway`、`.env` 第 549 行 `HERMES_CUSTOM_TOKENGATEWAY_API_KEY` |
+| 6 份備份 | 最新兩份（config 與 .env）**都是乾淨的**，還原來源沒有問題 |
+
+⇒ 「先還原到 09-23 備份」會把你現在可用的設定換成舊設定，**不是你要的**。
+你選了 A：只做外科清理。
+
+#### 10.9.2 外科清理（可完全回復）
+
+1. 先把 `config.yaml` 與 `.env` 複製到 App 的 `backups/hermes/`
+   （`config.yaml.bak-20260928-035729`、`.env.bak-20260928-035729`）。
+   **這一步刻意不經 App 的輪換邏輯**，所以這兩份不會被 `BACKUP_KEEP = 1` 砍掉。
+2. `config.yaml`：`providers:` 區塊（6 行）→ `providers: {}`（343 行，原 349）。
+3. `.env`：刪掉那一行（549 行，原 550）。
+4. 驗證：`yaml.safe_load` 可解析、`model` 段逐字未動、全檔再無
+   `tokengateway`／`15722` 痕跡；再跑 **`hermes doctor`** → 配置區全綠
+   （「API key or custom endpoint configured ✓」「No deprecated config keys ✓」），
+   42 項連線檢查中 **OpenCode Go ✓ (key configured)**，沒有任何一項因這次改動失敗。
+5. `hermes --version` 仍正常（v0.21.4）。
+
+> 想回頭：把 `backups/hermes/` 那兩份 `*.bak-20260928-035729` 覆蓋回去即可。
+
+#### 10.9.3 程式改動
+
+刪除（−783 行）：
+
+| 位置 | 內容 |
+|---|---|
+| `tools/hermes.rs` | **整檔 367 行** |
+| `tools/switch.rs` | hermes 接管分支、`hermes_apply` 呼叫、接管後寫 `.env` 的整段（56 行） |
+| `tools/versions.rs` | hermes 版本探測／更新命令／`hermes_up_to_date`／`tool_latest` 補位（79 行） |
+| `tools/backup.rs` | hermes 污染偵測兩處、可還原清單、還原 `.env` 連帶處理（29 行） |
+| `tools/util.rs` | `strip_quotes`（只被 hermes 用，13 行） |
+| `tools/detect.rs` | `detect_hermes` 與清單項（44 行） |
+| 測試 | apply 5 條、restore 2 條、`live_hermes_roundtrip`；契約 5 → 4 |
+
+保留（要求二：**用量資訊必須完整**）：
+
+- 後端 `APPS`／`APP_META` 的 hermes 項、`proxy/util.rs::infer_app` 的
+  `("hermes", "hermes")` 對應
+- 前端 `logos.tsx`／`usageTypes.ts` 的 `APP_META`／`APP_COLORS`／`APP_ORDER`
+- `switch.rs`／`apply.rs` 各留一條**誠實的拒絕**（hermes 不再能被接管）
+
+#### 10.9.4 驗證
+
+| 項目 | 結果 |
+|---|---|
+| `cargo test --offline` | **216 passed / 0 failed / 8 ignored**（少掉的 7 條正是 hermes 專屬） |
+| `cargo clippy --offline --all-targets` | **4 個警告**（原為 5；少的那個就在被刪的測試裡） |
+| `npx tsc --noEmit` | exit 0 |
+| `scripts/check_app_labels.py` | 前後端 7 個顯示名一致（含 hermes） |
+| `hermes doctor` | 配置全綠、OpenCode Go 連線 ✓（見 §10.9.2） |
+
+#### 10.9.5 建置／安裝／實機驗證（2026-09-28 04:34 產物）
+
+| 項目 | 結果 |
+|---|---|
+| exe | 2026-09-28 04:34:43、9,009,152 bytes（比 D-1／A／E 版又小 37,376 bytes） |
+| MSI | 04:34:29、7,344,128 bytes |
+| NSIS setup | 04:34:43、3,830,837 bytes |
+| 前端資源 | `index-B1Ek3VaH.js`、`index-DnRx7SDk.css`（未變） |
+| 安裝 | NSIS `/S` exit 0；安裝後 04:34:36、同一組資源 |
+| **hermes 程式真的消失** | exe 內搜 `hermes_home`／`parse_hermes_model`／`HERMES_CUSTOM_TOKENGATEWAY_API_KEY` → **全部 False** |
+| 用量設施仍在 | exe 內搜 `usage_by_app` → True |
+| 工具清單縮減 | 實機頁籤讀到「**本機工具（2/4 接管中）**」 |
+| 四張工具卡 | Claude Code（網關接管中）、Codex（接管中 ＋ 接管前體檢鈕）、OpenCode、DeepSeek Harness —— **沒有 Cursor／Antigravity／Hermes** |
+| 底部文案 | 讀到「Cursor／Antigravity／Hermes 不提供接管…」 |
+| 新增版本面板 | 工具區新增「本機工具版本」面板，含「可接管／還原：Claude Code、Codex、OpenCode」與四列工具版本 |
+| 未寫入任何設定 | 全程未按套用／接管；備份目錄 claude 10／codex 11＋baseline 1／opencode 10 完全未變，`app.db` mtime 仍是 2026-09-27 17:09:05 |
+
+> hermes 的備份目錄由 6 份變成 8 份 —— 多出來的正是這次外科清理的兩份安全備份
+> （`*.bak-20260928-035729`），**刻意不經 App 的輪換邏輯**，所以不會被砍。
