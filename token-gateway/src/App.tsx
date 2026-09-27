@@ -265,6 +265,7 @@ function Shell() {
             {tab === "usage" && (
               <UsagePage
                 filter={uFilter}
+                onFilter={patchFilter}
                 showImport={showImport}
                 onCloseImport={() => setShowImport(false)}
               />

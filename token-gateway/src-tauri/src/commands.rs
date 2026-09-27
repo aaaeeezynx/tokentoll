@@ -423,6 +423,22 @@ pub fn usage_by_model(
     usage::by_model(&conn, &f).map_err(|e| e.to_string())
 }
 
+/// 分本機工具統計（「工具」視角）。唯一能並排比較各工具的來源。
+#[tauri::command]
+pub fn usage_by_app(
+    db: State<DbState>,
+    range: String,
+    app: Option<String>,
+    provider_id: Option<i64>,
+    model: Option<String>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+) -> Result<Vec<usage::AppStat>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let f = resolve_filter(&range, app, provider_id, model, start_ts, end_ts)?;
+    usage::by_app(&conn, &f).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn usage_hourly(
     db: State<DbState>,

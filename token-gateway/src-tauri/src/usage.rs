@@ -38,6 +38,20 @@ fn where_sql(f: &UsageFilter) -> (String, Vec<rusqlite::types::Value>) {
     (conds.join(" AND "), args)
 }
 
+/// 快取命中率＝`cache_read / (in_tok + cache_read)`。
+///
+/// **全檔唯一算法**：`summary` / `by_app` / `by_provider` / `by_model` 一律呼叫這裡，
+/// 避免各視角各算一套導致數字互相矛盾（前端「工具」「渠道」「模型」三頁並排比對時尤其致命）。
+/// 分母為 0 時回 0.0，不產生 NaN。
+pub(crate) fn hit_rate(in_tok: i64, cache_read: i64) -> f64 {
+    let denom = in_tok + cache_read;
+    if denom > 0 {
+        cache_read as f64 / denom as f64
+    } else {
+        0.0
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct UsageSummary {
     pub requests: i64,
@@ -90,11 +104,7 @@ pub(crate) fn summary(
         cache_read: cr,
         cache_write: cw,
         total_tokens: total,
-        cache_hit_rate: if itok + cr > 0 {
-            cr as f64 / (itok + cr) as f64
-        } else {
-            0.0
-        },
+        cache_hit_rate: hit_rate(itok, cr),
         cost_usd: cost,
     })
 }
@@ -152,9 +162,9 @@ pub(crate) fn trend_by_app(
     let bms = bucket_secs.max(60) * 1000;
     let (w, args) = where_sql(f);
     let mut stmt = conn.prepare(&format!(
-        "SELECT (ts/?1)*?1 AS b, COALESCE(app,'unknown'), COUNT(*),
+        "SELECT (ts/?1)*?1 AS b, COALESCE(NULLIF(app,''),'unknown'), COUNT(*),
          COALESCE(SUM(in_tok+out_tok+cache_read+cache_write),0), COALESCE(SUM(cost_usd),0)
-         FROM request_logs WHERE {w} GROUP BY b, COALESCE(app,'unknown') ORDER BY b ASC"
+         FROM request_logs WHERE {w} GROUP BY b, COALESCE(NULLIF(app,''),'unknown') ORDER BY b ASC"
     ))?;
     let mut full_args = vec![rusqlite::types::Value::from(bms)];
     full_args.extend(args);
@@ -270,9 +280,16 @@ pub struct ProviderStat {
     pub provider_id: Option<i64>,
     pub provider_name: String,
     pub requests: i64,
-    pub tokens: i64,
-    pub cost_usd: f64,
+    pub ok_requests: i64,
     pub success_rate: f64,
+    pub in_tok: i64,
+    pub out_tok: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+    pub tokens: i64,
+    /// 快取命中率，與 `UsageSummary` 同一算法（`hit_rate`）。
+    pub cache_hit_rate: f64,
+    pub cost_usd: f64,
 }
 
 pub(crate) fn by_provider(
@@ -289,26 +306,36 @@ pub(crate) fn by_provider(
         .replace("model_raw LIKE", "l.model_raw LIKE");
     let mut stmt = conn.prepare(&format!(
         "SELECT l.provider_id, COALESCE(p.name, '(未知渠道)'), COUNT(*),
+         COALESCE(SUM(l.in_tok),0), COALESCE(SUM(l.out_tok),0),
+         COALESCE(SUM(l.cache_read),0), COALESCE(SUM(l.cache_write),0),
          COALESCE(SUM(l.in_tok+l.out_tok+l.cache_read+l.cache_write),0),
          COALESCE(SUM(l.cost_usd),0),
          COALESCE(SUM(CASE WHEN l.status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0)
          FROM request_logs l LEFT JOIN providers p ON p.id = l.provider_id
-         WHERE {w} GROUP BY l.provider_id ORDER BY 4 DESC"
+         WHERE {w} GROUP BY l.provider_id ORDER BY 8 DESC"
     ))?;
     let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
         let requests: i64 = r.get(2)?;
-        let ok: i64 = r.get(5)?;
+        let ok: i64 = r.get(9)?;
+        let in_tok: i64 = r.get(3)?;
+        let cache_read: i64 = r.get(5)?;
         Ok(ProviderStat {
             provider_id: r.get(0)?,
             provider_name: r.get(1)?,
             requests,
-            tokens: r.get(3)?,
-            cost_usd: r.get(4)?,
+            ok_requests: ok,
             success_rate: if requests > 0 {
                 ok as f64 / requests as f64
             } else {
                 0.0
             },
+            in_tok,
+            out_tok: r.get(4)?,
+            cache_read,
+            cache_write: r.get(6)?,
+            tokens: r.get(7)?,
+            cache_hit_rate: hit_rate(in_tok, cache_read),
+            cost_usd: r.get(8)?,
         })
     })?;
     rows.collect()
@@ -320,7 +347,11 @@ pub struct ModelStat {
     pub requests: i64,
     pub in_tok: i64,
     pub out_tok: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
     pub tokens: i64,
+    /// 快取命中率，與 `UsageSummary` 同一算法（`hit_rate`）。
+    pub cache_hit_rate: f64,
     pub cost_usd: f64,
 }
 
@@ -332,17 +363,81 @@ pub(crate) fn by_model(
     let mut stmt = conn.prepare(&format!(
         "SELECT COALESCE(NULLIF(model_raw,''),'(未知模型)'), COUNT(*),
          COALESCE(SUM(in_tok),0), COALESCE(SUM(out_tok),0),
+         COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0),
          COALESCE(SUM(in_tok+out_tok+cache_read+cache_write),0), COALESCE(SUM(cost_usd),0)
-         FROM request_logs WHERE {w} GROUP BY 1 ORDER BY 5 DESC"
+         FROM request_logs WHERE {w} GROUP BY 1 ORDER BY 7 DESC"
     ))?;
     let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
+        let in_tok: i64 = r.get(2)?;
+        let cache_read: i64 = r.get(4)?;
         Ok(ModelStat {
             model: r.get(0)?,
             requests: r.get(1)?,
-            in_tok: r.get(2)?,
+            in_tok,
             out_tok: r.get(3)?,
-            tokens: r.get(4)?,
-            cost_usd: r.get(5)?,
+            cache_read,
+            cache_write: r.get(5)?,
+            tokens: r.get(6)?,
+            cache_hit_rate: hit_rate(in_tok, cache_read),
+            cost_usd: r.get(7)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppStat {
+    pub app: String,
+    pub requests: i64,
+    pub ok_requests: i64,
+    pub success_rate: f64,
+    pub in_tok: i64,
+    pub out_tok: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+    pub tokens: i64,
+    /// 快取命中率，與 `UsageSummary` 同一算法（`hit_rate`）。
+    pub cache_hit_rate: f64,
+    pub cost_usd: f64,
+}
+
+/// 分本機工具統計（「工具」視角用）。
+///
+/// 這是唯一能**並排比較各工具**的來源：`summary` 一次只回一個工具的聚合，
+/// `trend_by_app` 只有 tokens 沒有快取拆分。沿用 `where_sql(f)`，因此範圍／工具／
+/// 來源／模型四種篩選自動生效，口徑與其他視角完全一致。
+pub(crate) fn by_app(conn: &Connection, f: &UsageFilter) -> rusqlite::Result<Vec<AppStat>> {
+    let (w, args) = where_sql(f);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT COALESCE(NULLIF(app,''),'unknown'), COUNT(*),
+         COALESCE(SUM(in_tok),0), COALESCE(SUM(out_tok),0),
+         COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0),
+         COALESCE(SUM(in_tok+out_tok+cache_read+cache_write),0),
+         COALESCE(SUM(cost_usd),0),
+         COALESCE(SUM(CASE WHEN status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0)
+         FROM request_logs WHERE {w} GROUP BY 1 ORDER BY 7 DESC"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
+        let requests: i64 = r.get(1)?;
+        let ok: i64 = r.get(8)?;
+        let in_tok: i64 = r.get(2)?;
+        let cache_read: i64 = r.get(4)?;
+        Ok(AppStat {
+            app: r.get(0)?,
+            requests,
+            ok_requests: ok,
+            success_rate: if requests > 0 {
+                ok as f64 / requests as f64
+            } else {
+                0.0
+            },
+            in_tok,
+            out_tok: r.get(3)?,
+            cache_read,
+            cache_write: r.get(5)?,
+            tokens: r.get(6)?,
+            cache_hit_rate: hit_rate(in_tok, cache_read),
+            cost_usd: r.get(7)?,
         })
     })?;
     rows.collect()
@@ -1876,5 +1971,220 @@ mod tests {
         assert!(pp_upsert(&conn, &bad2).is_err());
         pp_delete(&conn, pid, "m-sub").unwrap();
         assert!(pp_delete(&conn, pid, "m-sub").is_err());
+    }
+
+    // ── 分工具統計（「工具」視角）─────────────────────────────────────────
+
+    /// 插入含快取欄位的日誌。
+    #[allow(clippy::too_many_arguments)]
+    fn add_log_cache(
+        conn: &Connection,
+        ts: i64,
+        app: &str,
+        model: &str,
+        itok: i64,
+        otok: i64,
+        cr: i64,
+        cw: i64,
+        status: i64,
+    ) {
+        conn.execute(
+            "INSERT INTO request_logs (ts, app, provider_id, model_raw, model_norm, in_tok, out_tok,
+                                       cache_read, cache_write, cost_usd, latency_ms, status, is_stream)
+             VALUES (?1,?2,NULL,?3,?3,?4,?5,?6,?7,0,10,?8,0)",
+            rusqlite::params![ts, app, model, itok, otok, cr, cw, status],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn hit_rate_is_zero_on_empty_denominator() {
+        // 分母為 0 必須回 0.0，不可產生 NaN（NaN 會讓前端 fmtPct 顯示 "NaN%"）
+        assert_eq!(hit_rate(0, 0), 0.0);
+        assert!(!hit_rate(0, 0).is_nan());
+        // 一般情形
+        assert!((hit_rate(100, 300) - 0.75).abs() < 1e-9);
+        // 全命中
+        assert!((hit_rate(0, 50) - 1.0).abs() < 1e-9);
+        // 全未命中
+        assert!((hit_rate(50, 0) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn by_app_row_matches_summary_for_that_app() {
+        // 這是「工具」視角與「總覽」卡片數字一致的保證：
+        // 每一列都必須等於 summary 加上該工具篩選後的結果。
+        let (_d, conn) = seed_db();
+        add_log_cache(&conn, 1000, "codex", "m1", 100, 20, 300, 0, 200);
+        add_log_cache(&conn, 2000, "codex", "m1", 50, 10, 0, 0, 500);
+        add_log_cache(&conn, 3000, "claude", "m2", 10, 5, 90, 0, 200);
+        add_log_cache(&conn, 4000, "dsh", "m2", 7, 1, 0, 0, 200);
+
+        let f0 = UsageFilter {
+            start_ts: 0,
+            ..Default::default()
+        };
+        let rows = by_app(&conn, &f0).unwrap();
+        assert_eq!(rows.len(), 3);
+
+        let overall = summary(&conn, &f0).unwrap();
+        // 加總必須等於整體
+        assert_eq!(rows.iter().map(|r| r.requests).sum::<i64>(), overall.requests);
+        assert_eq!(rows.iter().map(|r| r.tokens).sum::<i64>(), overall.total_tokens);
+        assert_eq!(rows.iter().map(|r| r.in_tok).sum::<i64>(), overall.in_tok);
+        assert_eq!(rows.iter().map(|r| r.cache_read).sum::<i64>(), overall.cache_read);
+
+        for row in &rows {
+            let f = UsageFilter {
+                start_ts: 0,
+                app: Some(row.app.clone()),
+                ..Default::default()
+            };
+            let s = summary(&conn, &f).unwrap();
+            assert_eq!(row.requests, s.requests, "{} 請求數不一致", row.app);
+            assert_eq!(row.tokens, s.total_tokens, "{} tokens 不一致", row.app);
+            assert_eq!(row.in_tok, s.in_tok, "{} in_tok 不一致", row.app);
+            assert_eq!(row.cache_read, s.cache_read, "{} cache_read 不一致", row.app);
+            assert!(
+                (row.cache_hit_rate - s.cache_hit_rate).abs() < 1e-12,
+                "{} 命中率不一致",
+                row.app
+            );
+        }
+
+        // 排序：tokens 由大到小（codex 420 > claude 105 > dsh 8）
+        assert_eq!(rows[0].app, "codex");
+        assert_eq!(rows[1].app, "claude");
+        assert_eq!(rows[2].app, "dsh");
+    }
+
+    #[test]
+    fn by_app_hit_rate_must_not_be_averaged_by_row() {
+        // 迴歸測試：各工具命中率的「簡單平均」與正確的 token 加權值差距極大。
+        // 前端若拿工具列自行平均，整體數字會嚴重錯誤 —— 本測試把這個陷阱釘住。
+        let (_d, conn) = seed_db();
+        // codex：大量 token，低命中（100 輸入 vs 100 快取讀 → 50%）
+        add_log_cache(&conn, 1000, "codex", "m1", 100_000, 0, 100_000, 0, 200);
+        // claude：極少 token，全命中（0 輸入 vs 1000 快取讀 → 100%）
+        add_log_cache(&conn, 2000, "claude", "m2", 0, 0, 1_000, 0, 200);
+
+        let f0 = UsageFilter {
+            start_ts: 0,
+            ..Default::default()
+        };
+        let rows = by_app(&conn, &f0).unwrap();
+        let overall = summary(&conn, &f0).unwrap();
+
+        let naive = rows.iter().map(|r| r.cache_hit_rate).sum::<f64>() / rows.len() as f64;
+        // 正確值＝(100_000+1_000) / (100_000 + 100_000+1_000) = 101_000/201_000 ≈ 0.5025
+        assert!(
+            (overall.cache_hit_rate - 101_000.0 / 201_000.0).abs() < 1e-9,
+            "整體命中率算法錯誤：{}",
+            overall.cache_hit_rate
+        );
+        // 印證兩者確實不同（若哪天有人「優化」成平均，這裡會失敗）
+        assert!(
+            (naive - overall.cache_hit_rate).abs() > 0.2,
+            "簡單平均 {naive} 與正確值 {} 應有顯著差距",
+            overall.cache_hit_rate
+        );
+    }
+
+    #[test]
+    fn by_app_applies_all_four_filters() {
+        // 沿用 where_sql：四種篩選都必須生效，否則「工具」視角的數字會與其他頁不一致。
+        let (_d, conn) = seed_db();
+        add_log_cache(&conn, 1000, "codex", "m1", 100, 0, 0, 0, 200);
+        add_log_cache(&conn, 2000, "codex", "m2", 200, 0, 0, 0, 200);
+        add_log_cache(&conn, 3000, "claude", "m1", 400, 0, 0, 0, 200);
+
+        let all = by_app(
+            &conn,
+            &UsageFilter {
+                start_ts: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(all.len(), 2);
+
+        // 依模型
+        let only_m1 = by_app(
+            &conn,
+            &UsageFilter {
+                start_ts: 0,
+                model: Some("m1".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(only_m1.iter().map(|r| r.in_tok).sum::<i64>(), 500);
+
+        // 依時間
+        let early = by_app(
+            &conn,
+            &UsageFilter {
+                start_ts: 0,
+                end_ts: Some(1500),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(early.len(), 1);
+        assert_eq!(early[0].app, "codex");
+        assert_eq!(early[0].in_tok, 100);
+    }
+
+    #[test]
+    fn provider_and_model_stats_expose_cache() {
+        // 「來源」與「模型」視角新增的快取欄位必須真的有值。
+        let (_d, conn) = seed_db();
+        add_log_cache(&conn, 1000, "codex", "m1", 100, 20, 300, 5, 200);
+        add_log_cache(&conn, 2000, "codex", "m1", 100, 20, 300, 5, 500);
+
+        let f0 = UsageFilter {
+            start_ts: 0,
+            ..Default::default()
+        };
+        let ps = by_provider(&conn, &f0).unwrap();
+        assert_eq!(ps.len(), 1);
+        assert_eq!(ps[0].in_tok, 200);
+        assert_eq!(ps[0].out_tok, 40);
+        assert_eq!(ps[0].cache_read, 600);
+        assert_eq!(ps[0].cache_write, 10);
+        assert_eq!(ps[0].tokens, 850);
+        assert_eq!((ps[0].requests, ps[0].ok_requests), (2, 1));
+        assert!((ps[0].success_rate - 0.5).abs() < 1e-9);
+        assert!((ps[0].cache_hit_rate - hit_rate(200, 600)).abs() < 1e-12);
+
+        let ms = by_model(&conn, &f0).unwrap();
+        assert_eq!(ms.len(), 1);
+        assert_eq!(ms[0].in_tok, 200);
+        assert_eq!(ms[0].cache_read, 600);
+        assert_eq!(ms[0].cache_write, 10);
+        assert_eq!(ms[0].tokens, 850);
+        assert!((ms[0].cache_hit_rate - hit_rate(200, 600)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn by_app_unknown_bucket_is_preserved() {
+        // `request_logs.app` 是 `TEXT NOT NULL DEFAULT ''`，所以「未知」有兩種來源：
+        // 顯式的 'unknown'（infer_app 判定不出）與空字串（欄位預設值）。
+        // 兩者都必須歸成同一個 'unknown' 桶，否則各工具加總會對不上整體數字。
+        let (_d, conn) = seed_db();
+        add_log_cache(&conn, 1000, "unknown", "m1", 11, 1, 0, 0, 200);
+        add_log_cache(&conn, 2000, "", "m1", 13, 1, 0, 0, 200);
+        let rows = by_app(
+            &conn,
+            &UsageFilter {
+                start_ts: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1, "空字串與 'unknown' 必須合併為一列");
+        assert_eq!(rows[0].app, "unknown");
+        assert_eq!(rows[0].in_tok, 24);
+        assert_eq!(rows[0].requests, 2);
     }
 }

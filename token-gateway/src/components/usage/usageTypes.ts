@@ -9,6 +9,7 @@ import {
 
 export const LENSES: { id: LensId; label: string; icon: IconName }[] = [
   { id: "overview", label: "總覽", icon: "chart-bar-fill" },
+  { id: "apps", label: "工具", icon: "server" },
   { id: "models", label: "模型", icon: "cpu" },
   { id: "monthly", label: "月", icon: "calendar" },
   { id: "daily", label: "日", icon: "calendar-day" },
@@ -23,7 +24,7 @@ export const RANGES: { id: UsageRange; label: string }[] = [
   { id: "30d", label: "最近 30 天" },
 ];
 
-export type LensId = "overview" | "models" | "monthly" | "daily" | "hourly" | "stats" | "channels";
+export type LensId = "overview" | "apps" | "models" | "monthly" | "daily" | "hourly" | "stats" | "channels";
 
 export type Lens = (typeof LENSES)[number]["id"];
 

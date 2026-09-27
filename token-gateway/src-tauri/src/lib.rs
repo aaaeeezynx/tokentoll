@@ -82,6 +82,7 @@ pub fn run() {
             commands::subscription_fees,
             commands::usage_by_provider,
             commands::usage_by_model,
+            commands::usage_by_app,
             commands::usage_hourly,
             commands::pricing_list,
             commands::pricing_upsert,

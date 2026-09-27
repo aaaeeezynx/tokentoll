@@ -252,9 +252,16 @@ export interface ProviderStat {
   provider_id: number | null;
   provider_name: string;
   requests: number;
-  tokens: number;
-  cost_usd: number;
+  ok_requests: number;
   success_rate: number;
+  in_tok: number;
+  out_tok: number;
+  cache_read: number;
+  cache_write: number;
+  tokens: number;
+  /** 快取命中率，後端 `hit_rate()` 演算法，與 UsageSummary 同口徑。 */
+  cache_hit_rate: number;
+  cost_usd: number;
 }
 
 export interface ModelStat {
@@ -262,7 +269,33 @@ export interface ModelStat {
   requests: number;
   in_tok: number;
   out_tok: number;
+  cache_read: number;
+  cache_write: number;
   tokens: number;
+  /** 快取命中率，後端 `hit_rate()` 演算法，與 UsageSummary 同口徑。 */
+  cache_hit_rate: number;
+  cost_usd: number;
+}
+
+/**
+ * 分本機工具統計（「工具」視角）。唯一能並排比較各工具的來源。
+ *
+ * ⚠️ 整體命中率**不可**由本表各行自行平均：各工具 token 量差距極大，
+ * 簡單平均與以 token 加權的正確值實測可差 19.7 個百分點。
+ * 需要整體數字時一律用 `usageSummary`。
+ */
+export interface AppStat {
+  app: string;
+  requests: number;
+  ok_requests: number;
+  success_rate: number;
+  in_tok: number;
+  out_tok: number;
+  cache_read: number;
+  cache_write: number;
+  tokens: number;
+  /** 快取命中率，後端 `hit_rate()` 演算法，與 UsageSummary 同口徑。 */
+  cache_hit_rate: number;
   cost_usd: number;
 }
 
@@ -642,6 +675,23 @@ export const api = {
     endTs?: number | null,
   ): Promise<ModelStat[]> =>
     invoke("usage_by_model", {
+      range,
+      app,
+      providerId,
+      model,
+      startTs: startTs ?? null,
+      endTs: endTs ?? null,
+    }),
+  /** 分本機工具統計（「工具」視角）。 */
+  usageByApp: (
+    range: UsageRange,
+    app?: string | null,
+    providerId?: number | null,
+    model?: string | null,
+    startTs?: number | null,
+    endTs?: number | null,
+  ): Promise<AppStat[]> =>
+    invoke("usage_by_app", {
       range,
       app,
       providerId,

@@ -41,6 +41,9 @@ import {
   StatsLens,
 } from "./usage/usageLenses";
 import {
+  AppsLens,
+} from "./usage/UsageAppsLens";
+import {
   LENSES,
   Lens,
   RANGES,
@@ -135,6 +138,8 @@ export function UsageFilterBar(props: {
 
 export default function UsagePage(props: {
   filter: UsageFilterState;
+  /** 供「工具」視角點列下鑽用（套用該工具到全域篩選）。 */
+  onFilter: (patch: Partial<UsageFilterState>) => void;
   showImport: boolean;
   onCloseImport: () => void;
 }) {
@@ -177,6 +182,11 @@ export default function UsagePage(props: {
   const byModel = useQuery({
     queryKey: ["usage_by_model", ...fkey],
     queryFn: () => api.usageByModel(range, app || null, pid, model || null, sts, ets),
+    refetchInterval: 10000,
+  });
+  const byApp = useQuery({
+    queryKey: ["usage_by_app", ...fkey],
+    queryFn: () => api.usageByApp(range, app || null, pid, model || null, sts, ets),
     refetchInterval: 10000,
   });
   const hourly = useQuery({
@@ -230,6 +240,13 @@ export default function UsagePage(props: {
           gridRange={gridRange}
           onGridRange={setGridRange}
           subFees={subFees}
+        />
+      )}
+      {lens === "apps" && (
+        <AppsLens
+          byApp={byApp}
+          summary={summary}
+          onPickApp={(a) => props.onFilter({ app: a })}
         />
       )}
       {lens === "models" && (
