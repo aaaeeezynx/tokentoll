@@ -206,14 +206,14 @@ export function SwitchDialog(props: {
   const reasoningRaw = row && row.reasoning !== "unset" ? row.reasoning : null;
   const reasoning = reasoningRaw?.split(",")[0]?.trim() || null;
   const context = row?.context_window ?? null;
-  const buildReq = (via: boolean): SwitchRequest | null =>
+  // 只有一種路由模式：經本網關。base_url 由後端覆寫成網關 URL，這裡送的是佔位值。
+  const buildReq = (): SwitchRequest | null =>
     provider && effModel
       ? {
           app: tool.app,
-          base_url: via ? gatewayUrl(port, tool.app) : provider.base_url,
+          base_url: gatewayUrl(port, tool.app),
           api_key: apiKey,
           model: effModel,
-          via_gateway: via,
           provider_id: providerId,
           provider_format: provider?.api_format ?? null,
           reasoning,
@@ -227,7 +227,7 @@ export function SwitchDialog(props: {
         }
       : null;
 
-  const req = buildReq(true);
+  const req = buildReq();
 
   const plan = useQuery({
     queryKey: ["plan", tool.app, port, req],
@@ -303,7 +303,7 @@ export function SwitchDialog(props: {
   };
 
   const doFlip = (v: boolean) => {
-    const r = buildReq(true);
+    const r = buildReq();
     if (!r) return;
     setKeyMsg("");
     setResult("");
@@ -324,7 +324,7 @@ export function SwitchDialog(props: {
 
   /** 直接套用當前下拉選擇（換來源/模型無需重啟開關；開關狀態不變，只重寫工具配置）。 */
   const applySelection = () => {
-    const r = buildReq(true);
+    const r = buildReq();
     if (!r) return;
     setKeyMsg("");
     setResult("");

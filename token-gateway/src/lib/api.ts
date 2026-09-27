@@ -71,10 +71,10 @@ export interface ToolLatest {
 
 export interface SwitchRequest {
   app: string;
+  /** 佔位值：後端一律覆寫成網關 URL（唯一模式就是經網關）。 */
   base_url: string;
   api_key: string;
   model: string;
-  via_gateway: boolean;
   provider_id: number | null;
   provider_format: string | null;
   reasoning: string | null;

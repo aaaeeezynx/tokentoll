@@ -13,7 +13,6 @@ fn gateway_request_overrides_conflicting_external_url() {
         base_url: "https://integrate.api.nvidia.com/v1".into(),
         api_key: "k".into(),
         model: "m".into(),
-        via_gateway: true,
         provider_id: Some(15),
         provider_format: Some("openai-chat".into()),
         reasoning: None,
@@ -68,8 +67,7 @@ fn codex_preserves_comments_and_sections() {
 
 /// B4 迴歸測試：`wire_api` 不可無差別寫 `responses`。
 ///
-/// **直連第三方**時 `base_url` 是對方（`Providers.tsx`：
-/// `base_url: via ? gatewayUrl(...) : provider.base_url`），而多數第三方
+/// **設定檔裡是第三方 URL**（早先的直連模式留下的、或手改的）時，多數第三方
 /// 只實作 Chat Completions；硬寫 `responses` 會讓 Codex 打到不存在的
 /// 端點而 404。原本只**警告**、沒有修。
 #[test]
@@ -586,7 +584,6 @@ fn dsh_plan_is_detect_only() {        let req = SwitchRequest {
         base_url: "".into(),
         api_key: "k".into(),
         model: "deepseek-v4-flash".into(),
-        via_gateway: false,
         provider_id: None,
         provider_format: None,
         reasoning: None,

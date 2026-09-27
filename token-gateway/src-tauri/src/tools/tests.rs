@@ -124,7 +124,6 @@ fn live_req(app: &str, base_url: &str, key: String, direct: bool) -> SwitchReque
         base_url: base_url.into(),
         api_key: key,
         model: LIVE_MODEL.into(),
-        via_gateway: true,
         provider_id: Some(LIVE_PID),
         provider_format: None,
         reasoning: None,

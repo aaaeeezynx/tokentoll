@@ -8,13 +8,19 @@ use super::*;
 #[derive(Debug, Clone, Deserialize)]
 pub struct SwitchRequest {
     pub app: String,
-    /// 已解析好的目標 base_url（網關 URL 或上游直連 URL）。
+    /// 目標 base_url。**前端送來的值只是佔位**：`plan_switch`／`apply_switch`
+    /// 一律覆寫成 `gateway_url(port, app)`。
+    ///
+    /// 原本還有一個「真·直連上游」模式（`via_gateway = false` 時把工具設定檔
+    /// 的網址直接寫成廠商地址），但前端從來沒有送過 `false`（`buildReq()` 的
+    /// `via` 參數三個呼叫點全是 `true`），那條路走不到，已於 2026-09-28 連同
+    /// `via_gateway` 欄位一起刪除。見 `docs/SIMPLIFICATION-PLAN.md` §4.4。
     pub base_url: String,
-    /// 要使用的密鑰取值：網關模式=本地 sk key，直連=上游 key。僅 codex/opencode/dsh 用於生成
-    /// 環境變量指引；claude 寫入文件（見警告）；hermes 寫入自家 .env。
+    /// 要使用的密鑰取值：網關模式=本地 sk key；Key 欄留空時＝上游 Key
+    /// （見 `direct_upstream`）。僅 codex/opencode/dsh 用於生成環境變量指引；
+    /// claude 寫入文件（見警告）；hermes 寫入自家 .env。
     pub api_key: String,
     pub model: String,
-    pub via_gateway: bool,
     /// 選中的渠道（產生 Codex 目錄時必填）。
     pub provider_id: Option<i64>,
     /// 選中渠道的格式（計劃頁做相容提示用）。
@@ -70,13 +76,11 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
     if req.model.trim().is_empty() {
         return Err("model 不能為空".to_string());
     }
+    // base_url 一律由後端決定（唯一的模式就是經網關）。
     let mut normalized = req.clone();
-    if normalized.via_gateway {
-        normalized.base_url = gateway_url(port, &normalized.app);
-    }
+    normalized.base_url = gateway_url(port, &normalized.app);
     let req = &normalized;
     let path = config_path_for(&req.app);
-    let gw = req.via_gateway;
     let mut plan = SwitchPlan {
         app: req.app.clone(),
         config_path: path
@@ -89,15 +93,8 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
         env_setup: vec![],
         warnings: vec![],
     };
-    // 通用警告：正在被本地代理接管的配置將被替換
-    for st in detect_tools(port) {
-        if st.app == req.app && st.gateway_active && !gw {
-            plan.warnings.push(
-                "檢測到該工具當前正被本地代理接管（疑似 cc-switch），切換將替換其 base_url（已自動備份，可回滾）"
-                    .to_string(),
-            );
-        }
-    }
+    // 註：原本這裡有一段「該工具正被本地代理接管（疑似 cc-switch）」警告，只在
+    // `via_gateway = false`（真·直連）時才會出現；那條路走不到，已隨 D-1 刪除。
     match req.app.as_str() {
         "claude" => {
             plan.edits.push(format!("env.ANTHROPIC_BASE_URL = {}", req.base_url));
@@ -110,12 +107,10 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
                     }
                 }
             }
-            if req.via_gateway {
-                plan.warnings.push(
-                    "ANTHROPIC_AUTH_TOKEN 將明文寫入 settings.json：網關模式下請使用可吊銷的本地 sk key，不要放上游長效 key"
-                        .to_string(),
-                );
-            }
+            plan.warnings.push(
+                "ANTHROPIC_AUTH_TOKEN 將明文寫入 settings.json：網關模式下請使用可吊銷的本地 sk key，不要放上游長效 key"
+                    .to_string(),
+            );
         }
         "codex" => {
             plan.edits.push(format!("model = {}", req.model));
@@ -190,13 +185,10 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
                     "直連模式：各段寫 experimental_bearer_token = 上游 Key 明文（不寫 env_key）"
                         .to_string(),
                 );
-                plan.warnings.push(if req.via_gateway {
+                plan.warnings.push(
                     "直連模式：上游 Key 明文寫入 config.toml，僅本機可讀；流量仍經網關轉發，用量照常記錄（僅不計本地 Key 配額）、僅允許該來源登記的模型、不做跨來源路由"
-                        .to_string()
-                } else {
-                    "直連模式：上游 Key 明文寫入 config.toml，僅本機可讀；流量不經網關，無用量審計與故障轉移"
-                        .to_string()
-                });
+                        .to_string(),
+                );
             } else {
                 plan.env_setup.push(ps_export(GATEWAY_ENV_KEY));
                 plan.warnings.push(
@@ -231,13 +223,10 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
                 }
             }
             if req.direct_upstream {
-                plan.warnings.push(if req.via_gateway {
+                plan.warnings.push(
                     "直連模式：上游 Key 明文寫入 opencode.json，僅本機可讀；流量仍經網關轉發，用量照常記錄（僅不計本地 Key 配額）、僅允許該來源登記的模型、不做跨來源路由"
-                        .to_string()
-                } else {
-                    "直連模式：上游 Key 明文寫入 opencode.json，僅本機可讀；流量不經網關，無用量審計與故障轉移"
-                        .to_string()
-                });
+                        .to_string(),
+                );
             } else {
                 plan.env_setup.push(ps_export(GATEWAY_ENV_KEY));
             }
@@ -296,32 +285,25 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
         }
         _ => unreachable!(),
     }
-    if !req.via_gateway {
-        plan.warnings.push(
-            "直連模式：base_url 直接指向第三方，流量不經過本網關，無用量審計與故障轉移".to_string(),
-        );
-    }
-    // 格式相容提示（網關直連模式不經網關，此處僅提示經網關時的行為）
-    if req.via_gateway {
-        if let Some(pf) = req.provider_format.as_deref() {
-            match (tool_format(&req.app), pf) {
-                ("anthropic", "openai-chat") | ("anthropic", "mixed") => {
-                    plan.edits.push(
-                        "將自動做 Anthropic→OpenAI 轉換（模型按可用模型表映射，無映射原樣透傳）"
-                            .to_string(),
-                    );
-                }
-                ("anthropic", "anthropic") => {
-                    plan.edits.push("Anthropic 原生透傳".to_string());
-                }
-                (_, "anthropic") => {
-                    plan.warnings.push(
-                        "格式不相容：該工具不說 Anthropic，請求會被網關拒絕（反向轉換未實現）"
-                            .to_string(),
-                    );
-                }
-                _ => {}
+    // 格式相容提示（`direct_upstream` 只是 Key 的來源不同，流量仍經網關）
+    if let Some(pf) = req.provider_format.as_deref() {
+        match (tool_format(&req.app), pf) {
+            ("anthropic", "openai-chat") | ("anthropic", "mixed") => {
+                plan.edits.push(
+                    "將自動做 Anthropic→OpenAI 轉換（模型按可用模型表映射，無映射原樣透傳）"
+                        .to_string(),
+                );
             }
+            ("anthropic", "anthropic") => {
+                plan.edits.push("Anthropic 原生透傳".to_string());
+            }
+            (_, "anthropic") => {
+                plan.warnings.push(
+                    "格式不相容：該工具不說 Anthropic，請求會被網關拒絕（反向轉換未實現）"
+                        .to_string(),
+                );
+            }
+            _ => {}
         }
     }
     Ok(plan)
@@ -334,9 +316,7 @@ pub fn apply_switch(
     port: u16,
     catalog: Option<String>,
 ) -> Result<SwitchResult, String> {
-    if req.via_gateway {
-        req.base_url = gateway_url(port, &req.app);
-    }
+    req.base_url = gateway_url(port, &req.app);
     // 先出方案做合法性校驗（dsh 等直接在此拒絕）。
     let plan = plan_switch(&req, port)?;
     if !plan.supported {
@@ -423,10 +403,7 @@ pub fn apply_switch(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("config");
-        if req.via_gateway
-            && !has_baseline(&dir, stem)
-            && !backup_is_tainted(&req.app, old, port)
-        {
+        if !has_baseline(&dir, stem) && !backup_is_tainted(&req.app, old, port) {
             write_baseline(&dir, stem, old).map_err(|e| e.to_string())?;
         }
         let name = format!("{stem}.bak-{}", crate::fsutil::backup_stamp());

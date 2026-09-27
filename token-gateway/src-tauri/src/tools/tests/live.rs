@@ -49,7 +49,6 @@ fn live_codex_takeover() {
         base_url: "http://127.0.0.1:15722/v1".into(),
         api_key,
         model: LIVE_MODEL.into(),
-        via_gateway: true,
         provider_id: Some(LIVE_PID),
         provider_format: None,
         reasoning: Some("medium".into()),
@@ -245,8 +244,7 @@ fn live_tool_versions_shape() {
 
 /// 真實接管（默认忽略，需显式 `-- --ignored live_opencode_direct` 執行）：
 /// 對真實 ~/.config/opencode/opencode.json 做一次直連上游接管（默認 NIM 渠道 15），
-/// 驗證注入的上游 Key 明文落盤（回归：曾靜默寫 {env:} 引用導致斷連；另需前端保證
-/// 空 Key 時 via_gateway=true，否則 baseURL 會是第三方直連）。
+/// 驗證注入的上游 Key 明文落盤（回归：曾靜默寫 {env:} 引用導致斷連）。
 /// 前置：opencode 未運行；跑完後用 backups/opencode 下的新備份還原。
 #[test]
 #[ignore = "live: writes real ~/.config/opencode/opencode.json"]
@@ -282,7 +280,6 @@ fn live_opencode_direct() {
         base_url: "http://127.0.0.1:15722/v1".into(),
         api_key: up.clone(),
         model: LIVE_MODEL.into(),
-        via_gateway: true,
         provider_id: Some(LIVE_PID),
         provider_format: None,
         reasoning: None,

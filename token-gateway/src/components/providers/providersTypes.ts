@@ -35,7 +35,7 @@ export function saveLastSwitch(app: string, req: SwitchRequest) {
   try {
     localStorage.setItem(
       LAST_KEY(app),
-      JSON.stringify({ ...req, via_gateway: true, base_url: "" }),
+      JSON.stringify({ ...req, base_url: "" }),
     );
   } catch {
     /* 忽略配額錯誤 */

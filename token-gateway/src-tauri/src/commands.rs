@@ -658,31 +658,22 @@ fn normalize_switch_request(
     req: &mut tools::SwitchRequest,
     port: u16,
 ) -> Result<(), String> {
+    // base_url 一律指向本網關（唯一模式；`via_gateway` 已於 2026-09-28 移除）。
+    req.base_url = tools::gateway_url(port, &req.app);
     if let Some(pid) = req.provider_id {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        let provider: Option<(String, String)> = conn
+        let api_format: Option<String> = conn
             .query_row(
-                "SELECT base_url, api_format FROM providers WHERE id=?1 AND enabled=1",
+                "SELECT api_format FROM providers WHERE id=?1 AND enabled=1",
                 rusqlite::params![pid],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| r.get(0),
             )
             .ok();
         drop(conn);
-        let Some((base_url, api_format)) = provider else {
+        let Some(api_format) = api_format else {
             return Err("該來源不存在或已停用（可能已被刪除），請重新選擇來源接管".into());
         };
-        req.base_url = if req.via_gateway {
-            tools::gateway_url(port, &req.app)
-        } else {
-            base_url
-        };
         req.provider_format = Some(api_format);
-    } else {
-        if req.via_gateway {
-            req.base_url = tools::gateway_url(port, &req.app);
-        } else {
-            return Err("直連模式需先選擇來源".into());
-        }
     }
     Ok(())
 }

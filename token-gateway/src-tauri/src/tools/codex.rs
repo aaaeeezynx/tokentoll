@@ -307,10 +307,13 @@ pub fn codex_inline_models(catalog: Option<&str>) -> Vec<(String, String)> {
 /// `base_url` —— `responses` 走 `/v1/responses`、`chat` 走
 /// `/v1/chat/completions`。本網關**兩種都收**並代為轉譯，所以指向網關時用
 /// `responses` 沒問題（那也是 Codex 的原生形狀，能保留 reasoning 等欄位）。
-/// 但**直連第三方**時 `base_url` 是對方（`Providers.tsx` 的
-/// `base_url: via ? gatewayUrl(...) : provider.base_url`），而多數第三方只
-/// 實作 Chat Completions —— 硬寫 `responses` 會讓 Codex 打到不存在的端點而
-/// 404。
+/// 但**設定檔裡若出現第三方 URL**（早先的「真·直連」模式留下的、使用者手改的、
+/// 或別的代理如 cc-switch 寫入的），就必須用 Chat Completions —— 硬寫
+/// `responses` 會讓 Codex 打到不存在的端點而 404。
+///
+/// 前端那個 `base_url: via ? gatewayUrl(...) : provider.base_url` 的直連分支
+/// 已於 2026-09-28 移除（`docs/SIMPLIFICATION-PLAN.md` §4.4）；這個依 URL 推定
+/// 的後備仍然需要，因為還原／診斷路徑要判斷的是**檔案裡現有的** URL。
 ///
 /// 這個問題原本**已經被發現過**（`restore_backup` 的提示文字寫著「該配置
 /// 直連第三方 URL 但走 responses 協議（直連 Chat 上游會 404）」），但當時只

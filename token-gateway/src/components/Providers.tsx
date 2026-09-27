@@ -298,7 +298,6 @@ export default function ProvidersPage() {
       const req: SwitchRequest = {
         ...saved,
         app: t.app,
-        via_gateway: true,
         base_url: gatewayUrl(port, t.app),
         api_key: savedKey,
         gen_catalog: saved.gen_catalog ?? true,
@@ -358,7 +357,6 @@ export default function ProvidersPage() {
         base_url: gatewayUrl(port, t.app),
         api_key: apiKey,
         model: row.actual_model,
-        via_gateway: true,
         provider_id: provider.id,
         provider_format: provider.api_format ?? null,
         reasoning,
