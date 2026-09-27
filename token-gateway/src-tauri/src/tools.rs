@@ -95,11 +95,9 @@ pub(crate) use {
     switch::plan_switch,
 
     // ---- backup ----
-    backup::backup_is_tainted,
-    backup::has_baseline,
+    backup::ensure_baseline_before_prune,
     backup::prune_backups_keep_clean,
     backup::restore_backup_port,
-    backup::write_baseline,
 };
 
 #[cfg(test)]

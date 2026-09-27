@@ -20,7 +20,17 @@ pub const CODEX_SHARED_PROVIDER_ID: &str = "custom";
 /// Hermes 自定義渠道按其自有約定讀取的 Key 名：`HERMES_CUSTOM_<PROVIDER>_API_KEY`。
 pub const HERMES_CUSTOM_ENV_KEY: &str = "HERMES_CUSTOM_TOKENGATEWAY_API_KEY";
 
-pub const BACKUP_KEEP: usize = 10;
+/// 每個工具保留的 `{stem}.bak-*` 備份份數（第一階段 E：10 → 1）。
+///
+/// **為什麼只留 1 份是安全的**：真正保命的是 `{stem}.baseline-*`（接管前的乾淨
+/// 設定），它由 `write_baseline` 單獨管理，**不在輪換的掃描範圍內**，永遠不會被
+/// 這裡的上限刪掉；而 `prune_backups_keep_clean` 淘汰時**優先刪污染（接管態）
+/// 備份**、乾淨的備份留到最後才動，所以留下來的那份一定是最有價值的那份。
+///
+/// 回歸測試（釘住上面兩句）：
+/// - `tools::tests::restore::prune_keep_one_keeps_the_clean_backup`
+/// - `tools::tests::restore::keep_one_still_restores_original_after_repeated_takeover`
+pub const BACKUP_KEEP: usize = 1;
 
 
 /// (app_id, 顯示名稱)

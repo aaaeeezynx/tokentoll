@@ -57,8 +57,12 @@ pub(crate) fn backup_is_tainted(app: &str, text: &str, port: u16) -> bool {
 
 
 /// 備份輪換（保乾淨版）：總數超限時優先淘汰最舊的接管態備份，
-/// 乾淨（接管前）備份永遠保留——它是關閉接管的唯一退路。
+/// 乾淨（接管前）備份留到最後才動——它是關閉接管的退路之一。
 /// 全是乾淨備份卻超限時才退化為淘汰最舊者（與舊邏輯一致）。
+///
+/// `keep = 1`（第一階段 E）時的行為：先刪污染備份、再刪最舊的，最後留下的一定
+/// 是最有價值的那一份。**baseline 檔（`{stem}.baseline-*`）不在本函式的掃描
+/// 範圍內，永遠不會被這裡刪掉**（那是另一條、更重要的退路）。
 pub(crate) fn prune_backups_keep_clean(
     dir: &Path,
     app: &str,
@@ -89,6 +93,40 @@ pub(crate) fn prune_backups_keep_clean(
         let _ = std::fs::remove_file(&v);
     }
     Ok(())
+}
+
+
+/// 第一階段 E 的安全網：在「只留 1 份」的輪換**之前**，先確保接管前的乾淨
+/// 基準備份存在。
+///
+/// 為什麼需要它：`prune_backups_keep_clean(keep = 1)` 會把舊的 `bak-` 砍掉。
+/// 對「沒有 baseline、只有一串歷史備份」的工具目錄（實際上 claude／opencode／
+/// hermes 就是這樣）而言，**最初的原始設定可能只存在於最舊的那份 bak 裡**，
+/// 一旦被砍就再也還原不回去。所以輪換前先做一次基準備份：
+///
+/// - 當前內容本來就乾淨 → 直接用它寫 baseline（原本 `apply_switch` 的行為）
+/// - 當前內容是接管態 → 從歷史備份裡找**最新的乾淨備份**遷移成 baseline
+///   （重用 `migrate_gateway_baseline` 的掃描邏輯）
+///
+/// 失敗時刻意**不報錯**（例如整串備份都含網關痕跡，那本來就還原不了）：
+/// 這是盡力而為的保險，不該讓接管本身失敗。
+pub(crate) fn ensure_baseline_before_prune(
+    app_data: &Path,
+    app: &str,
+    cfg: &Path,
+    old: &str,
+    port: u16,
+) {
+    let stem = cfg.file_name().and_then(|n| n.to_str()).unwrap_or("config");
+    let dir = app_data.join("backups").join(app);
+    if has_baseline(&dir, stem) {
+        return;
+    }
+    if !backup_is_tainted(app, old, port) {
+        let _ = write_baseline(&dir, stem, old);
+        return;
+    }
+    let _ = migrate_gateway_baseline(app_data, app, cfg, port);
 }
 
 

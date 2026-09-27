@@ -13,9 +13,11 @@ pub(crate) use std::path::Path;
 
 // ---- backup ----
 pub(crate) use crate::tools::backup::backup_is_tainted;
+pub(crate) use crate::tools::backup::ensure_baseline_before_prune;
 pub(crate) use crate::tools::backup::has_baseline;
 pub(crate) use crate::tools::backup::prune_backups_keep_clean;
 pub(crate) use crate::tools::backup::restore_backup_to_port;
+pub(crate) use crate::tools::backup::write_baseline;
 
 // ---- codex ----
 pub(crate) use crate::tools::codex::CodexAuth;
@@ -28,6 +30,7 @@ pub(crate) use crate::tools::codex::codex_wire_api;
 pub(crate) use crate::tools::codex::codex_wire_api_declared;
 
 // ---- consts ----
+pub(crate) use crate::tools::consts::BACKUP_KEEP;
 pub(crate) use crate::tools::consts::CODEX_SHARED_PROVIDER_ID;
 pub(crate) use crate::tools::consts::GATEWAY_PROVIDER_ID;
 pub(crate) use crate::tools::consts::HERMES_CUSTOM_ENV_KEY;

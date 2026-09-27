@@ -387,8 +387,8 @@ pub fn apply_switch(
         backup_path: None,
         extra_files: vec![],
     };
-    // 備份（同名 stem 前綴輪換；輪換時永遠保留乾淨備份——多次切換來源會
-    // 堆積接管態備份，舊邏輯會把唯一的接管前備份淘汰掉導致無法還原）。
+    // 備份（同名 stem 前綴輪換；第一階段 E 起每個工具只留 `BACKUP_KEEP`＝1 份，
+    // 所以輪換前先確保「接管前」基準備份存在——見 `ensure_baseline_before_prune`）。
     if let Some(old) = existing.as_deref() {
         let dir = backups_root.join(&req.app);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -396,9 +396,9 @@ pub fn apply_switch(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("config");
-        if !has_baseline(&dir, stem) && !backup_is_tainted(&req.app, old, port) {
-            write_baseline(&dir, stem, old).map_err(|e| e.to_string())?;
-        }
+        // 第一階段 E：輪換只留 1 份，砍之前先保住「接管前」的乾淨設定
+        // （當前乾淨就用當前；當前是接管態就從歷史備份遷移一份）。
+        ensure_baseline_before_prune(app_data, &req.app, &cfg, old, port);
         let name = format!("{stem}.bak-{}", crate::fsutil::backup_stamp());
         let dest = crate::fsutil::unique_backup_name(&dir, &name);
         std::fs::write(&dest, old).map_err(|e| format!("備份失敗：{e}"))?;
