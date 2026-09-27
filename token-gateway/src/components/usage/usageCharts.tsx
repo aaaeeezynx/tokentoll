@@ -239,7 +239,9 @@ export function TrendChart(props: {
                 { label: "費用", value: `$${fmtCost(hb.cost_usd)}` },
                 ...hb.segs.map((s) => ({
                   dot: appColor(s.app),
-                  label: s.app,
+                  // 用 appLabel 而非原始 id —— 圖例與提示都要顯示「DeepSeek Harness」
+                  // 這種給人看的名稱，不是內部的 `dsh`。
+                  label: appLabel(s.app),
                   value: `${fmtInt(s.tokens)} · ${hb.total ? ((s.tokens / hb.total) * 100).toFixed(0) : 0}%`,
                 })),
               ]
@@ -260,7 +262,7 @@ export function TrendChart(props: {
                   boxShadow: `0 0 6px 0 ${appColor(a)}`,
                 }}
               />
-              {a} · {fmtInt(totals[a])}
+              {appLabel(a)} · {fmtInt(totals[a])}
             </span>
           ))}
         </div>

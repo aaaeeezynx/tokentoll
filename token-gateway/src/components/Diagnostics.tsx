@@ -4,6 +4,7 @@ import { api, type TraceRow } from "../lib/api";
 import { Icon } from "./icons";
 import { Segmented } from "./Segmented";
 import { useConfirm } from "./Confirm";
+import { appLabel } from "./logos";
 
 /**
  * 診斷中心（Phase 1 可觀測性）。
@@ -118,7 +119,7 @@ function TraceDetail({ row }: { row: TraceRow }) {
   const kv: [string, ReactNode][] = [
     ["追蹤 ID", <span className="font-mono">{row.id}</span>],
     ["時間", fmtTime(row.ts)],
-    ["應用", row.app || "—"],
+    ["應用", row.app ? appLabel(row.app) : "—"],
     ["模型（原始）", <span className="font-mono">{row.model_raw || "—"}</span>],
     [
       "轉換",

@@ -7,7 +7,7 @@
 
 ---
 
-## 0. 這次要測的六件事
+## 0. 這次要測的七件事
 
 | # | 測什麼 | 為什麼重要 |
 |---|---|---|
@@ -16,7 +16,8 @@
 | **C** | 原本的 400 / Codex 會話症狀有沒有改善 | 你的原始問題 |
 | **D** | Codex 舊會話的 provider 別名（B3，已修） | 修正前讀取失敗會**靜默變成「沒有別名」**，看起來一切正常 |
 | **E** | `wire_api` 是否跟著上游能力走（B4，已修） | 修正前不論上游是誰都寫死 `responses`，直連第三方會壞 |
-| **F** | DSH 用量不可被記成 Codex（已修） | **你回報的 bug**。修正前 UA 同時含 codex 與 dsh 字樣時會靜默歸錯 |
+| **F** | DSH 用量為何不出現在 Token 趨勢 | **你回報的 bug**。已查明：**標籤是 bug，趨勢圖不是** —— DSH 目前設定直連 `opencode.ai`，根本沒經過網關 |
+| **G** | 本機工具標籤應顯示「DeepSeek Harness」 | **你回報的 bug**（已修）。前端寫成「DeepSeek」，與後端不一致 |
 
 > **為什麼 A 是「從未跑起來過」**：目前安裝在
 > `%LOCALAPPDATA%\token-gateway\token-gateway.exe` 的是 **2026-09-24 22:38**
@@ -253,54 +254,107 @@ py -c "import sqlite3,os;h=os.path.join(os.environ['USERPROFILE'],'.codex');c=sq
 `wire_api` 決定 Codex 用哪種協議打 `base_url`。寫錯的話 Codex 會打到不存在的
 端點而 **404** —— 修正前直連第三方一律被寫成 `responses`，明知會壞還照寫。
 
-## 6.7 測試 F：DSH 用量不可被記成 Codex（已修，`97e5911`）
+## 6.7 測試 F：DSH 用量為何不出現在 Token 趨勢（**已查明，非程式 bug**）
 
-**這是使用者回報的實際 bug**：「Codex 的 Token 用量似乎與 DeepSeek Harness
-用量混淆，DSH 的用量會顯示為 CODEX 的使用量。」
+**你回報**：「Token 趨勢中還是沒有出現 DeepSeek Harness 的使用量」、
+「本機工具應該顯示 DSH 或 DeepSeek Harness，而不是 DeepSeek」。
 
-### 怎麼判斷有沒有過
+### 結論先講
 
-在 Usage 頁把範圍設為「全部／365 天」，按來源分組，然後對照：
-
-| 模型 | 正確歸屬 |
+| 你的回報 | 查證結果 |
 |---|---|
-| `deepseek-v4.1-flash` | **DSH**（`~/.dsh/settings.yaml` 的 `agent-default-model`） |
-| `space-bunny-free`、`glm-5.3-flash`、`omen-alpha` | **DSH**（只在 DSH 的 `oc-go` 清單） |
-| `gpt-5.6-luna` 等 Codex 專屬模型 | Codex |
+| 標籤顯示「DeepSeek」 | ✅ **是真 bug**，已修（前端寫錯，後端本來就對），見 §6.8 |
+| Token 趨勢沒有 DSH 用量 | ⚠️ **不是程式 bug** —— DSH 目前的設定**根本沒有經過網關**，所以網關看不到它的用量 |
+| 「DSH 用量被記成 Codex」 | ❌ **我先前搞錯了**，見下方「更正」 |
 
-若這些模型仍出現在 Codex 分類下，就是還沒生效（**要安裝新版，不是只重跑
-exe** —— 見下方說明）。
+### 為什麼網關看不到 DSH 的用量
 
-### 通過標準
+`~/.dsh/settings.yaml`：
 
-**修正後送出的新請求**必須歸對。**歷史資料不會自動更正**（見下方未處理項）。
+```yaml
+llm-deepseek:
+  baseURL: http://127.0.0.1:15722/v1   # 指向網關
+  models: []                            # ← 沒有設定任何模型，等於沒在用
+llm-pi-ai:
+  providers:
+    oc-go:
+      baseURL: https://opencode.ai/zen/go/v1   # ← 直連，繞過網關
+agent-default-model:
+  provider: oc-go                       # ← DSH 實際用的就是這個
+  model: deepseek-v4.1-flash
+```
 
-### 已完成的驗證
+DSH 實際使用的 provider 是 `oc-go`，它**直接連到 `opencode.ai`**，不經過網關。
+指向網關的 `llm-deepseek` 反而 `models: []`（沒有模型）。
 
-安裝新版後，對執行中的網關實測 5 種 User-Agent，**5/5 全對**：
+**實測佐證**：我本身就跑在 DSH 裡。在 22:00～23:35 之間我進行了數十個回合，
+`request_logs` 裡**完全沒有**這些請求 —— 網關最後一次收到真實流量是 17:09。
+若 DSH 經過網關，我自己的每個回合都會留下紀錄。
 
-| 送出的 UA | 預期 | 結果 |
-|---|---|---|
-| `codex_cli_rs/0.20.0` | codex | ✅ |
-| `deepseek-harness/0.1.5-rc.3 (+https://…)` | dsh | ✅ |
-| `codex_cli_rs/0.20.0 (dsh)` | dsh | ✅（修正前為 **codex**） |
-| `dsh/1.0 codex` | dsh | ✅（修正前為 **codex**） |
-| `deepseek-harness/0.1.5 opencode` | dsh | ✅ |
+### 要讓 DSH 用量被統計，你把 `oc-go` 的 `baseURL` 改成網關即可
 
-### 一個容易踩的坑（我踩過）
+```yaml
+llm-pi-ai:
+  providers:
+    oc-go:
+      baseURL: http://127.0.0.1:15722/v1   # 改成網關
+```
 
-`cargo build --release` **不會**更新已安裝的程式。我第一次「驗證通過」其實是
-假象 —— 安裝目錄裡仍是舊版二進位（不含修正字串），實測自然是舊行為。
-必須跑 `npx tauri build` 產生安裝檔後**重新安裝**，或直接執行
-`target\release\token-gateway.exe`。
+改完後 DSH 的請求就會被記錄。歸屬會是正確的 `dsh`（見下方 UA 查證）。
 
-### 未處理（等你決定）
+### 更正：我先前「1,990 筆被記成 Codex」的說法是錯的
 
-1. **歷史資料未更正。** 已寫入的約 1,990 筆錯誤歸屬仍是 `codex`。更正需要
-   遷移腳本，但「用模型名稱反推 app」本質是猜測，我不想在未經確認下改寫
-   你的歷史資料。
-2. **DSH 沒有送 `X-TG-App`。** 目前歸屬靠 UA 推斷。若要 100% 確定，可替 DSH
-   加上這個標頭（像 hermes 那樣）；修正後的邏輯仍以它為最高優先。
+我在 `97e5911` 的訊息裡寫了「`app='codex'` 的 3,505 筆中有 1,990 筆
+（56.8%）其實是 DSH」。**這個結論是錯的**，原因是我只看模型名稱就推論來源。
+
+錯在哪：
+
+1. **`~/.codex/config.toml` 的 `model = "deepseek-v4.1-flash"`** —— Codex 自己
+   就設定了這個模型，它的 `models = [...]` 清單裡還包含
+   `muse-spark-1.3-contributor`、`space-bunny-free`、`omen-alpha` 等
+   我誤稱為「DSH 專屬」的模型。**兩個工具用的是同一批模型名稱。**
+2. **`source='import'` 的 1,142 筆來自 `~/.codex/sessions/*.jsonl`** ——
+   那些是 Codex 自己的會話檔，本來就是 Codex。其中確實包含
+   `glm-5.3-flash`（523 筆）等模型，證明 Codex 真的用過它們。
+3. **舊版 `infer_app` 對 DSH 的真實 UA 本來就會回 `dsh`。** 我核對過
+   baseline `38f060a` 的原始碼：`deepseek-harness/...` 這個字串不含
+   `codex`／`opencode`／`hermes`／`dsh`，會命中 `deepseek` → 回 `dsh`。
+   所以**從來沒有把 DSH 記成 Codex**。
+
+### UA 查證（這部分仍然有效）
+
+DSH 的 `dsh-llm` 與 `dsh-llm-pi-ai` 都會用 `attributionHeaders()` 送出：
+
+```
+deepseek-harness/<version> (+https://github.com/deepseek-ai/deepseek-harness)
+```
+
+`dsh-llm-pi-ai` 的 `requestHeaders()` 會**移除大小寫不敏感的衝突欄位**再套用
+attribution，所以即使底層 SDK 想設自己的 UA 也會被覆蓋。DSH 不可能送出含
+`codex` 的 UA。
+
+### 那 `97e5911` 的 `infer_app` 改動要留嗎？
+
+**留。** 它對真實流量是**行為等價**的（所有真實 UA 的判定結果都相同），
+只在「UA 同時含多個工具字樣」時更穩健。我補的 7 條測試也把行為釘住了。
+但它**不是**你症狀的原因 —— 這點我必須講清楚。
+
+---
+
+## 6.8 測試 G：本機工具標籤（已修，`43930a4`）
+
+前端 `logos.tsx` 的 `APP_META` 把 `dsh` 標成 `"DeepSeek"`，後端
+`tools/consts.rs` 的 `APPS` 早就寫 `"DeepSeek Harness"` —— 兩份清單各寫各的。
+
+這一格指的是**本機工具**（DeepSeek Harness CLI），不是模型或廠商名稱，
+寫成 `DeepSeek` 會讓人以為那是模型。
+
+**通過標準**：Usage 頁的來源篩選、Token 趨勢圖例、診斷頁明細，凡顯示來源
+名稱處都應為「DeepSeek Harness」。
+
+**已做的防護**：
+- Rust 測試 3 條釘住 `APPS` 顯示名（含「不可簡寫成 DeepSeek」）
+- `py scripts/check_app_labels.py` 比對前後端兩份清單，不一致則 exit 1
 
 ---
 
