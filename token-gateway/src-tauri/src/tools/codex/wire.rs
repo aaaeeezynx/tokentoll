@@ -60,6 +60,35 @@ pub fn codex_wire_api(base_url: &str) -> &'static str {
 }
 
 
+/// 決定**實際要寫進 provider 段**的 `wire_api`。
+///
+/// **指向本網關時一律 `responses`，上游的宣告不得推翻。**
+///
+/// 為什麼（2026-09-28 真實故障）：`api_format` 宣告描述的是**上游**說哪種協議，
+/// 但這裡寫的是 **Codex → 網關**這一段。網關兩種都收並代為轉譯，用 Codex
+/// 原生的 `responses` 較好（保留 reasoning 等欄位）。而 **Codex 自某版起已不
+/// 再接受 `wire_api = "chat"`** —— 它讀到就整份 config 判為
+/// 「Invalid configuration; using defaults」，於是回頭找 ChatGPT 登入，
+/// 使用者看到的錯誤是 **「Unable to log in」**，完全看不出真正的起因。
+///
+/// 先前的寫法是「有宣告就用宣告」，於是 7 個來源全部宣告 `openai-chat` 時，
+/// 接管後每個段都被寫成 `chat` → Codex 直接罷工。修正：先看 URL，
+/// 指向網關／官方 OpenAI 就定死 `responses`；宣告只在**真正的第三方**
+/// （依 URL 會猜 `chat` 的那些）才發揮作用。
+pub fn codex_wire_api_for(base_url: &str, declared: Option<&str>) -> &'static str {
+    let by_url = codex_wire_api(base_url);
+    if by_url == "responses" {
+        return "responses";
+    }
+    // 宣告只可能是 [`codex_wire_api_declared`] 產生的兩個靜態值之一，
+    // 逐一對回靜態字串，避免與 `CodexAuth` 的生命週期糾纏。
+    match declared {
+        Some("responses") => "responses",
+        _ => by_url,
+    }
+}
+
+
 pub(crate) fn gateway_section(
     base_url: &str,
     inline_models: &[(String, String)],
@@ -77,9 +106,9 @@ pub(crate) fn gateway_section(
             tbl["env_key"] = toml_edit::value(GATEWAY_ENV_KEY);
         }
     }
-    // 協議形狀：**優先採用 provider 的明確宣告**（`api_format`），只有在沒有
-    // 宣告時才依 base_url 推定。宣告比猜準（第三方也可能提供 responses 端點）。
-    tbl["wire_api"] = toml_edit::value(auth.wire_api.unwrap_or_else(|| codex_wire_api(base_url)));
+    // 協議形狀：指向本網關時一律 `responses`（見 [`codex_wire_api_for`]）；
+    // 只有真正的第三方才輪到 provider 的明確宣告來覆蓋 URL 推定。
+    tbl["wire_api"] = toml_edit::value(codex_wire_api_for(base_url, auth.wire_api));
     if !inline_models.is_empty() {
         let mut arr = toml_edit::Array::new();
         for (m, display) in inline_models {

@@ -86,3 +86,36 @@ config.toml.baseline-20260926-054716   6931 bytes  09-26 05:47:16
 - 建議修法（**我沒有擅自改程式**）：
   ① 先跳一個「將重寫 config.toml」的確認框；或
   ② 只在使用者明確按下「以此來源重接管」時才寫入，而不是 `onSelect` 直接觸發。
+
+## 7. 後續：這些重寫引爆了一個真正的程式缺陷
+
+重寫本身還帶出了更嚴重的问题 —— **Codex 完全無法啟動**，錯誤是
+「Unable to log in」。
+
+**真因**（`~/.codex/logs_2.sqlite`，首次出現 09-28 16:48:28）：
+
+```
+ERROR codex_app_server: Invalid configuration; using defaults.
+C:\Users\luluna\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
+How to fix: set `wire_api = "responses"` in your provider config.
+```
+
+Codex 讀到非法設定 → **整份 config 丟棄改用預設值** → 回頭找 ChatGPT 登入
+→ 使用者看到「Unable to log in」（與登入無關，`auth.json` 一直都在）。
+
+**責任歸屬（誠實版）**：
+
+| 事實 | 說明 |
+|---|---|
+| 你原本（09-27，**舊版** App 寫的）是 `responses` | 舊版依 URL 推定 → 指向網關 → Codex 原生形狀 → **能用** |
+| 今天 12:31 你裝了**新版**（含 E 階段的「宣告優先」） | 新版會把指向網關的段寫成 `chat` |
+| 我 16:19／16:23／16:28 的三次重寫用的是新版 | 所以寫出 `chat` → 引爆 |
+| **但這不是「只有我點才會壞」** | 你只要在今天的新版上**點任何一張來源卡片**，結果完全相同。缺陷在程式，我的點擊只是**觸發器** |
+
+**已修**：`wire.rs` 新增 `codex_wire_api_for()` —— 指向網關／官方 OpenAI 時
+**定死 `responses`**，宣告只在真正的第三方才生效；並補上使用生產路徑參數
+組合的回歸測試 `codex_apply_forces_responses_on_gateway_even_if_declared_chat`
+（舊測試只驗「網關＋未宣告」，從未與「網關＋宣告」相遇，所以漏掉）。
+你的 `config.toml` 8 個段已於 17:59:48 全部改回 `responses`。
+
+詳見 `docs/TESTING.md` §0.6。

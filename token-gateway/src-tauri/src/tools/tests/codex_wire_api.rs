@@ -163,3 +163,86 @@ fn codex_apply_picks_wire_api_per_upstream() {
         assert_eq!(w, "responses", "走網關時 [{name}] 應為 responses：{out}");
     }
 }
+
+/// **回歸測試（2026-09-28 真實故障）**：真實的接管路徑長這樣 ——
+/// `base_url` 是**本網關**，而 provider 宣告的是 `openai-chat`
+/// （本機 7 個來源的 `api_format` **全部**如此）。
+///
+/// 這種組合以前會被寫成 `wire_api = "chat"`，而 **Codex 已不再接受 `chat`**：
+/// 它把整份 config 判為「Invalid configuration; using defaults」，於是回頭
+/// 找 ChatGPT 登入，使用者看到的錯誤是 **「Unable to log in」**
+/// —— 完全看不出真正的起因。指向網關時必須一律 `responses`。
+#[test]
+fn codex_apply_forces_responses_on_gateway_even_if_declared_chat() {
+    let get = |out: &str| -> Vec<(String, String)> {
+        let v: toml_edit::DocumentMut = out.parse().unwrap();
+        v["model_providers"]
+            .as_table()
+            .unwrap()
+            .iter()
+            .map(|(k, sec)| {
+                let w = sec
+                    .as_table()
+                    .and_then(|t| t.get("wire_api"))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("<缺失>")
+                    .to_string();
+                (k.to_string(), w)
+            })
+            .collect()
+    };
+
+    // 決策函式：指向網關／官方 OpenAI 時，宣告不得推翻。
+    assert_eq!(
+        codex_wire_api_for("http://127.0.0.1:15722/v1", Some("chat")),
+        "responses"
+    );
+    assert_eq!(
+        codex_wire_api_for("http://127.0.0.1:15722/v1", None),
+        "responses"
+    );
+    assert_eq!(
+        codex_wire_api_for("https://api.openai.com/v1", Some("chat")),
+        "responses"
+    );
+    // 真正的第三方：宣告才有作用（此分支在生產路徑已不可達 —— 直連分支
+    // 於 2026-09-28 移除；保留是因為讀取既有設定檔時仍需判讀）。
+    assert_eq!(
+        codex_wire_api_for("https://api.example.com/v1", Some("responses")),
+        "responses"
+    );
+    assert_eq!(
+        codex_wire_api_for("https://api.example.com/v1", None),
+        "chat"
+    );
+
+    // 端到端：完全比照 `switch.rs` 的真實呼叫（網關 URL ＋ 宣告 openai-chat）。
+    let declared = codex_wire_api_declared(Some("openai-chat"));
+    assert_eq!(declared, Some("chat"), "前提：宣告確實是 chat");
+    let out = codex_apply(
+        "model = \"m\"\n",
+        "http://127.0.0.1:15722/v1",
+        "m",
+        None,
+        None,
+        &["oldalias".to_string()],
+        &[],
+        CodexAuth {
+            direct_key: Some("nv-key"),
+            wire_api: declared,
+        },
+    )
+    .unwrap();
+    let got = get(&out);
+    assert!(!got.is_empty(), "應產出 provider 段：{out}");
+    for (name, w) in &got {
+        assert_eq!(
+            w, "responses",
+            "指向網關時 [{name}] 必須是 responses（宣告 openai-chat 不得推翻）：{out}"
+        );
+    }
+    assert!(
+        got.iter().any(|(n, _)| n == "oldalias"),
+        "別名段也必須存在：{got:?}"
+    );
+}

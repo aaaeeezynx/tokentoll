@@ -31,11 +31,13 @@
 > 逐字比對過所有中文訊息（15 → 15，零改字）。**若你看到非預期的行為變化，
 > 那是我拆壞了，請回報。**
 
-> **目前狀態（2026-09-28 16:30 更新）**：測試 **A 已通過**（2026-09-27 22:07
-> 你提供的截圖，已與資料庫逐項核對）。**B、D、E 已於 2026-09-28 由我代跑並
-> 全部通過**（見 §5.3、§6.5、§6.6）；**C 仍然只能你自己在真實使用情境下測**
-> （見 §6）。後端測試 **218 passed / 0 failed / 8 ignored**、clippy **0 警告**。
-> 最新的實機驗證與建置見 §0.5 與 §9.5。
+> **目前狀態（2026-09-28 18:0x 更新）**：測試 **A 已通過**（2026-09-27 22:07
+> 你提供的截圖，已與資料庫逐項核對）。**B、D 已於 2026-09-28 由我代跑並全部
+> 通過**；**E 在代跑時抓到一個真實故障**（接管會寫出 Codex 已不接受的
+> `wire_api = "chat"`，導致 Codex 報「Unable to log in」），**已修正**並補上
+> 回歸測試 —— 詳見 §6.6 與 §0.6。**C 仍然只能你自己在真實使用情境下測**（見 §6）。
+> 後端測試 **219 passed / 0 failed / 8 ignored**、clippy **0 警告**。
+> 最新的實機驗證與建置見 §0.5、§0.6 與 §9.5。
 >
 > <small>（以下為歷史紀錄，數字是當時的基線，已被上面的現況取代）</small>
 
@@ -277,7 +279,7 @@ DBCS 前導位元組會吃掉後面的 `0x0A`，另有解碼成 U+0085 而合併
 |---|---|---|
 | **B** 網關拒絕要留痕 | ✅ **5/5 通過** | §5.3：Δ+3 筆、401／401／400、warn 層級、總數 21→24、「轉換」欄＝網關拒絕（未觸及上游） |
 | **D** Codex 舊會話別名體檢 | ✅ **3/3 通過** | §6.5：ℹ️ 明示讀自 `state_5.sqlite`、6 個別名、並附 ❌ 實例；「讀不到」分支有單元測試釘住 |
-| **E** `wire_api` 跟著上游 | ✅ 可驗的都過了 | §6.6：你**真實的** `config.toml` 8 個段**全部** `wire_api = "chat"`；準則 1 未做成螢幕證據（已誠實註明） |
+| **E** `wire_api` 跟著上游 | ❌→✅ **發現真實故障並修正** | §6.6：E 的「宣告優先」被誤用到指向網關的情況，寫出 Codex **已不再接受**的 `wire_api = "chat"` → Codex 整份 config 判為非法 → **「Unable to log in」**。已修（`codex_wire_api_for`）＋新增回歸測試；你檔案上 8 段現為 `responses` |
 | **C** 你原本的症狀 | ⏳ 仍待你實測 | 需要真實 CLI 使用情境，我無法代跑 |
 | GUI 覆蓋補齊 | ✅ | 診斷頁（含展開明細）、上游來源頁、本機工具分頁、切換對話框全部重新渲染確認過 |
 | 標籤一致性 | ✅ | `scripts/check_app_labels.py` exit 0 |
@@ -328,6 +330,73 @@ opencode-go 的第一個模型正是 `deepseek-v4.1-flash`、reasoning 首位正
 **建議的修法（等你決定，我沒有擅自改）**：來源切換的自動重接管應該
 ①先跳一個「將重寫 config.toml」的確認，或 ②只在**使用者明確按下**某個
 「以此來源重接管」動作時才寫入，而不是 `onSelect` 直接觸發。
+
+---
+
+## 0.6 2026-09-28：Codex 報「Unable to log in」的真因與修正
+
+### 0.6.1 你看到的症狀
+
+開啟 Codex 時出現 **「Unable to log in」**。
+
+### 0.6.2 真因（不是登入問題）
+
+Codex 的日誌（`~/.codex/logs_2.sqlite`，首次出現 **09-28 16:48:28**）說得很清楚：
+
+```
+ERROR codex_app_server: Invalid configuration; using defaults.
+C:\Users\luluna\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
+How to fix: set `wire_api = "responses"` in your provider config.
+```
+
+**Codex 已經不再接受 `wire_api = "chat"`。** 它讀到非法設定就**整份
+`config.toml` 丟棄、改用預設值**，於是 `model_provider` 回到 `openai`、
+回頭去找 ChatGPT 登入狀態 —— 你看到的「Unable to log in」是**下游症狀**，
+跟登入本身無關（`~/.codex/auth.json` 一直都在，mtime 09-24）。
+
+### 0.6.3 為什麼會寫出 `chat`
+
+E 階段（`38c5bcd`）加了「**provider 宣告的 `api_format` 優先於 URL 推定**」。
+但宣告描述的是**上游**說哪種協議，而寫進 `config.toml` 的 `base_url`
+**永遠是本網關** —— 也就是說，宣告被用在了錯的那一段連線上。
+
+你的 7 個來源 `api_format` **全部是 `openai-chat`**，所以接管後
+**每一個** provider 段都被寫成 `chat`，Codex 直接罷工。
+
+**舊版（E 之前）寫的是 `responses`** —— 依 URL 推定，指向網關就給 Codex 原生
+形狀。這解釋了為什麼 09-26／09-27 都正常，而今天 12:31 裝了新版本之後才出事。
+
+### 0.6.4 為什麼測試沒攔住
+
+單元測試只驗了「網關 URL ＋ **未宣告**」→ `responses`
+（用 `CodexAuth::default()`）；而生產路徑（`switch.rs`）
+**永遠帶著宣告**。兩個條件從未在同一條測試裡相遇 —— 這是典型的
+「測試驗了元件、沒驗接線」。
+
+### 0.6.5 修正
+
+| 項目 | 內容 |
+|---|---|
+| 新增 `wire.rs::codex_wire_api_for(base_url, declared)` | 先看 URL：指向**網關／官方 OpenAI** 就定死 `responses`，宣告不得推翻；只有**真正的第三方**才輪到宣告生效 |
+| `gateway_section` 改用它 | 原本是 `auth.wire_api.unwrap_or_else(|| codex_wire_api(base_url))` |
+| 新增回歸測試 | `codex_apply_forces_responses_on_gateway_even_if_declared_chat` —— 用的正是生產路徑的參數組合（網關 URL ＋ `codex_wire_api_declared(Some("openai-chat"))`） |
+| 你目前的 `config.toml` | 8 個段的 `wire_api` 已全數由 `chat` 改為 `responses`（17:59:48） |
+
+**測試**：`cargo test --offline` → **219 passed / 0 failed / 8 ignored**（exit 0）；
+`cargo clippy --offline --all-targets` → **exit 0、0 警告**。
+
+### 0.6.6 兩件仍待你決定的事
+
+1. **`chat` 這個值在新版 Codex 已經完全不能用**（錯誤訊息說的是
+   「no longer supported」，不是「這個 provider 不支援」）。也就是說 E 階段
+   那整套「依上游能力選 chat/responses」的設計**前提已經消失**。
+   目前我只修了「指向網關時定死 responses」這條**實際會走到的路**；
+   「真正的第三方 → `chat`」那條分支在生產路徑已不可達（直連分支於
+   2026-09-28 移除），但**留著就是地雷**。要不要整組拿掉、永遠只寫
+   `responses`，請你決定。
+2. 新版本程式需要**重新建置並安裝**才會生效（見 §9.6）。
+   在那之前，**不要再點「上游來源」頁的來源卡片** —— 舊版 App 仍會把
+   `wire_api` 寫回 `chat`。
 
 ---
 
@@ -586,26 +655,48 @@ py -c "import sqlite3,os;h=os.path.join(os.environ['USERPROFILE'],'.codex');c=sq
 - [x] 接管後打開 `~/.codex/config.toml`，每個 `[model_providers.*]` 段都是
       `wire_api = "chat"` —— **在你真實的 config.toml 上實測通過**
 - [x] 換成經由網關接管時，同一欄位是 `wire_api = "responses"`
-      —— **僅在「未宣告」時成立**，見下方更正
 - [x] 若該渠道的 `api_format` 被宣告為 `openai-responses`，即使 base_url 是
       第三方，也應該寫 `responses`（**宣告優先於 URL 猜測**）
 
-**在你真實檔案上的實測**（2026-09-28，接管中、來源 opencode-go）：
+> ## ❌ 這一項原本是**程式錯、文件對**，而且造成了真實故障
+>
+> **2026-09-28 17:xx 追查「Codex 開啟時報 Unable to log in」時發現：**
+> 實作把「宣告優先」用到了**指向網關**的情況上 —— 你的 7 個來源
+> `api_format` **全部是 `openai-chat`**，於是接管後**每個** provider 段
+> 都被寫成 `wire_api = "chat"`。
+>
+> 而 **Codex 已經不再接受 `wire_api = "chat"`**。它的日誌寫得很清楚
+> （`~/.codex/logs_2.sqlite`）：
+>
+> ```
+> ERROR codex_app_server: Invalid configuration; using defaults.
+> C:\Users\luluna\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
+> How to fix: set `wire_api = "responses"` in your provider config.
+> ```
+>
+> Codex 讀到非法設定就**整份 config 丟棄改用預設值**，於是回頭找 ChatGPT
+> 登入 —— 使用者看到的錯誤是 **「Unable to log in」**，
+> **完全看不出真正的起因**。這正是本節準則 3 要防的事。
+>
+> **為什麼會漏掉**：單元測試只驗了
+> 「網關 URL ＋ **未宣告**」→ `responses`（`CodexAuth::default()`），
+> 而生產路徑**永遠帶著宣告**（`switch.rs` 傳
+> `codex_wire_api_declared(provider_format)`）。兩者從未在同一條測試裡相遇。
+>
+> **修法**（`wire.rs` 新增 `codex_wire_api_for`）：先看 URL ——
+> 指向**網關／官方 OpenAI** 就定死 `responses`，宣告只在**真正的第三方**
+> 才發揮作用。並補上回歸測試
+> `codex_apply_forces_responses_on_gateway_even_if_declared_chat`，
+> 用的正是生產路徑的參數組合。
+
+**在你真實檔案上的實測**（2026-09-28，接管中、來源 opencode-go；修正後）：
 
 | 檢查 | 結果 |
 |---|---|
 | `[model_providers.*]` 段數 | 8（`custom`／`tokengateway`／`gw`／`mock`／`nim-direct`／`nvidia-nim`／`nvidia-proxy`／`opencode-zen`） |
-| 每一段的 `wire_api` | **全部 `chat`** ✓ |
+| 每一段的 `wire_api` | **全部 `responses`** ✓ |
 | 每一段的 `base_url` | **全部 `http://127.0.0.1:15722/v1`** ✓ |
 | 有沒有段落漏寫 `wire_api` | 無 ✓ |
-
-> **更正：準則 3 的寫法不精確。** 真實的優先序是
-> **「provider 宣告的 `api_format` 優先，沒宣告才依 URL 推定」**
-> （`wire.ts`：`codex_wire_api_declared()` 先判，回 `None` 才輪到
-> `codex_wire_api()`）。你 7 個來源的 `api_format` **全部是 `openai-chat`**，
-> 所以**經由網關接管時寫出來的也是 `chat`，不是 `responses`** —— 這是正確行為，
-> 不是 bug。`responses` 只會在「指向網關**且**該來源沒有宣告」時出現。
-> 準則 3 原本的寫法會讓人誤以為現在這份 config 壞了。
 
 **釘住這件事的測試**（`src-tauri/src/tools/tests/codex_wire_api.rs`）：
 
@@ -614,6 +705,7 @@ py -c "import sqlite3,os;h=os.path.join(os.environ['USERPROFILE'],'.codex');c=sq
 | `codex_wire_api_prefers_declared_format` | `openai-chat`→`chat`；`openai-responses`／`mixed`→`responses`；`anthropic`／`gemini`／`None`／空字串→`None`（交 URL 推定）；且**同一個第三方 URL 下，宣告能推翻 URL 推定** |
 | `codex_wire_api_falls_back_to_url_when_undeclared` | 沒宣告時一定回退到 URL 推定，不會變成無值 |
 | `codex_apply_picks_wire_api_per_upstream` | 直連第三方 → **每個**段都 `chat`；走網關且未宣告 → **每個**段都 `responses`；別名段也必須存在 |
+| **`codex_apply_forces_responses_on_gateway_even_if_declared_chat`** | **新增（回歸）**：網關 URL ＋ 宣告 `openai-chat` → **必須** `responses`；官方 OpenAI 同理；真正的第三方才輪到宣告生效 |
 
 > **準則 1 為何沒做成螢幕截圖**：接管預覽要展開「N 項寫入」才會露出內容，
 > 而那個展開控制項在 UI Automation 裡不是可 Invoke 的元素；我用座標點它時
@@ -868,7 +960,7 @@ py scripts\dump_traces.py --problems -n 100
 
 ## 9. 建置資訊
 
-### 9.5 最新建置（2026-09-28 12:31，§8 誠實清單清空輪）—— **你目前安裝的就是這一個**
+### 9.5 前一次建置（2026-09-28 12:31，§8 誠實清單清空輪，已被 9.6 取代）
 
 | 項目 | 值 |
 |---|---|
@@ -914,6 +1006,36 @@ py scripts\dump_traces.py --problems -n 100
 > 點擊**（第一次點擊只用來讓 webview 取得焦點）。純 Win32 程式（Notepad 測試）
 > 不受影響，所以別把「沒反應」誤判成 UI 壞了。本輪最後是「同一點連點 3 次」
 > 才穩定生效；且 OCR 座標與點擊座標存在固定偏移，需先做一次校準。
+
+---
+
+### 9.6 最新建置（2026-09-28 18:14，`wire_api` 修正輪）—— **你目前安裝的就是這一個**
+
+**為什麼要重建**：§0.6 的 `wire_api` 修正動到 Rust 後端。**舊版執行檔仍會把
+`wire_api` 寫成 Codex 已不接受的 `chat`** —— 在裝上這一版之前，只要點
+「上游來源」頁的來源卡片，Codex 就會再次罷工。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | **2026-09-28 18:05:49 起算 → 產物 18:14:53**（release 編譯 7 分 30 秒） |
+| 執行檔大小 | 9,010,176 bytes |
+| MSI 大小 | 7,344,128 bytes |
+| NSIS 大小 | 3,827,231 bytes |
+| **安裝後執行檔 SHA-256 前綴** | **`758F03DFB3E69A73941FA2B0`**（前一次安裝的是 `25CCCF4F0942ACBB17A3B5B8`，**已確實換掉**） |
+| 後端測試 | **219 passed / 0 failed / 8 ignored**（實跑 `cargo test --offline`，exit 0） |
+| clippy | **0 個警告**（`cargo clippy --offline --all-targets`，exit 0） |
+| 新增測試 | `tools::tests::codex_wire_api::codex_apply_forces_responses_on_gateway_even_if_declared_chat` |
+| 前端 | **未改動**（`src/` 一行都沒動） |
+| 啟動後 | 15722 LISTEN ✓；`config.toml` **mtime（17:59:48）與 SHA-256 都沒變** —— 開頁面不會觸發接管 |
+
+**這次的程式改動共 4 個檔案**：
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/tools/codex/wire.rs` | 新增 `codex_wire_api_for()`；`gateway_section()` 改用它 |
+| `src-tauri/src/tools/tests.rs` | 測試模組的再匯出清單加一行 `codex_wire_api_for` |
+| `src-tauri/src/tools/tests/codex_wire_api.rs` | 新增回歸測試（生產路徑的參數組合） |
+| `docs/TESTING.md`、`docs/evidence/2026-09-28-codex-config-incident.md` | 本節與 §0.6 |
 
 ---
 
