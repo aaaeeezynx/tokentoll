@@ -68,25 +68,6 @@ fn codex_preserves_comments_and_sections() {
 }
 
 
-/// B4 迴歸測試：`wire_api` 不可無差別寫 `responses`。
-///
-/// **設定檔裡是第三方 URL**（早先的直連模式留下的、或手改的）時，多數第三方
-/// 只實作 Chat Completions；硬寫 `responses` 會讓 Codex 打到不存在的
-/// 端點而 404。原本只**警告**、沒有修。
-#[test]
-fn codex_wire_api_matches_upstream_capability() {
-    // 指向本網關 → responses（網關兩種都收，且 responses 保留 reasoning）
-    assert_eq!(codex_wire_api("http://127.0.0.1:15722/v1"), "responses");
-    // 官方 OpenAI → responses
-    assert_eq!(codex_wire_api("https://api.openai.com/v1"), "responses");
-    // 第三方 → chat（唯一普遍實作的形狀）
-    assert_eq!(codex_wire_api("https://integrate.api.nvidia.com/v1"), "chat");
-    assert_eq!(codex_wire_api("https://api.deepseek.com/v1"), "chat");
-    assert_eq!(codex_wire_api("https://openrouter.ai/api/v1"), "chat");
-    // 大小寫與前後空白不影響判定
-    assert_eq!(codex_wire_api("  HTTPS://API.OPENAI.COM/v1  "), "responses");
-}
-
 #[test]
 fn codex_shared_brand_keeps_legacy_sections() {
     // 模擬用戶實際 config：custom 段已被外部刪除，僅剩 tokengateway
@@ -265,7 +246,6 @@ fn codex_direct_writes_bearer_no_envkey() {
         &[],
         CodexAuth {
             direct_key: Some("nv-direct-secret"),
-            ..Default::default()
         },
     )
     .unwrap();
@@ -301,6 +281,63 @@ fn codex_doctor_runs_without_writes() {
     assert!(report.iter().any(|l| l.contains("15721")), "{report:?}");
     // 純讀取：檔案未被改動
     assert_eq!(std::fs::read_to_string(dir.path().join("config.toml")).unwrap(), before);
+}
+
+
+/// **回歸測試（2026-09-28）**：體檢的 `TOKEN_GATEWAY_KEY` 檢查原本
+/// **無條件**報 ❌，於是「直連模式」（上游 Key 明文寫進 `config.toml`，
+/// 根本不讀環境變數）的使用者每次體檢都看到假警報 —— 久而久之就不再看體檢。
+///
+/// 現在改成看設定檔**實際有沒有用到** `env_key`。
+#[test]
+fn doctor_env_key_warning_depends_on_config_usage() {
+    // (1) 直連模式：provider 段寫 experimental_bearer_token，不需要環境變數。
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        "model_provider = \"custom\"\n\n[model_providers.custom]\n\
+         base_url = \"http://127.0.0.1:15722/v1\"\n\
+         experimental_bearer_token = \"oc_sk_dummy\"\n\
+         wire_api = \"responses\"\n",
+    )
+    .unwrap();
+    let report = codex_doctor_at(dir.path(), 15722);
+    assert!(
+        report.iter().any(|l| l.contains("不需要")),
+        "直連模式不該被要求設環境變數：{report:?}"
+    );
+    assert!(
+        !report
+            .iter()
+            .any(|l| l.contains("❌") && l.contains("TOKEN_GATEWAY_KEY")),
+        "直連模式不該對 TOKEN_GATEWAY_KEY 報 ❌（假警報）：{report:?}"
+    );
+
+    // (2) env_key 模式：這時環境變數才真的重要。
+    //     測試行程通常沒設 TOKEN_GATEWAY_KEY；若真的設了，則應報 ✅。
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        "model_provider = \"custom\"\n\n[model_providers.custom]\n\
+         base_url = \"http://127.0.0.1:15722/v1\"\n\
+         env_key = \"TOKEN_GATEWAY_KEY\"\n\
+         wire_api = \"responses\"\n",
+    )
+    .unwrap();
+    let report = codex_doctor_at(dir.path(), 15722);
+    let env_set = std::env::var("TOKEN_GATEWAY_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    assert!(
+        report
+            .iter()
+            .any(|l| l.contains("TOKEN_GATEWAY_KEY") && (l.contains("❌") || l.contains("✅"))),
+        "env_key 模式必須對環境變數給出明確結論（env_set={env_set}）：{report:?}"
+    );
+    assert!(
+        !report.iter().any(|l| l.contains("不需要")),
+        "設定檔用了 env_key 就不能說不需要：{report:?}"
+    );
 }
 
 

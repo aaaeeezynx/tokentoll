@@ -4,6 +4,9 @@
 > 標準**，讓你可以自己判斷有沒有過，而不是只能憑感覺。
 >
 > 對應的技術細節在 [`REFACTORING-PLAN.md`](./REFACTORING-PLAN.md)。
+>
+> **只想看「我自己要動手做什麼」→ 直接看 [`MANUAL-TESTS.md`](./MANUAL-TESTS.md)。**
+> 那份是精簡版（7 個測試，含唯一還沒跑過的測試 C）；本檔是完整紀錄。
 
 ---
 
@@ -31,14 +34,16 @@
 > 逐字比對過所有中文訊息（15 → 15，零改字）。**若你看到非預期的行為變化，
 > 那是我拆壞了，請回報。**
 
-> **目前狀態（2026-09-28 18:50 更新）**：測試 **A 已通過**（2026-09-27 22:07
+> **目前狀態（2026-09-28 20:30 更新）**：測試 **A 已通過**（2026-09-27 22:07
 > 你提供的截圖，已與資料庫逐項核對）。**B、D 已由我代跑並全部通過**；
 > **E 在代跑時抓到一個真實故障**（接管會寫出 Codex 已不接受的
-> `wire_api = "chat"`，導致 Codex 報「Unable to log in」），**已修正並補上
-> 兩條回歸測試** —— 詳見 §6.6、§0.6。**C 仍然只能你自己在真實使用情境下測**
-> （見 §6），**這是唯一還沒跑過的測試**。
-> 後端測試 **220 passed / 0 failed / 8 ignored**、clippy **0 警告**。
-> 最新的實機驗證與建置見 §0.5、§0.6 與 §9.7。
+> `wire_api = "chat"`，導致 Codex 報「Unable to log in」），**已修正**，
+> 並在安裝後的正式版本上用**真實 UI 點擊**驗證過「App 會把壞掉的 `chat`
+> 修回 `responses`」—— 詳見 §0.6、§0.7.5。
+> **C 仍然只能你自己在真實使用情境下測**（見 §6 與
+> [`MANUAL-TESTS.md`](./MANUAL-TESTS.md)），**這是唯一還沒跑過的測試**。
+> 後端測試 **217 passed / 0 failed / 8 ignored**、clippy **0 警告**。
+> 最新的實機驗證與建置見 §0.5、§0.6、§0.7 與 §9.8。
 >
 > <small>（以下為歷史紀錄，數字是當時的基線，已被上面的現況取代）</small>
 
@@ -314,11 +319,11 @@ opencode-go 的第一個模型正是 `deepseek-v4.1-flash`、reasoning 首位正
 「關閉：還原接管前備份」仍然可用。其他工具的備份完全沒動
 （claude 10／hermes 8／opencode 10，與基線相同）。
 
-### 0.5.3 由此發現的一個真實缺陷（尚未修）
+### 0.5.3 由此發現的一個真實缺陷（**已修，2026-09-28**）
 
 **點一下來源卡片就會靜默重寫 `~/.codex/config.toml`，沒有任何確認或提示。**
 
-- 位置：`src/components/providers/useToolSwitch.ts:200-215`。
+- 位置：`src/components/providers/useToolSwitch.ts`（原 `:200-215`）。
   註解自己寫著「來源切換自動重接管……**永不彈框**」—— 這是刻意的設計，
   但代價是「只是想看看某個來源」也會改檔案。
 - 觸發條件：**Codex 正在接管中** ＋ 所選來源改變。對已被接管的 Codex 而言，
@@ -328,9 +333,21 @@ opencode-go 的第一個模型正是 `deepseek-v4.1-flash`、reasoning 首位正
   只記錄不套用，所以「第一次進上游來源頁」是安全的。我實測確認過兩次
   （重啟 App 後只開頁面，`config.toml` 的 mtime 與 SHA-256 都沒變）。
 
-**建議的修法（等你決定，我沒有擅自改）**：來源切換的自動重接管應該
-①先跳一個「將重寫 config.toml」的確認，或 ②只在**使用者明確按下**某個
-「以此來源重接管」動作時才寫入，而不是 `onSelect` 直接觸發。
+**修法（已採用建議的 ②，2026-09-28）**：
+
+自動重接管**整段移除**。現在所選來源改變時只做一件事 —— 在 Codex 那一行
+顯示一行提示：
+
+> 已選擇來源「X」，但 Codex 仍接管自原來源（未改動 config.toml）。
+> 要換過去請按右側開關，或點此行左側進詳情按「套用」
+
+也就是說：**寫入一律要使用者的明確動作**（行開關、或詳情裡的「套用」），
+不再有任何因為「點一下看看」而改檔的路徑。沒有用確認框是因為確認框仍會在
+「只是瀏覽」時跳出來打斷；把寫入的觸發點收斂到明確動作更乾淨。
+
+> **為什麼不用 ①（確認框）**：確認框會讓「點卡片看模型與定價」這個**唯讀
+> 意圖**變成一個要按掉的中斷。問題的根不是「沒問」，而是「瀏覽與切換共用
+> 同一個點擊」。收斂觸發點直接解決根因。
 
 ---
 
@@ -430,18 +447,128 @@ Codex 自己有診斷指令（`codex doctor`），我用它做了**端到端**�
 > 但兩者共用同一份設定載入與驗證邏輯，而 `parse ok` ＋ `requires OpenAI auth
 > false` 正是先前失敗的那兩項。
 
-### 0.6.7 兩件仍待你決定的事
+### 0.6.7 兩件仍待你決定的事（**兩件都已於 2026-09-28 處理完畢**）
 
-1. **`chat` 這個值在新版 Codex 已經完全不能用**（錯誤訊息說的是
-   「no longer supported」，不是「這個 provider 不支援」）。也就是說 E 階段
-   那整套「依上游能力選 chat/responses」的設計**前提已經消失**。
-   目前我只修了「指向網關時定死 responses」這條**實際會走到的路**；
-   「真正的第三方 → `chat`」那條分支在生產路徑已不可達（直連分支於
-   2026-09-28 移除），但**留著就是地雷**。要不要整組拿掉、永遠只寫
-   `responses`，請你決定。
-2. 新版本程式需要**重新建置並安裝**才會生效（見 §9.6）。
-   在那之前，**不要再點「上游來源」頁的來源卡片** —— 舊版 App 仍會把
-   `wire_api` 寫回 `chat`。
+1. ~~**`chat` 這個值在新版 Codex 已經完全不能用**……要不要整組拿掉、永遠只寫
+   `responses`，請你決定。~~ **已決定並執行**：整組拿掉。
+   現在 `wire_api` 是**一個常數** `CODEX_WIRE_API = "responses"`，
+   由寫入端與畫面預覽**共用同一個符號**，型別上不可能再漂移；
+   `codex_wire_api`／`codex_wire_api_declared`／`CodexAuth.wire_api`
+   全部刪除（含它們的測試）。詳見 §0.7。
+2. ~~新版本程式需要重新建置並安裝才會生效（見 §9.6）。在那之前，
+   **不要再點「上游來源」頁的來源卡片**……~~ **已建置並安裝**（見 §9.8）。
+   而且**新版即使被點也不會寫檔** —— 靜默重接管已移除（§0.5.3）。
+
+---
+
+## 0.7 2026-09-28（第二輪）：把「未完成清單」一次收乾
+
+使用者指示「先把全部未完成的部分完成」。以下四項全部完成。
+
+### 0.7.1 (a) 靜默重寫 `config.toml` —— 已修
+
+見 §0.5.3。**寫入一律要明確動作**；所選來源改變只在畫面上提示。
+
+### 0.7.2 (b) `wire_api` 的「依上游能力判斷」整組移除 —— 已執行
+
+原本（E 階段）的設計是：`api_format` 宣告優先，URL 推定為後備。
+**這個設計的前提已經不存在**：
+
+| 當初的前提 | 現在的事實 |
+|---|---|
+| 有「真·直連第三方」模式，所以協議要跟著上游走 | 直連分支已於 §4.4 移除；`plan_switch` 與 `apply_switch` **都**把 `base_url` 強制改寫成網關 |
+| `chat` 是可用的協議值 | **Codex 已完全不接受 `chat`**（整份 config 判為非法 → 「Unable to log in」） |
+| `api_format` 能描述「Codex→上游」該用什麼協議 | 它描述的是**上游**說哪種協議，與「Codex→網關」這一段無關 |
+
+所以現在是：
+
+```rust
+pub const CODEX_WIRE_API: &str = "responses";
+```
+
+寫入端（`gateway_section`）與預覽端（`plan_switch`）**共用這個符號**。
+刪除的程式碼：`codex_wire_api()`、`codex_wire_api_for()`、
+`codex_wire_api_declared()`、`CodexAuth.wire_api` 欄位，以及 3 條測舊機制的測試。
+
+> **這是刻意的簡化，不是退步。** B4 當初修的是「無差別寫 `responses` 會讓
+> 直連第三方 404」；但直連模式已經不存在，而且現在寫 `chat` 的代價是
+> **Codex 完全不能用**（比 404 嚴重得多）。用常數取代判斷，讓「寫出 `chat`」
+> 在型別層面不可能發生。
+
+`api_format` 本身保留 —— 它仍有「來源列表顯示」與「網關端轉譯」用途。
+
+### 0.7.3 體檢的 `TOKEN_GATEWAY_KEY` 假警報 —— 已修
+
+`codex_doctor` 原本**無條件**檢查 `TOKEN_GATEWAY_KEY` 環境變數，沒設就報 ❌。
+但「直連模式」寫的是 `experimental_bearer_token`（上游 Key 明文），
+**根本不讀環境變數** —— 所以那個 ❌ 是假警報，而假警報的長期代價是
+「使用者不再看體檢」。
+
+現在改成先讀 `config.toml`，只有在**真的有 provider 段寫 `env_key`** 時才要求
+環境變數；否則報 ℹ️ 說明目前設定不需要它。新增測試
+`doctor_env_key_warning_depends_on_config_usage` 兩種情況都釘住。
+
+### 0.7.4 測試 B 留下的 6 筆合成資料 —— 已清除
+
+| 表 | 刪除的 id | 內容 |
+|---|---|---|
+| `proxy_trace` | 22, 23, 24 | `app='unknown'`、`trans_kind='rejected'`、狀態 401/401/400 |
+| `request_logs` | 4353, 4354, 4355 | `app='unknown'`、`source='gateway'`、0 token、0 成本 |
+
+刪除前後都有核對（`remaining: 0/0`），且**刪除前先備份資料庫**到
+`.workbuddy/tmp/app.db.before-testB-cleanup`。證據本身（訊息全文、狀態碼、
+`model_raw`）已完整保存在 §5.3，所以列本身可以刪。
+
+### 0.7.5 實機驗證：App 真的會把壞掉的 `chat` 修回 `responses`
+
+這一輪補上了先前一直缺的**端到端實機證據**（用的是安裝後的正式版本，
+透過真實 UI 點擊，不是單元測試）。
+
+**取證方式**：把 `~/.codex/config.toml` 的 8 個段**手動改回壞掉的
+`wire_api = "chat"`**（重現事故狀態），然後在 App 裡開 Codex 詳情、按
+「套用（切換來源/模型）」，再看檔案變成什麼。
+
+| 步驟 | 動作 | 結果 |
+|---|---|---|
+| 1 | 手工把 8 段改成 `chat`（`app='unknown'` 無關，純檔案） | `now chat = 8 / now resp = 0` |
+| 2 | `codex doctor`（**證明 `chat` 真的會讓 Codex 掛掉**） | ✗ `config could not be loaded — Fix the reported config error`、`failed to load Codex config` |
+| 3 | App 內的真實接管：詳情 →「套用（切換來源/模型）」 | 寫入時間 `20:24:52` |
+| 4 | 接管後檢查 | **`wire_api="responses"` → 8 段**（custom, tokengateway, gw, mock, nim-direct, nvidia-nim, nvidia-proxy, opencode-zen） |
+| 5 | `codex doctor`（接管後） | ✓ `config loaded`、`config.toml parse ok`、`model deepseek-v4.1-flash · custom`、`requires OpenAI auth false` |
+
+> **第 2 步是這次最有價值的收穫**：它把「`chat` 會導致 Codex 報
+> Unable to log in」從推論變成**直接可重現的觀測**。錯誤訊息與事故當天
+> 使用者看到的一致（「Invalid configuration; using defaults」→ 回頭找登入）。
+
+**另外兩項同時取得的證據**：
+
+1. **畫面預覽顯示的是實際會寫入的值**：在詳情裡展開「7 項寫入」，畫面上
+   顯示的那一行是
+   `[model_providers.{custom, tokengateway, …}] 共 8 段 base_url = http://127.0.0.1:15722/v1
+   / experimental_bearer_token = 上游 Key 明文 / wire_api = responses`
+   —— 這正是 §6.6 準則 1 先前「拿不到螢幕證據」的那一項，現在拿到了。
+2. **接管是冪等的**：在設定已經是正確值的情況下按「套用」，檔案
+   **逐行完全相同**（SHA-256 不變、9922 bytes），只有 mtime 更新。
+   備份也沒有被輪換 —— 因為要備份的那份「舊設定」本身已指向網關
+   （`backup_is_tainted`），會被 `prune_backups_keep_clean` 清掉，
+   只留下真正的「接管前」乾淨基準（09-26 那兩份）。
+   這是**刻意設計**，不是沒備份。
+
+### 0.7.6 這一輪的閘門
+
+| 項目 | 結果 |
+|---|---|
+| `cargo test --offline` | **217 passed / 0 failed / 8 ignored**（exit 0） |
+| `cargo clippy --offline --all-targets` | exit 0、**0 警告** |
+| `pnpm exec tsc --noEmit` | exit 0 |
+| 測試數變化 | 220 → 217：刪 3 條測舊機制的，加 1 條體檢假警報的回歸測試 |
+| 安裝後執行檔 | 9,010,176 bytes、SHA-256 `E098655E9488C4F79757B5266A220168DC80DD3D8276BA67658BFD793E1B4498` |
+| 啟動後 `config.toml` | SHA-256 **完全沒變**（開頁面不觸發接管，已再次確認） |
+
+> **一個環境備註**：`cargo build`（非 clippy）會出現 1 條
+> `#[warn(linker_messages)]` 警告，內容是 MSVC 連結器的中文輸出
+> （「正在建立程式庫 …」）。那是工具鏈的地區化輸出被新版 Rust 當成訊息，
+> **與本專案程式碼無關**，clippy 為 0 警告。
 
 ---
 
@@ -892,12 +1019,16 @@ py scripts\dump_traces.py --problems -n 100
 - ~~**B3**：Codex 舊會話 provider 別名段靜默消失。~~ **已修** —— 見測試 D。
   共 4 條成因（檔名寫死 `state_5.sqlite`、缺 `busy_timeout`、管理清單會縮小、
   `codex_doctor` 把失敗報成 ✅）加上第 5 條 `rows.flatten()` 靜默吞錯。
-- ~~**B4**：無差別強制 `wire_api = "responses"`。~~ **已修** —— 見測試 E。
-  ⚠️ **但這次修正本身有缺陷（2026-09-28 追查「Unable to log in」時發現）**：
-  「宣告優先」被用到指向網關的情況上，把每個段都寫成 Codex 已不接受的
-  `chat`。已再修（`codex_wire_api_for`），見 §0.6。
-- ~~**§5.3 第 2 層**：能力宣告。~~ **已實作**（協議選擇改為宣告優先）。
-  ⚠️ **同上**：宣告只在真正的第三方才該生效；指向網關時一律 `responses`。
+- ~~**B4**：無差別強制 `wire_api = "responses"`。~~ **已修，而後整個機制已移除。**
+  過程是：B4 的修法（宣告優先）本身有缺陷 —— 它把指向網關的每個段都寫成
+  Codex 已不接受的 `chat`，造成「Unable to log in」（2026-09-28，§0.6）。
+  接著發現**那套設計的前提全部失效**（直連模式已移除、Codex 不接受 `chat`、
+  `api_format` 描述的是上游而非 Codex→網關），於是**整組拿掉**：
+  現在 `wire_api` 是單一常數 `CODEX_WIRE_API = "responses"`，見 §0.7.2。
+- ~~**§5.3 第 2 層**：能力宣告。~~ **已實作，而後移除。**
+  協議選擇改成宣告優先之後被證明會寫出 `chat` 而讓 Codex 打不開，
+  最終於 2026-09-28 移除整個宣告機制（同上一條）。
+  `providers.api_format` 欄位保留，但只剩「來源列表顯示」與「網關端轉譯」用途。
 - ~~**§5.2 的 body 解析 400**：仍未定案。~~ **已定案（2026-09-28）** ——
   **不是網關的 bug**。把三筆證據的 body 與宣稱的 `bytes_len` 逐一對齊
   （69／107／132 全部相符，儀器沒有弄壞 body），再實際丟給 JSON 解析器：
@@ -1058,7 +1189,39 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.7 最新建置（2026-09-28 18:45，`wire_api` 預覽修正輪）—— **你目前安裝的就是這一個**
+### 9.8 最新建置（2026-09-28 20:15，未完成清單收乾輪）—— **你目前安裝的就是這一個**
+
+這一輪把 §0.7 的四項全部做完（靜默重接管、`wire_api` 機制移除、
+體檢假警報、測試 B 殘留資料），因此重新建置。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-28 20:09:41 起算 → 產物 20:15:12 |
+| 執行檔大小 | 9,010,176 bytes |
+| NSIS 大小 | 3,827,867 bytes |
+| MSI 大小 | 7,344,128 bytes |
+| **安裝後執行檔 SHA-256** | **`E098655E9488C4F79757B5266A220168DC80DD3D8276BA67658BFD793E1B4498`**（前一版 `9AD41461…`） |
+| 後端測試 | **217 passed / 0 failed / 8 ignored** |
+| clippy | **0 個警告** |
+| 前端 | `tsc --noEmit` exit 0 |
+| 啟動後 | 15722 LISTEN；`config.toml` SHA-256 不變 |
+
+**這一輪改到的檔案**：
+
+| 檔案 | 改動 |
+|---|---|
+| `src/components/providers/useToolSwitch.ts` | **移除**來源切換自動重接管（改為只提示）；刪 `applyCurrentSelection` |
+| `src-tauri/src/tools/codex/wire.rs` | 加 `CODEX_WIRE_API` 常數；刪 `codex_wire_api`／`codex_wire_api_for`／`codex_wire_api_declared`／`CodexAuth.wire_api` |
+| `src-tauri/src/tools/switch.rs` | 預覽改用常數；`CodexAuth` 建構簡化 |
+| `src-tauri/src/tools/codex/doctor.rs` | 體檢的 `TOKEN_GATEWAY_KEY` 改為依設定檔實際使用情況判定 |
+| `src-tauri/src/tools.rs`／`tests.rs` | 再匯出清單同步 |
+| `src-tauri/src/tools/tests/codex_wire_api.rs` | 改寫：3 條舊機制測試刪除，2 條回歸測試保留並強化 |
+| `src-tauri/src/tools/tests/codex.rs` | 刪重複的舊測試；新增體檢假警報回歸測試 |
+| 文件 | 本檔 §0.5.3／§0.6.7／§0.7／§9.8、`SIMPLIFICATION-PLAN.md` §10.13、`MANUAL-TESTS.md`（新增） |
+
+---
+
+### 9.7 前一次建置（2026-09-28 18:45，`wire_api` 預覽修正輪，已被 9.8 取代）
 
 **為什麼要再建一次**：§0.6.5b 發現 `plan_switch`（畫面預覽）有**第二份**
 同樣的運算式，會顯示 `chat` 而實際寫 `responses`。這處修正在 Rust 後端，

@@ -140,11 +140,10 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             } else {
                 "env_key = TOKEN_GATEWAY_KEY"
             };
-            // 協議形狀：指向本網關時一律 `responses`（宣告不得推翻，見
-            // [`codex_wire_api_for`]）；只有真正的第三方才輪到宣告生效。
-            // **必須與 [`codex_apply`] 用同一個函式**，否則預覽會騙人。
-            let wire_api =
-                codex_wire_api_for(&req.base_url, req.provider_format.as_deref());
+            // 協議形狀：**一律** `CODEX_WIRE_API`，與 [`codex_apply`] 共用
+            // 同一個常數（先前兩邊各算一次，預覽因此顯示過 `chat` 而實際
+            // 寫 `responses` —— 預覽騙人）。指向網關是唯一模式，宣告與此無關。
+            let wire_api = CODEX_WIRE_API;
             if aliases.is_empty() {
                 plan.edits.push(format!(
                     "[model_providers.{CODEX_SHARED_PROVIDER_ID}] 與 [model_providers.{GATEWAY_PROVIDER_ID}] base_url = {} / {auth_desc} / wire_api = {wire_api}",
@@ -341,13 +340,10 @@ pub fn apply_switch(
                 catalog.as_deref(),
                 &aliases,
                 &inline_models,
-                // 協議形狀優先採用 provider 的明確宣告（`api_format`），
-                // 沒有宣告時 `gateway_section` 才依 base_url 推定。
-                // 這正是 §5.3 第 2 層「能力宣告」的落點。
-                CodexAuth {
-                    direct_key,
-                    wire_api: codex_wire_api_declared(req.provider_format.as_deref()),
-                },
+                // 協議形狀不由這裡決定：`gateway_section` 一律寫
+                // `CODEX_WIRE_API`（指向網關是唯一模式，Codex 也已不接受
+                // `chat`）。這裡只需交代認證方式。
+                CodexAuth { direct_key },
             )?
         }
         "opencode" => {

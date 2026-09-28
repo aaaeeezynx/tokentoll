@@ -9,6 +9,9 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     let gw = format!("http://{GATEWAY_HOST}:{port}/v1");
     let cfg_path = codex_home.join("config.toml");
+    // 目前設定**是否真的**依賴 `GATEWAY_ENV_KEY`（provider 段寫 `env_key`）。
+    // `None` = 讀不到／解析不了，無法判定 —— 這時才用「可能有問題」的說法。
+    let mut env_key_used: Option<bool> = None;
     match std::fs::read_to_string(&cfg_path) {
         Err(_) => out.push("⚠️ config.toml 不存在：接管將新建".to_string()),
         Ok(t) => {
@@ -24,6 +27,21 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
             match dedupe_codex_sections(&t).parse::<toml_edit::DocumentMut>() {
                 Err(e) => out.push(format!("❌ config.toml 解析失敗：{e}")),
                 Ok(doc) => {
+                    // 有 provider 段寫 `env_key = TOKEN_GATEWAY_KEY` 才需要環境變數；
+                    // 直連模式寫的是 `experimental_bearer_token`，不需要。
+                    env_key_used = Some(
+                        doc.get("model_providers")
+                            .and_then(|m| m.as_table())
+                            .map(|tbl| {
+                                tbl.iter().any(|(_, sec)| {
+                                    sec.as_table()
+                                        .and_then(|s| s.get("env_key"))
+                                        .and_then(|v| v.as_str())
+                                        == Some(GATEWAY_ENV_KEY)
+                                })
+                            })
+                            .unwrap_or(false),
+                    );
                     if doc.get("model_provider").and_then(|v| v.as_str())
                         != Some(CODEX_SHARED_PROVIDER_ID)
                     {
@@ -84,9 +102,18 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
         .unwrap_or(false)
     {
         out.push(format!("✅ {GATEWAY_ENV_KEY} 已在環境變數"));
+    } else if env_key_used == Some(false) {
+        // **設定檔根本沒用到它**，所以沒設不是問題。以前這裡無條件報 ❌，
+        // 於是「直連模式（上游 Key 明文寫進 config.toml）」的使用者每次體檢
+        // 都會看到一個假警報，久而久之就不再看體檢了。
+        out.push(format!(
+            "ℹ️ 目前的設定不需要 {GATEWAY_ENV_KEY}（各段用 experimental_bearer_token \
+             直接寫入上游 Key，不讀環境變數）"
+        ));
     } else {
         out.push(format!(
-            "❌ {GATEWAY_ENV_KEY} 未設定：Codex 行程繼承不到 Key 會 401，請先設為用戶環境變數"
+            "❌ {GATEWAY_ENV_KEY} 未設定：設定檔的 provider 段用 env_key 指向它，\
+             Codex 行程繼承不到 Key 會 401，請先設為用戶環境變數"
         ));
     }
     // cc-switch 代理殘留（15721）會與接管預期衝突

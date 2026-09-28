@@ -26,9 +26,7 @@ pub(crate) use crate::tools::codex::codex_alias_ids;
 pub(crate) use crate::tools::codex::codex_apply;
 pub(crate) use crate::tools::codex::codex_doctor_at;
 pub(crate) use crate::tools::codex::codex_legacy_providers_report;
-pub(crate) use crate::tools::codex::codex_wire_api;
-pub(crate) use crate::tools::codex::codex_wire_api_declared;
-pub(crate) use crate::tools::codex::codex_wire_api_for;
+pub(crate) use crate::tools::codex::CODEX_WIRE_API;
 
 // ---- consts ----
 pub(crate) use crate::tools::consts::BACKUP_KEEP;

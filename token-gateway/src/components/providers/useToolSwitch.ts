@@ -12,9 +12,14 @@ import { loadLastSwitch, saveLastSwitch } from "./providersTypes";
  * 「本機工具」卡片的接管／還原行為。
  *
  * 由 `Providers.tsx` 抽出（該檔 2026-09-28 時 430 行）—— 這一整塊是
- * 「開關 ON/OFF、按來源組裝請求、寫入並回報、來源切換時自動重接管」。
+ * 「開關 ON/OFF、按來源組裝請求、寫入並回報」。
  * 抽出的界線：hook 只依賴傳入的 `deps`（來源清單、埠、所選來源），
  * 不碰任何 JSX。行為與文案一字未改。
+ *
+ * **2026-09-28 移除「來源切換自動重接管」**：原本所選來源一變就自動重寫
+ * `config.toml`（永不彈框），導致「只是點一下來源卡片看模型」也會靜默改檔。
+ * 現在寫入只發生在使用者明確動作（行開關／詳情「套用」）。見 `docs/TESTING.md`
+ * §0.5.2 與 §0.5.3。
  */
 export type ToolSwitch = {
   /** 正在切換中的工具 app 名（用來 disable 開關）。 */
@@ -157,27 +162,6 @@ export function useToolSwitch(deps: {
     }
   };
 
-  /**
-   * 來源切換自動重接管共用入口（按當前所選來源組裝，永不彈框）。
-   * 模型解析：上次模型（或現行模型）仍在該來源啟用表則沿用，否則取該來源首個啟用模型；
-   * Key/目錄/推理偏好沿用上次設定。來源無啟用模型時報行內錯誤，不寫入。
-   */
-  const applyCurrentSelection = async (t: ToolStatus) => {
-    const provider = (latest.current.providers || []).find(
-      (p) => p.id === latest.current.selId,
-    );
-    if (!provider) {
-      setRowErr({ app: t.app, msg: "請先選擇一個上游來源" });
-      return;
-    }
-    try {
-      const { req, upstreamKeyWritten } = await resolveSelectionReq(t, provider);
-      await doApply(t, req, "已按新來源重接管", upstreamKeyWritten);
-    } catch (e) {
-      setRowErr({ app: t.app, msg: e instanceof Error ? e.message : String(e) });
-    }
-  };
-
   /** 行開關（只開/關，永不彈框）：關=還原接管前備份；開=按上次來源/模型強制經網關接管。詳情設定一律點行左側進入。 */
   const toggleRow = (t: ToolStatus, on: boolean) => {
     setRowErr(null);
@@ -197,8 +181,15 @@ export function useToolSwitch(deps: {
     void toggleOn(t);
   };
 
-  // 來源切換自動重接管：所選來源變化且 Codex 正被接管時，按新來源直接重接管
-  //（模型沿用現行/上次，否則新來源首個啟用模型；Codex 重啟後選擇器同步）。
+  // 所選來源改變時**只提示、不寫檔**。
+  //
+  // 這裡以前會「來源切換自動重接管」（註解原文寫著「永不彈框」）—— 代價是：
+  // 只是在來源清單點一下卡片看看它的模型與定價，就會**靜默重寫**
+  // `~/.codex/config.toml`（並輪換備份、可能換掉舊會話用的上游），使用者
+  // 完全不會知道。2026-09-28 發生過真實事故，見 `docs/TESTING.md` §0.5.2。
+  //
+  // 現在改成：**寫入一律要使用者的明確動作** —— 行開關，或進詳情按「套用」。
+  // 這一步仍然偵測「選了別的來源」，但只發訊息告訴使用者怎麼套用。
   const prevSelId = useRef<number | null>(null);
   useEffect(() => {
     if (prevSelId.current === null) {
@@ -210,7 +201,12 @@ export function useToolSwitch(deps: {
     if (selId == null) return;
     const codex = (tools || []).find((x) => x.app === "codex");
     if (!codex?.gateway_active || toggling === "codex") return;
-    void applyCurrentSelection(codex);
+    const name = (latest.current.providers || []).find((p) => p.id === selId)?.name;
+    setRowErr(null);
+    setRowMsg({
+      app: "codex",
+      msg: `已選擇來源「${name ?? selId}」，但 Codex 仍接管自原來源（未改動 config.toml）。要換過去請按右側開關，或點此行左側進詳情按「套用」`,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selId, tools, toggling]);
 

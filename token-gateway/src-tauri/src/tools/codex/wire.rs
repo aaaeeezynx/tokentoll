@@ -28,65 +28,30 @@ pub(crate) fn codex_text_base_url(text: &str) -> Option<String> {
 }
 
 
-/// 這個 `base_url` 該用哪種 `wire_api`（Codex 送出時的協議形狀）。
+/// **寫進 Codex `config.toml` 的 `wire_api` 一律是這個值。**
 ///
-/// **為什麼不能無差別寫 `responses`**：`wire_api` 決定 Codex 用哪種協議打
-/// `base_url` —— `responses` 走 `/v1/responses`、`chat` 走
-/// `/v1/chat/completions`。本網關**兩種都收**並代為轉譯，所以指向網關時用
-/// `responses` 沒問題（那也是 Codex 的原生形狀，能保留 reasoning 等欄位）。
-/// 但**設定檔裡若出現第三方 URL**（早先的「真·直連」模式留下的、使用者手改的、
-/// 或別的代理如 cc-switch 寫入的），就必須用 Chat Completions —— 硬寫
-/// `responses` 會讓 Codex 打到不存在的端點而 404。
+/// 為什麼是一個常數，而不是「依上游能力判斷」的函式（2026-09-28 定案）：
 ///
-/// 前端那個 `base_url: via ? gatewayUrl(...) : provider.base_url` 的直連分支
-/// 已於 2026-09-28 移除（`docs/SIMPLIFICATION-PLAN.md` §4.4）；這個依 URL 推定
-/// 的後備仍然需要，因為還原／診斷路徑要判斷的是**檔案裡現有的** URL。
+/// 1. 本 App **唯一的模式就是經網關** —— `plan_switch` 與 `apply_switch`
+///    都會把 `base_url` 強制改寫成 `gateway_url(...)`（「真·直連」分支已於
+///    2026-09-28 移除，見 `docs/SIMPLIFICATION-PLAN.md` §4.4）。所以寫入時
+///    看到的 URL **永遠**是本網關。
+/// 2. `wire_api` 描述的是 **Codex → 網關** 這一段，不是 網關 → 上游。
+///    網關兩種協議都收並代為轉譯，用 Codex 原生的 `responses` 最好
+///    （保留 reasoning 等欄位）。
+/// 3. **Codex 已不再接受 `wire_api = "chat"`。** 它讀到就整份 config 判為
+///    「Invalid configuration; using defaults」，於是回頭找 ChatGPT 登入，
+///    使用者看到的錯誤是 **「Unable to log in」** —— 完全看不出真正起因。
 ///
-/// 這個問題原本**已經被發現過**（`restore_backup` 的提示文字寫著「該配置
-/// 直連第三方 URL 但走 responses 協議（直連 Chat 上游會 404）」），但當時只
-/// **警告、不修**。這裡改成寫入時就選對，讓那個警告不再需要出現。
-pub fn codex_wire_api(base_url: &str) -> &'static str {
-    let u = base_url.trim().to_ascii_lowercase();
-    // 指向本網關：兩種協議都收，用 Codex 原生的 responses（保留 reasoning 等）。
-    if u.contains(GATEWAY_HOST) {
-        return "responses";
-    }
-    // 官方 OpenAI：兩種都支援，維持 responses。
-    if u.contains("api.openai.com") {
-        return "responses";
-    }
-    // 其餘第三方：Chat Completions 是唯一普遍實作的形狀。
-    "chat"
-}
-
-
-/// 決定**實際要寫進 provider 段**的 `wire_api`。
+/// 第 3 點是 2026-09-28 的真實故障：舊版依 provider 宣告的 `api_format`
+/// 選協議，而 7 個來源**全部**宣告 `openai-chat`，於是接管後 8 個 provider
+/// 段全被寫成 `chat`，Codex 直接罷工。詳見 `docs/TESTING.md` §0.6。
 ///
-/// **指向本網關時一律 `responses`，上游的宣告不得推翻。**
-///
-/// 為什麼（2026-09-28 真實故障）：`api_format` 宣告描述的是**上游**說哪種協議，
-/// 但這裡寫的是 **Codex → 網關**這一段。網關兩種都收並代為轉譯，用 Codex
-/// 原生的 `responses` 較好（保留 reasoning 等欄位）。而 **Codex 自某版起已不
-/// 再接受 `wire_api = "chat"`** —— 它讀到就整份 config 判為
-/// 「Invalid configuration; using defaults」，於是回頭找 ChatGPT 登入，
-/// 使用者看到的錯誤是 **「Unable to log in」**，完全看不出真正的起因。
-///
-/// 先前的寫法是「有宣告就用宣告」，於是 7 個來源全部宣告 `openai-chat` 時，
-/// 接管後每個段都被寫成 `chat` → Codex 直接罷工。修正：先看 URL，
-/// 指向網關／官方 OpenAI 就定死 `responses`；宣告只在**真正的第三方**
-/// （依 URL 會猜 `chat` 的那些）才發揮作用。
-pub fn codex_wire_api_for(base_url: &str, declared: Option<&str>) -> &'static str {
-    let by_url = codex_wire_api(base_url);
-    if by_url == "responses" {
-        return "responses";
-    }
-    // 宣告只可能是 [`codex_wire_api_declared`] 產生的兩個靜態值之一，
-    // 逐一對回靜態字串，避免與 `CodexAuth` 的生命週期糾纏。
-    match declared {
-        Some("responses") => "responses",
-        _ => by_url,
-    }
-}
+/// **刻意用常數而不是函式**：寫入端（[`gateway_section`]）與畫面預覽
+/// （`switch.rs::plan_switch`）都要用它，兩邊各算一次就會漂移 ——
+/// 這個 bug 當天就發生過一次（寫入端修好了、預覽端還在顯示 `chat`）。
+/// 常數讓這種漂移在型別層面不可能發生。
+pub const CODEX_WIRE_API: &str = "responses";
 
 
 pub(crate) fn gateway_section(
@@ -106,9 +71,9 @@ pub(crate) fn gateway_section(
             tbl["env_key"] = toml_edit::value(GATEWAY_ENV_KEY);
         }
     }
-    // 協議形狀：指向本網關時一律 `responses`（見 [`codex_wire_api_for`]）；
-    // 只有真正的第三方才輪到 provider 的明確宣告來覆蓋 URL 推定。
-    tbl["wire_api"] = toml_edit::value(codex_wire_api_for(base_url, auth.wire_api));
+    // 協議形狀：**一律** `CODEX_WIRE_API`。指向網關就是唯一模式，
+    // 而上游宣告與此無關（Codex 更是已不接受 `chat`）—— 見常數的說明。
+    tbl["wire_api"] = toml_edit::value(CODEX_WIRE_API);
     if !inline_models.is_empty() {
         let mut arr = toml_edit::Array::new();
         for (m, display) in inline_models {
@@ -130,38 +95,16 @@ pub(crate) fn gateway_section(
 /// cc-switch 時代與網關時代的舊會話（按段名引用供應商）都能繼續，
 /// 段被外部工具刪除也會在下次接管時重建。
 /// 冪等：先刪後插＋回驗，多次接管不疊段；入口先做重複段消毒（非法 TOML 也能救）。
-/// [`codex_apply`] 的認證與協議選項。
+/// [`codex_apply`] 的認證選項。
 ///
-/// 把這兩個欄位綁在一起，是為了讓參數列維持在 8 個（clippy
-/// `too_many_arguments` 門檻）—— 原本只有 `direct_key`，加入協議宣告後若
-/// 直接再多一個參數就會超標。
+/// 只有一個欄位，但**刻意不收斂成裸參數**：`codex_apply` 的參數列已經在
+/// 8 個（clippy `too_many_arguments` 門檻）而不能再多一個。若以後還要加
+/// 認證面向（例如改走 OAuth），直接往這裡加欄位即可，不必再動參數列。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CodexAuth<'a> {
     /// 直連上游 Key（Some = 直連模式：各段寫 `experimental_bearer_token`
     /// 明文，不寫 `env_key`）。
     pub direct_key: Option<&'a str>,
-    /// 協議形狀覆寫，來自 provider **宣告**的 `api_format`（§5.3 能力宣告）。
-    /// `None` = 依 `base_url` 推定（見 [`codex_wire_api`]）。
-    pub wire_api: Option<&'a str>,
-}
-
-
-/// 依 provider 宣告的 `api_format` 決定 Codex 該用哪種 `wire_api`。
-///
-/// 這是「能力宣告優先於事後猜測」的具體落點：`providers.api_format` 是使用者
-/// 對該渠道的**明確宣告**，比從 URL 猜準確（第三方也可能提供 responses
-/// 端點）。
-///
-/// 回傳 `None` = 宣告不足以判定（未宣告，或 Anthropic／Gemini 這種 Codex
-/// 根本說不了的協議），交由 [`codex_wire_api`] 依 URL 推定接手。
-pub fn codex_wire_api_declared(provider_format: Option<&str>) -> Option<&'static str> {
-    match provider_format?.trim() {
-        // 只實作 Chat Completions
-        "openai-chat" => Some("chat"),
-        // 兩種都支援 → 用 Codex 原生的 responses（保留 reasoning 等欄位）
-        "mixed" | "openai-responses" => Some("responses"),
-        _ => None,
-    }
 }
 
 
