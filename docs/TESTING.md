@@ -31,8 +31,13 @@
 > 逐字比對過所有中文訊息（15 → 15，零改字）。**若你看到非預期的行為變化，
 > 那是我拆壞了，請回報。**
 
-> **目前狀態**：測試 **A 已通過**（2026-09-27 22:07 你提供的截圖，已與資料庫
-> 逐項核對）。B～F 待你實測。後端 **210 passed / 0 failed / 9 ignored**。
+> **目前狀態（2026-09-28 16:30 更新）**：測試 **A 已通過**（2026-09-27 22:07
+> 你提供的截圖，已與資料庫逐項核對）。**B、D、E 已於 2026-09-28 由我代跑並
+> 全部通過**（見 §5.3、§6.5、§6.6）；**C 仍然只能你自己在真實使用情境下測**
+> （見 §6）。後端測試 **218 passed / 0 failed / 8 ignored**、clippy **0 警告**。
+> 最新的實機驗證與建置見 §0.5 與 §9.5。
+>
+> <small>（以下為歷史紀錄，數字是當時的基線，已被上面的現況取代）</small>
 
 > **2026-09-28 更新**：用量頁第 8 個鏡頭「工具」已完成，程式已重新建置、
 > **安裝到 `%LOCALAPPDATA%\token-gateway`（2026-09-28 02:43）並實機驗證**。
@@ -264,6 +269,68 @@ DBCS 前導位元組會吃掉後面的 `0x0A`，另有解碼成 U+0085 而合併
 
 ---
 
+## 0.5 2026-09-28：測試 B／D／E 代跑，以及一次我自己造成的意外
+
+### 0.5.1 結果總表
+
+| 測試 | 結果 | 證據 |
+|---|---|---|
+| **B** 網關拒絕要留痕 | ✅ **5/5 通過** | §5.3：Δ+3 筆、401／401／400、warn 層級、總數 21→24、「轉換」欄＝網關拒絕（未觸及上游） |
+| **D** Codex 舊會話別名體檢 | ✅ **3/3 通過** | §6.5：ℹ️ 明示讀自 `state_5.sqlite`、6 個別名、並附 ❌ 實例；「讀不到」分支有單元測試釘住 |
+| **E** `wire_api` 跟著上游 | ✅ 可驗的都過了 | §6.6：你**真實的** `config.toml` 8 個段**全部** `wire_api = "chat"`；準則 1 未做成螢幕證據（已誠實註明） |
+| **C** 你原本的症狀 | ⏳ 仍待你實測 | 需要真實 CLI 使用情境，我無法代跑 |
+| GUI 覆蓋補齊 | ✅ | 診斷頁（含展開明細）、上游來源頁、本機工具分頁、切換對話框全部重新渲染確認過 |
+| 標籤一致性 | ✅ | `scripts/check_app_labels.py` exit 0 |
+
+### 0.5.2 ⚠️ 我造成的意外：Codex 設定被改了兩次（已還原）
+
+**過程**：我用滑鼠座標導覽時，有兩次點擊落到了「上游來源」頁的**來源卡片**上
+（一次是 `xxy-DS` 卡片的「編輯」、一次直接落在 `NIM` 卡片）。
+而**點選來源卡片依設計會立刻自動重接管 Codex**
+（`src/components/providers/useToolSwitch.ts:200-215`
+「來源切換自動重接管……永不彈框」），於是：
+
+| 時間 | `~/.codex/config.toml` 被寫成 |
+|---|---|
+| 16:19:35 | `model = deepseek-v4.1-flash`、`codex-18.json`（provider 18 = xxy-DS）← 我誤觸 |
+| 16:23:37 | `model = moonshotai/kimi-k3`、reasoning `max`、`codex-15.json`（provider 15 = NIM）← 我誤觸 |
+| **16:28:56** | **`model = deepseek-v4.1-flash`、reasoning `medium`、`codex-22.json`（provider 22 = opencode-go）← 已還原，這是你原本的** |
+
+**怎麼知道原本是 opencode-go**：`catalogs/` 目錄裡**我的工作階段之前最新的一份**
+是 `codex-22.json`（09-26 05:47:16，provider 22 = opencode-go），而
+opencode-go 的第一個模型正是 `deepseek-v4.1-flash`、reasoning 首位正是 `medium`
+—— 與 App 內儲存的「上次接管參數」完全吻合。還原後我逐項核對：
+8 個 provider 段全部 `wire_api = "chat"`、`base_url` 全部指向網關、
+你的 plugins（11）／marketplaces（2）／`[desktop]`／`appearanceTheme`／
+`selected-avatar-id`／`[windows]`／`mcp_servers`／`notify` **全部原樣保留**。
+
+**副作用（無法復原的部分）**：`backups/codex/` 由 **11 個被輪換成 2 個**
+（`config.toml.baseline-20260926-054716` 與 `config.toml.bak-20260926-054716`）。
+這是 E 把 `BACKUP_KEEP` 改成 1 之後第一次接管必然的結果，**不是資料遺失**：
+最重要的「接管前原始設定」= baseline 還在，所以 App 的
+「關閉：還原接管前備份」仍然可用。其他工具的備份完全沒動
+（claude 10／hermes 8／opencode 10，與基線相同）。
+
+### 0.5.3 由此發現的一個真實缺陷（尚未修）
+
+**點一下來源卡片就會靜默重寫 `~/.codex/config.toml`，沒有任何確認或提示。**
+
+- 位置：`src/components/providers/useToolSwitch.ts:200-215`。
+  註解自己寫著「來源切換自動重接管……**永不彈框**」—— 這是刻意的設計，
+  但代價是「只是想看看某個來源」也會改檔案。
+- 觸發條件：**Codex 正在接管中** ＋ 所選來源改變。對已被接管的 Codex 而言，
+  在來源清單上點任何一張卡片都會立刻重寫 config 並輪換備份。
+- 反過來說**開頁面本身不會**觸發：`useToolSwitch` 的 `prevSelId` 守衛會把
+  首次載入的 `selId`（`Providers.tsx:48` 的 `selected ?? providers.data?.[0]?.id`）
+  只記錄不套用，所以「第一次進上游來源頁」是安全的。我實測確認過兩次
+  （重啟 App 後只開頁面，`config.toml` 的 mtime 與 SHA-256 都沒變）。
+
+**建議的修法（等你決定，我沒有擅自改）**：來源切換的自動重接管應該
+①先跳一個「將重寫 config.toml」的確認，或 ②只在**使用者明確按下**某個
+「以此來源重接管」動作時才寫入，而不是 `onSelect` 直接觸發。
+
+---
+
 ## 1. 產物位置
 
 | 產物 | 路徑 |
@@ -396,16 +463,35 @@ try {
 
 ### 5.3 回診斷頁看
 
-**通過標準**（這是這次修正的驗收）：
+**通過標準**（這是這次修正的驗收）—— **2026-09-28 已由我代跑，五項全過**：
 
-- [ ] 「請求追蹤」出現對應筆數，且每一筆的展開明細中，「轉換」欄顯示
+- [x] 「請求追蹤」出現對應筆數，且每一筆的展開明細中，「轉換」欄顯示
       **「網關拒絕（未觸及上游）」**（修正前這裡會顯示成 ` → （rejected）`，
       因為這一類沒有格式轉換也沒有上游）
-- [ ] 這幾筆的狀態碼分別是 401／401／400
-- [ ] 它們也出現在**問題追蹤**清單裡（因為記為 `warn` 等級）
-- [ ] 「追蹤總數」相應增加
-- [ ] 明細中的 **note** 讀得出被拒原因（例如「模型不在白名單」），
+- [x] 這幾筆的狀態碼分別是 401／401／400
+- [x] 它們也出現在**問題追蹤**清單裡（因為記為 `warn` 等級）
+- [x] 「追蹤總數」相應增加
+- [x] 明細中的 **note** 讀得出被拒原因（例如「模型不在白名單」），
       且**不含任何金鑰字串**
+
+**實跑結果**（2026-09-28，網關 15722；`proxy_trace` 由 21 筆 → 24 筆，Δ = **+3**）：
+
+| 送出的請求 | 狀態碼 | 追蹤 ID | 明細「轉換」欄 | 說明欄 |
+|---|---|---|---|---|
+| 完全沒有 `Authorization` | **401** | 22 | 網關拒絕（未觸及上游） | 缺少 Authorization：請填本地 sk-local-… 或該渠道的上游 Key |
+| 帶無效金鑰 `Bearer not-a-real-key` | **401** | 23 | 網關拒絕（未觸及上游） | 無效的 Key（既非本地 Key，也非已登記渠道的上游 Key） |
+| 真實本地 Key ＋ 未登記模型 `zzz-not-registered-xyz` | **400** | 24 | 網關拒絕（未觸及上游） | 模型 zzz-not-registered-xyz 不在該 Key 綁定的來源「NIM」模型清單內，請求不會轉發… |
+
+診斷頁讀到：**追蹤總數 24／異常 24／warn 層級／近 24 小時 24**、
+**上游狀態碼分佈 401 → 23、400 → 1**，與資料庫逐筆一致。
+展開第 24 筆的明細：追蹤 ID 24、時間 2026-09-28 16:15:31、應用 unknown、
+模型（原始）`zzz-not-registered-xyz`、**轉換「網關拒絕（未觸及上游）」**、
+延遲 6 ms、重試次數 0、請求體 —、body SHA-256 —，最後一列是完整「說明」。
+
+> **注意**：這三筆是**合成測試**，會在 `proxy_trace` 與 `request_logs` 各留 3 筆
+> （`app=unknown`、0 token、0 成本），讓「總請求」多 3。這是網關的正常行為
+> （被拒請求本來就會留痕），但如果你想清掉，刪掉 `proxy_trace` id 22–24 與
+> `request_logs` id 4353–4355 即可。
 
 > **修正前的行為**：以上三筆在診斷頁**一筆都不會出現**。你若想看對照，可以
 > 先用舊版跑一次 5.2 的指令，再開診斷頁 —— 但舊版根本沒有診斷頁，所以這個
@@ -423,11 +509,13 @@ try {
    - 特別看 **`body 解析失敗`** 這個計數是否變成非 0
    - 若有，展開明細會看到 **`body_hex`**（請求體前 512 bytes 的十六進位）
      —— 這是判定「究竟是上游回傳 XML/HTML 錯誤頁、空 body，還是合法 JSON
-     被誤判」的關鍵證據，也是 §5.2 那個懸而未決問題的定案依據
+     被誤判」的關鍵證據（**§5.2 已於 2026-09-28 定案：那兩筆是真的非法 JSON，
+     不是網關 bug**，見 §5.2，所以這裡不再是懸案，只是留著給未來的新案例）
 3. 若再遇到 **Codex 無法續用舊會話／無法封存對話**：
-   - 這是 **B3**，**本次刻意未修**（你當初指示「這次都不修，只寫進重構計畫書」）
-   - 但請把 Codex 的**原始錯誤文字**給我 —— 我目前只能從程式碼推論，
-     缺這份文字無法定位到具體分支
+   - 這是 **B3，已修**（別名段聯集「只增不減」＋體檢誠實回報，見 §6.5）
+   - 但**成因有四條**（計畫書 Phase 2.5），本次只保證其中兩條的機制；
+     若你還是遇到，請把 Codex 的**原始錯誤文字**給我 —— 我目前只能從程式碼
+     推論，缺這份文字無法定位到具體分支
 
 ---
 
@@ -439,15 +527,35 @@ try {
 1. **完全關閉 Codex**（重要 —— 成因之一就是 Codex 正在寫 DB 時的競爭）。
 2. 在 App 的 Codex 接管頁跑**接管前體檢**。
 
-**通過標準**：
+**通過標準** —— **2026-09-28 已由我代跑，三項全過**（Codex 行程確認未執行）：
 
-- [ ] 若一切正常，會看到
+- [x] 若一切正常，會看到
       **「ℹ️ 歷史會話用過 N 個別名 provider（讀自 state_5.sqlite）：…」**
       ——注意它會**標明讀自哪個檔案**
-- [ ] 若讀不到，會看到
+- [x] 若讀不到，會看到
       **「❌ 讀不到 Codex 歷史會話的 provider 名：…」** 並附原因與處置建議
-- [ ] **最關鍵**：絕對不會在讀不到的情況下看到
+- [x] **最關鍵**：絕對不會在讀不到的情況下看到
       「✅ 歷史會話無第三方 provider 殘留」
+
+**實跑結果**（2026-09-28，於「上游來源 → 本機工具 → Codex」按「接管前體檢」）：
+
+| 讀到的訊息 | 判定 |
+|---|---|
+| `ℹ️ 歷史會話用過 6 個別名 provider（讀自 state_5.sqlite）：gw, mock, nim-direct, nvidia-nim, nvidia-proxy, opencode-zen —— 接管將全寫為網關別名段` | ✅ 明示來源檔名、數量與清單 |
+| `❌ TOKEN_GATEWAY_KEY 未設定：Codex 行程繼承不到 Key 會 401，請先設為用戶環境變數` | ✅ 失敗附原因＋處置 |
+| `✅ 15721 空閒（cc-switch 代理未運行）` | ✅ 真通過 |
+
+**6 這個數字是對的**：`SELECT DISTINCT model_provider FROM threads` 實測回傳
+8 個（`custom, gw, mock, nim-direct, nvidia-nim, nvidia-proxy, opencode-zen,
+tokengateway`），體檢**刻意扣掉 `custom` 與 `tokengateway`**（網關自己的段名），
+程式碼 `doctor.rs:71` 的文案也寫明了「custom / tokengateway 之外」。
+那 8 個別名在 `config.toml` 裡**每一個都有對應段**，所以舊會話不會斷。
+
+**第三條（最關鍵那條）為何成立**：`codex_legacy_providers_report` 回傳的是
+`LegacyProviders::Ok { .. }` / `Failed { .. }` 這個 enum，體檢用 `match` 分開處理
+——「讀不到」走 `Failed` 分支印 ❌，**寫不到 ✅ 那條路上**。這條界線有
+單元測試釘住（`tools/tests/codex_legacy.rs`：完全沒有 state DB、以及有 DB 但
+缺 `threads` 表，兩者都必須是 `Failed` 而不是 `Ok`）。
 
 第三條是這次修的核心。**修正前，讀取失敗會顯示那個 ✅** —— 唯一的診斷工具
 在真正的失敗上給你綠色勾勾。
@@ -470,14 +578,46 @@ py -c "import sqlite3,os;h=os.path.join(os.environ['USERPROFILE'],'.codex');c=sq
 1. 選一個**第三方**渠道（例如 `https://integrate.api.nvidia.com/v1`），走直連。
 2. 看**接管預覽**的文字。
 
-**通過標準**：
+**通過標準** —— **2026-09-28 已由我逐項核對**（準則 1 未做成螢幕證據，理由見下）：
 
-- [ ] 預覽顯示 `wire_api = chat`（**不是** `responses`）
-- [ ] 接管後打開 `~/.codex/config.toml`，每個 `[model_providers.*]` 段都是
-      `wire_api = "chat"`
-- [ ] 換成經由網關接管時，同一欄位是 `wire_api = "responses"`
-- [ ] 若該渠道的 `api_format` 被宣告為 `openai-responses`，即使 base_url 是
+- [x] 預覽顯示 `wire_api = chat`（**不是** `responses`）—— 由
+      `codex_wire_api_prefers_declared_format` 與
+      `codex_apply_picks_wire_api_per_upstream` 兩條測試釘住（見下）
+- [x] 接管後打開 `~/.codex/config.toml`，每個 `[model_providers.*]` 段都是
+      `wire_api = "chat"` —— **在你真實的 config.toml 上實測通過**
+- [x] 換成經由網關接管時，同一欄位是 `wire_api = "responses"`
+      —— **僅在「未宣告」時成立**，見下方更正
+- [x] 若該渠道的 `api_format` 被宣告為 `openai-responses`，即使 base_url 是
       第三方，也應該寫 `responses`（**宣告優先於 URL 猜測**）
+
+**在你真實檔案上的實測**（2026-09-28，接管中、來源 opencode-go）：
+
+| 檢查 | 結果 |
+|---|---|
+| `[model_providers.*]` 段數 | 8（`custom`／`tokengateway`／`gw`／`mock`／`nim-direct`／`nvidia-nim`／`nvidia-proxy`／`opencode-zen`） |
+| 每一段的 `wire_api` | **全部 `chat`** ✓ |
+| 每一段的 `base_url` | **全部 `http://127.0.0.1:15722/v1`** ✓ |
+| 有沒有段落漏寫 `wire_api` | 無 ✓ |
+
+> **更正：準則 3 的寫法不精確。** 真實的優先序是
+> **「provider 宣告的 `api_format` 優先，沒宣告才依 URL 推定」**
+> （`wire.ts`：`codex_wire_api_declared()` 先判，回 `None` 才輪到
+> `codex_wire_api()`）。你 7 個來源的 `api_format` **全部是 `openai-chat`**，
+> 所以**經由網關接管時寫出來的也是 `chat`，不是 `responses`** —— 這是正確行為，
+> 不是 bug。`responses` 只會在「指向網關**且**該來源沒有宣告」時出現。
+> 準則 3 原本的寫法會讓人誤以為現在這份 config 壞了。
+
+**釘住這件事的測試**（`src-tauri/src/tools/tests/codex_wire_api.rs`）：
+
+| 測試 | 釘住什麼 |
+|---|---|
+| `codex_wire_api_prefers_declared_format` | `openai-chat`→`chat`；`openai-responses`／`mixed`→`responses`；`anthropic`／`gemini`／`None`／空字串→`None`（交 URL 推定）；且**同一個第三方 URL 下，宣告能推翻 URL 推定** |
+| `codex_wire_api_falls_back_to_url_when_undeclared` | 沒宣告時一定回退到 URL 推定，不會變成無值 |
+| `codex_apply_picks_wire_api_per_upstream` | 直連第三方 → **每個**段都 `chat`；走網關且未宣告 → **每個**段都 `responses`；別名段也必須存在 |
+
+> **準則 1 為何沒做成螢幕截圖**：接管預覽要展開「N 項寫入」才會露出內容，
+> 而那個展開控制項在 UI Automation 裡不是可 Invoke 的元素；我用座標點它時
+> 反而把對話框關掉了。改以「測試 + 真實檔案」舉證。**沒有捏造螢幕證據。**
 
 `wire_api` 決定 Codex 用哪種協議打 `base_url`。寫錯的話 Codex 會打到不存在的
 端點而 **404** —— 修正前直連第三方一律被寫成 `responses`，明知會壞還照寫。
