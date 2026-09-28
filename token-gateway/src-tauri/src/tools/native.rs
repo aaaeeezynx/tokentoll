@@ -50,6 +50,20 @@ pub const ANTHROPIC_HOST: &str = "api.anthropic.com";
 /// 選 `gpt-5.6-luna` 是因為使用者自己的舊對話就是用這個模型（Codex 的日誌裡
 /// 出現過 `Unknown model gpt-5.6-luna` 的警告 —— 當時 config 的目錄是 NIM 的，
 /// 所以查不到）。使用者於 2026-09-28 明確選定它。
+///
+/// **為什麼是「一律覆寫」而不是「已經是 GPT 系列就別動」**（2026-09-29 查證）：
+/// 還原當下 config 裡殘留的模型名可能**根本不是 OpenAI 的模型**，而是別的來源
+/// 目錄帶進來的。實例：使用者那份原生設定寫著 `model = "gpt-6-luna"`，但
+///
+/// - Codex 自己的內建清單（乾淨 `CODEX_HOME`）只有 `gpt-6-astra` 這個 gpt-6，
+///   `luna` 只有 `gpt-5.6-luna`；查不到 `gpt-6-luna`；
+/// - App 的 `provider_models` 裡 `gpt-6-luna` 只掛在 provider 22（opencode-go），
+///   `catalogs/codex-22.json` 是唯一含它的目錄檔。
+///
+/// 也就是說 `gpt-6-luna` 是 **opencode-go 的模型名**。原生還原的目的就是離開那些
+/// 第三方來源，留著它們的模型名只會讓 Codex 拿到一個查不到的模型（正是上面那個
+/// `Unknown model` 警告的成因），所以一律覆寫成本常數是正確行為 ——
+/// 使用者於 2026-09-29 確認。
 pub const CODEX_NATIVE_MODEL: &str = "gpt-5.6-luna";
 
 /// 原生化的結果。`text` 一律可直接寫回檔案（無法轉換時等於輸入）。

@@ -847,10 +847,29 @@ Claude／OpenCode：只要是合法的非空設定物件就算有來源（有沒
 `~/.claude/settings.json`**沒動**（仍在網關接管中）。備份都在
 `%APPDATA%\com.tokencounter.gateway\backups\`。
 
+**✅ 一個看起來像問題、查證後確認是正確行為的點**：原生還原會把 `model`
+**覆寫**成 `gpt-5.6-luna`（你 2026-09-28 選的預設）。這次它把你原本的
+`gpt-6-luna` 換掉了（訊息裡那句「model → gpt-5.6-luna」就是這個動作）。
+你問「`gpt-6-luna` 是不是 OpenCodeGo 來源的模型」—— **查證結果：是**。
+所以覆寫是對的，**沒有改任何程式**：
+
+| 查證 | 結果 |
+|---|---|
+| App 的 `provider_models` | `gpt-6-luna` **只**掛在 provider **22（opencode-go）**，其他 provider 都沒有 |
+| App 的目錄檔 | `catalogs/codex-22.json` 是**唯一**含 `gpt-6-luna` 的；codex-15（NIM）／17／18／19／20／21 都沒有 |
+| Codex 自己的內建清單（乾淨 `CODEX_HOME`，11 個模型） | 只有 `gpt-6-astra` 這個 gpt-6；`luna` 只有 `gpt-5.6-luna`；**查不到 `gpt-6-luna`** |
+
+結論：`gpt-6-luna` 是 opencode-go 的模型名，不是 OpenAI 的。原生還原的目的
+正是離開那些第三方來源，留著它們的模型名只會讓 Codex 拿到一個查不到的模型
+（那正是使用者日誌裡 `Unknown model` 警告的成因）。因此「一律覆寫成
+`gpt-5.6-luna`」是正確行為，你 2026-09-29 也確認「不用换预设模型」。這個查證
+寫進了 `native.rs` 的 `CODEX_NATIVE_MODEL` 註解，免得日後有人把它改成
+「已是 GPT 系列就別動」而讓這個坑復活。
+
 **⚠️ 一個要你決定的行為**：原生還原會把 `model` **覆寫**成 `gpt-5.6-luna`
 （你 2026-09-28 選的預設）。這次它把你原本的 `gpt-6-luna` 換掉了（訊息裡那句
 「model → gpt-5.6-luna」就是這個動作）。如果你希望「已經是 GPT 系列就別動」，
-告訴我一聲就改。
+告訴我一聲就改。→ **已於 2026-09-29 查證結案：維持覆寫，不改**（見上一段）。
 
 #### 已知問題（測試中發現，尚未處理）
 
