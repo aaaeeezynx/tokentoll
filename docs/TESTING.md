@@ -385,7 +385,29 @@ E 階段（`38c5bcd`）加了「**provider 宣告的 `api_format` 優先於 URL 
 **測試**：`cargo test --offline` → **219 passed / 0 failed / 8 ignored**（exit 0）；
 `cargo clippy --offline --all-targets` → **exit 0、0 警告**。
 
-### 0.6.6 兩件仍待你決定的事
+### 0.6.6 修好之後的實機驗證（`codex doctor`）
+
+Codex 自己有診斷指令（`codex doctor`），我用它做了**端到端**核對
+（不用啟動 Codex、不消耗額度）：
+
+| `codex doctor` 的輸出 | 意義 |
+|---|---|
+| `✓ config` → **`loaded`** | **不再出現「Invalid configuration; using defaults」** |
+| `config.toml parse` → **`ok`** | 整份檔案合法（不是只有第一個錯誤被修掉） |
+| `model` → `deepseek-v4.1-flash · custom` | 接管**生效**：確實走 `custom` 段（網關），不是退回預設 |
+| `✓ auth` → **`OpenAI auth is not required for the active model provider`** | **「Unable to log in」的根因消失** |
+| `model provider requires OpenAI auth` → **`false`** | Codex 知道這個 provider 不需要 ChatGPT 登入 |
+| **`wire API` → `responses`** | 寫進去的值就是 Codex 現在唯一接受的那個 |
+| `✓ reachability` → **`active provider endpoints are reachable over HTTP`**（`mode: provider auth`） | 它**真的帶著設定裡的 bearer token 打了一次網關並成功** |
+
+也就是說：設定合法、模型目錄生效、認證路徑正確、而且**網關端確實收下了
+寫進去的那把上游 Key**。這比「我看檔案內容對」強得多。
+
+> **注意**：`codex doctor` 是 CLI 路徑；你原本的錯誤來自 `codex_app_server`。
+> 但兩者共用同一份設定載入與驗證邏輯，而 `parse ok` ＋ `requires OpenAI auth
+> false` 正是先前失敗的那兩項。
+
+### 0.6.7 兩件仍待你決定的事
 
 1. **`chat` 這個值在新版 Codex 已經完全不能用**（錯誤訊息說的是
    「no longer supported」，不是「這個 provider 不支援」）。也就是說 E 階段
