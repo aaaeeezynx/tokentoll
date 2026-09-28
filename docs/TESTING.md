@@ -774,6 +774,91 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 | `codex doctor` | `✓ config loaded`、`model gpt-5.6-luna · openai`、`config.toml parse ok`、`✓ auth auth is configured`、`stored auth mode chatgpt` ✅ |
 | **Codex 的模型清單** | `codex debug models` → **`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`**（＋2 個隱藏），NIM 的模型全部消失 ✅ |
 
+### 0.9.9 端到端實測（2026-09-29 02:50–03:2x）：用量核算 ＋ 關工具／關網關／重啟
+
+使用者要求跑一輪完整測試：**開網關 → 用工具真實對話 → 檢查用量是否算對 →
+關掉工具 → 關掉網關 → 重啟工具 → 檢查來源是否回到官方設定**。
+
+#### A. 用量核算（四路交叉比對，全部一致）
+
+| 比對 | 結果 |
+|---|---|
+| 真實對話（`codex exec` 經網關） | 網關記 `in=11,518 out=30`；**Codex 自己印 `tokens used 11,548`** → 11,518 + 30 = **11,548** ✅ |
+| 控制變數（curl 經網關，非串流） | 回應 `usage` = `prompt 49 / completion 200`；DB 該列 = `in 49 / out 200` ✅ |
+| 同一個 prompt 直打上游（繞過網關） | 上游自己的 `usage.prompt_tokens` = **49**，與網關一致 ✅（輸出 164 vs 200 是取樣與 `max_tokens` 上限，屬正常） |
+| 本地 key 配額 | `local_keys.used_tokens` 由 133,951 → 134,006，增加 **55** = 該列 `in 35 + out 20` ✅ |
+| 工具歸屬 | 帶 `x-tg-app: codex` 時 `app=codex` ✅；不帶時 `app=unknown`（未標識的客戶端，非退化） |
+
+**約束二（用量資訊必須完整）複驗**：本機工具篩選清單實測列出 **8 個選項** ——
+全部本機工具／Claude Code／OpenAI Codex／opencode OpenCode／**Hermes Agent**／
+DeepSeek Harness／**Cursor**／**Antigravity**，沒有任何選項消失 ✅
+
+#### B. 關工具 → 關網關 → 重啟工具
+
+**這一步抓到一個真的 bug，而且是「關閉網關」第二次以後才會遇到**：
+
+| 步驟 | 結果 |
+|---|---|
+| 接管 Codex | 設定變成 8 個 `base_url` 全指向網關、`model_provider = "custom"`、`model = "moonshotai/kimi-k3"` ✅ |
+| 真實對話（kimi-k3） | **失敗**：`#4404 st=504 303,004ms` —— 那個模型在 NIM 上要不到（見下方「已知問題」） |
+| 真實對話（改 `-m deepseek-ai/deepseek-v4.1-flash`） | 成功，8 秒內回覆，用量正確 ✅ |
+| **關閉 Codex** | **失敗**：卡片顯示「所有備份都還含網關配置，無法還原到接管前」❌ |
+| 檢查備份 | `config.toml.bak-20260929-025022`（6,911 bytes）**一個網關位址都沒有**、`model_provider = "openai"` —— 它明明是乾淨的 ❌ |
+
+根因（`backup.rs::backup_has_known_route`）：它要求「這份設定裡找得到一個
+URL」，但**原生設定正好沒有 URL** ——
+
+- Codex 的第一方 `openai` provider 是**內建**的，沒有 `[model_providers.openai]`
+  段 → `codex_text_base_url` 回 `None`；
+- Claude 回到官方時沒有 `ANTHROPIC_BASE_URL`。
+
+`restore_backup_to_inner` 會先呼叫 `migrate_gateway_baseline`，而它在沒有
+baseline 時會把該函式的 `Err` 直接往外丟 → 使用者看到一句指責備份含網關配置的
+訊息，但備份是乾淨的。
+
+**為什麼以前沒事**：在 §0.9 的原生還原上線前，「關閉」還原的是**接管前那份**
+（`model_provider = "custom"` ＋ NIM URL，有 URL → 有來源）。是「回到原生」讓
+基線／備份變成沒有 URL 的長相，才踩到這個判斷。
+
+修法：`backup_has_known_route` 改成認得原生長相 ——
+Codex：有段就必須有 URL（`model_provider = "custom"` 卻沒有段＝壞設定，不算），
+沒有段時只有**內建** provider（`openai`）才算有來源；
+Claude／OpenCode：只要是合法的非空設定物件就算有來源（有沒有被指到網關由
+`backup_is_tainted` 另行判斷，兩者職責分開）。
+
+回歸測試：`switch_off_accepts_a_native_codex_backup`、
+`switch_off_accepts_a_native_claude_backup`（兩條都先重現失敗再修）。
+
+修好後重建安裝（exe 9,038,336 bytes、sha256 `3561A32B…`），再跑一次同一個流程：
+
+| 步驟 | 結果 |
+|---|---|
+| 關閉 Codex（修正後） | `(On -> Off)` ✅、設定 7,718 → **6,913 bytes** |
+| 訊息 | `…｜還原自 config.toml.baseline-20260929-032145｜provider=openai model=gpt-5.6-luna｜已切回原生來源：model → gpt-5.6-luna` ✅ |
+| 設定內容 | `model_provider = "openai"`、`model = "gpt-5.6-luna"`、**指向網關 0 次**、8 個別名段全在 ✅ |
+| **關閉網關** | App 內按「停止」→ `15722 LISTEN = 0`、`gw` 行程消失、按鈕變「啟動」✅（App 本身仍在跑，這是正確的） |
+| **重啟工具** | 網關關著的情況下 `codex exec` → 14 秒回覆「官方來源正常。」、exit 0 ✅ |
+| **證明沒走網關** | 對話前後 `request_logs` 的 max id **都是 4407**（網關若收到請求一定會寫一列）✅ |
+| `codex doctor` | `✓ config loaded`、`model gpt-5.6-luna · openai`、`default model provider openai`、`✓ auth is configured` ✅ |
+| 模型清單 | `gpt-5.6-terra`／`gpt-5.6-luna`／`gpt-5.5`（＋2 隱藏）✅ |
+
+**這一輪我改動的檔案**：`~/.codex/config.toml`（接管 → 關閉，最終為原生設定，指紋
+6,913 bytes／`7CA78C88…`）、`~/.config/opencode/opencode.json`（§0.9.8）、
+`~/.claude/settings.json`**沒動**（仍在網關接管中）。備份都在
+`%APPDATA%\com.tokencounter.gateway\backups\`。
+
+**⚠️ 一個要你決定的行為**：原生還原會把 `model` **覆寫**成 `gpt-5.6-luna`
+（你 2026-09-28 選的預設）。這次它把你原本的 `gpt-6-luna` 換掉了（訊息裡那句
+「model → gpt-5.6-luna」就是這個動作）。如果你希望「已經是 GPT 系列就別動」，
+告訴我一聲就改。
+
+#### 已知問題（測試中發現，尚未處理）
+
+- **`moonshotai/kimi-k3` 在 NIM 上 504**（303 秒後逾時）。那是 App 為 Codex
+  記住的來源／模型配對，所以「接管 Codex 之後直接用」會失敗。這不是網關算錯，
+  是那個上游要不到那個模型；要不要換掉預設配對請你決定。
+
+
 ### 0.9.8 實機驗證（OpenCode）＋ 一個順手抓到的長期瑕疵
 
 照使用者的要求，把 OpenCode 的開關也實機走一遍（接管 → 關閉）：
@@ -1443,7 +1528,34 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.9 最新建置（2026-09-28 22:32，「關閉網關回到原生來源」輪）—— **你目前安裝的就是這一個**
+### 9.10 最新建置（2026-09-29 03:20，端到端測試輪：修好「原生備份無法還原」）—— **你目前安裝的就是這一個**
+
+使用者要求跑一輪完整端到端測試（開網關 → 對話 → 檢查用量 → 關工具 → 關網關 →
+重啟工具 → 檢查來源），過程中抓到並修掉 `backup_has_known_route` 的失效
+（§0.9.9），因此重新建置。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-29 03:1x 起算 → 產物 03:20:10 |
+| 執行檔大小 | 9,038,336 bytes |
+| NSIS 大小 | 3,843,545 bytes |
+| **安裝後執行檔 SHA-256** | **`3561A32B5CDE3F50C29BC573991A9ED80DE0CB09A727E9C0E4EC1B5392E71E6D`**（前一版 `66339F9E…`） |
+| 後端測試 | **231 passed / 0 failed / 8 ignored**（+2 條回歸測試） |
+| clippy | **0 個警告** |
+| 檔案行數 | 全部 ≤ 400 行 |
+| 實機驗證 | §0.9.9 全流程（含「網關關著仍能對話、DB 不新增列」） |
+
+**這一輪改到的檔案**：
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/tools/backup.rs` | **修**：`backup_has_known_route` 認得原生長相（Codex 內建 `openai`、Claude 無 base URL） |
+| `src-tauri/src/tools/tests/native.rs` | 新增 2 條回歸測試（codex／claude 原生備份必須可還原） |
+| 文件 | 本檔 §0.9.9／§9.10 |
+
+---
+
+### 9.9 前一次建置（2026-09-28 23:42，「關閉網關回到原生來源」輪，已被 9.10 取代）
 
 這一輪做 §0.9：新增 `switch_off`（還原 ＋ 原生來源化），並修掉因此暴露的
 還原摘要假警報。
@@ -1462,8 +1574,7 @@ py scripts\dump_traces.py --problems -n 100
 | 實機驗證 | §0.9.7（Codex 回到 `openai` ＋ `gpt-5.6-luna`，模型清單變回 GPT）、§0.9.8（OpenCode 回到自己的登入，摘要有依工具產生） |
 
 > 這一輪共建置 4 次（`switch_off` → Claude 端點推回官方 → 摘要依工具 → note／warning
-> 分離）。上面是最後一次，也就是**你目前安裝的版本**。前一輪（22:32）的
-> 9,026,048 bytes 已被取代。
+> 分離）。上面是那 4 次的最後一次，**已被 9.10 取代**。
 
 **這一輪改到的檔案**：
 

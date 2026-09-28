@@ -232,6 +232,66 @@ fn unsupported_app_is_reported_not_silently_ignored() {
 
 
 #[test]
+fn switch_off_accepts_a_native_codex_backup() {
+    // 2026-09-29 實測踩到：Codex 已經在原生來源時（`model_provider = "openai"`，
+    // 而 Codex 的 `openai` provider 是內建的、沒有 `[model_providers.openai]` 段），
+    // 關閉網關會失敗並顯示「所有備份都還含網關配置，無法還原到接管前」——
+    // 明明那份備份一個網關位址都沒有。
+    let dir = tempfile::tempdir().unwrap();
+    let app_data = dir.path();
+    let bdir = app_data.join("backups").join("codex");
+    std::fs::create_dir_all(&bdir).unwrap();
+    let native = r#"model = "gpt-5.6-luna"
+model_provider = "openai"
+
+[model_providers.custom]
+name = "Token Gateway"
+base_url = "https://integrate.api.nvidia.com/v1"
+experimental_bearer_token = "nvapi-x"
+wire_api = "responses"
+"#;
+    std::fs::write(bdir.join("config.toml.bak-20260929-025022"), native).unwrap();
+    let cfg = dir.path().join("config.toml");
+    std::fs::write(&cfg, "model_provider = \"custom\"\n").unwrap();
+
+    let back = match restore_native_to_port(app_data, "codex", &cfg, 15722) {
+        Ok(m) => m,
+        Err(e) => panic!("原生備份應該可以被還原，卻失敗了：{e}"),
+    };
+    // migrate=true：乾淨備份會先被升成不可變基線，所以訊息裡是 baseline 而不是 bak。
+    assert!(back.contains("config.toml.baseline-"), "{back}");
+    assert!(back.contains("provider=openai"), "{back}");
+    let after = std::fs::read_to_string(&cfg).unwrap();
+    assert!(after.contains("model_provider = \"openai\""), "{after}");
+    assert!(after.contains("[model_providers.custom]"), "別名段要留著：{after}");
+}
+
+
+#[test]
+fn switch_off_accepts_a_native_claude_backup() {
+    // 同一個失效的 Claude 版本：回到官方之後 `ANTHROPIC_BASE_URL` 不存在，
+    // 於是「有沒有一個 URL」的判斷把乾淨備份判成沒有來源。
+    let dir = tempfile::tempdir().unwrap();
+    let app_data = dir.path();
+    let bdir = app_data.join("backups").join("claude");
+    std::fs::create_dir_all(&bdir).unwrap();
+    let native = r#"{"env": {"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5"}, "theme": "dark"}"#;
+    std::fs::write(bdir.join("settings.json.bak-20260929-030000"), native).unwrap();
+    let cfg = dir.path().join("settings.json");
+    std::fs::write(&cfg, r#"{"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:15722"}}"#).unwrap();
+
+    let back = match restore_native_to_port(app_data, "claude", &cfg, 15722) {
+        Ok(m) => m,
+        Err(e) => panic!("原生備份應該可以被還原，卻失敗了：{e}"),
+    };
+    assert!(back.contains("settings.json.baseline-"), "{back}");
+    let after = std::fs::read_to_string(&cfg).unwrap();
+    assert!(!after.contains("15722"), "還原後不該再指向網關：{after}");
+    assert!(after.contains("claude-sonnet-5"), "{after}");
+}
+
+
+#[test]
 fn switch_off_restores_backup_then_converts_to_native() {
     // 接管前是 NIM 直連（乾淨備份），另有一份含網關痕跡的備份必須被跳過。
     let dir = tempfile::tempdir().unwrap();

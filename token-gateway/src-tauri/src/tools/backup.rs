@@ -122,28 +122,52 @@ pub(crate) fn ensure_baseline_before_prune(
 }
 
 
+/// 這份設定是否「看得出一個來源」—— 用來避免把空檔／無關檔案當成備份還原。
+///
+/// **2026-09-29 修正（實測踩到的失效）**：原本三個工具都要求「找得到一個 URL」，
+/// 但**原生設定正好沒有 URL**：
+///
+/// - Codex 的第一方 `openai` provider 是**內建**的，沒有 `[model_providers.openai]`
+///   段，所以 `codex_text_base_url` 回 `None`；
+/// - Claude 回到官方時**沒有** `ANTHROPIC_BASE_URL`。
+///
+/// 於是「關閉網關」會失敗：`migrate_gateway_baseline` 先用本函式篩候選，全部被
+/// 判成「沒有來源」，回傳 `Err("所有備份都還含網關配置，無法還原到接管前")`；
+/// 而 `restore_backup_to_inner` 在沒有 baseline 時會把那個 Err 直接往外丟 ——
+/// 使用者看到一句指責備份含網關配置的訊息，但那份備份一個網關位址都沒有。
+/// 只要用過一次「原生還原」就會踩到，因為從那之後基線／備份都是原生長相。
+///
+/// 現在改成認得「原生長相」：Codex 只要看得出是一份 Codex 設定（有
+/// `model_provider`／`model`／`model_providers`）就算有來源；Claude／OpenCode
+/// 只要是合法的非空設定物件就算有來源（有沒有被指到網關由
+/// `backup_is_tainted` 另外判斷，兩者職責分開）。
 pub(crate) fn backup_has_known_route(app: &str, text: &str) -> bool {
     match app {
-        "codex" => codex_text_base_url(text).is_some(),
-        "claude" => serde_json::from_str::<serde_json::Value>(text)
+        "codex" => {
+            let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else {
+                return false;
+            };
+            let provider = doc
+                .get("model_provider")
+                .and_then(|v| v.as_str())
+                .unwrap_or(super::native::CODEX_NATIVE_PROVIDER);
+            let has_section = doc
+                .get("model_providers")
+                .and_then(|m| m.get(provider))
+                .is_some();
+            if has_section {
+                // 有段就必須有 URL：`model_provider = "custom"` 卻沒有
+                // `[model_providers.custom]` 是壞掉的設定，不算有來源。
+                codex_text_base_url(text).is_some()
+            } else {
+                // 沒有段時，只有**內建** provider 才算有來源 —— 那一條走官方端點，
+                // 不需要 base_url，這正是原生 Codex 的長相。
+                provider == super::native::CODEX_NATIVE_PROVIDER
+            }
+        }
+        "claude" | "opencode" => serde_json::from_str::<serde_json::Value>(text)
             .ok()
-            .and_then(|v| {
-                v.get("env")
-                    .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
-                    .and_then(|u| u.as_str())
-                    .map(|_| true)
-            })
-            .unwrap_or(false),
-        "opencode" => serde_json::from_str::<serde_json::Value>(text)
-            .ok()
-            .and_then(|v| {
-                v.get("provider")
-                    .and_then(|p| p.get(GATEWAY_PROVIDER_ID))
-                    .and_then(|p| p.get("options"))
-                    .and_then(|o| o.get("baseURL"))
-                    .and_then(|u| u.as_str())
-                    .map(|_| true)
-            })
+            .and_then(|v| v.as_object().map(|o| !o.is_empty()))
             .unwrap_or(false),
         _ => false,
     }
