@@ -233,13 +233,64 @@ Copy-Item "$env:TEMP\config.backup-before-test.toml" "$env:USERPROFILE\.codex\co
 
 ---
 
-## 8. 若出現問題：怎麼回復
+## 8. 測試：封存舊對話（2026-09-28 新增）
+
+你回報「無法封存舊的對話，封存兩個 test 都失敗」。根因已查明 ——
+**不是網關的問題**，是 Codex 自己留下的鎖檔（完整證據在 `TESTING.md` §0.8）。
+
+### 快速確認是不是同一個原因
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\.codex\thread-writer-locks" -Force |
+  ForEach-Object { "  " + $_.Name + "  " + $_.LastWriteTime }
+```
+
+只要清單裡有 `<一串 UUID>.lock`，而你想封存的對話正好是那個 UUID，
+那就是同一個原因。
+
+### 修法
+
+```powershell
+# 1) 先完全關閉 Codex（Desktop 和任何 codex 行程都要關）
+Get-Process codex -ErrorAction SilentlyContinue
+
+# 2) 只報告，不動任何東西
+py scripts\codex_clear_stale_locks.py
+
+# 3) 確認列出來的都是你想處理的，再真的刪（會先備份）
+py scripts\codex_clear_stale_locks.py --apply
+
+# 4) 封存
+codex archive <session-id>
+```
+
+### 通過標準
+
+| # | 應該看到 |
+|---|---|
+| 1 | 第 2 步把那些鎖列為 **stale**（若顯示「IN USE」，代表 Codex 還開著，回第 1 步） |
+| 2 | `codex archive <id>` 印出 `Archived session <id>.`、exit code 0 |
+| 3 | rollout 檔從 `.codex\sessions\` 搬到 `.codex\archived_sessions\` |
+| 4 | 在 Codex Desktop 的對話清單裡，那個對話移到「已封存」 |
+
+### 注意
+
+- **不要在對話開著的時候封存它。** 那會失敗，而且會在
+  `thread-writer-locks\` 留下一把鎖，讓之後每次封存都失敗。
+- 工具**只**刪 0 byte 的 `<uuid>.lock`，而且**有行程開著 handle 的一律不碰**
+  （`.coordination.lock` 和 rollout 檔也一律不碰）。
+
+---
+
+## 9. 若出現問題：怎麼回復
 
 | 想回復什麼 | 怎麼做 |
 |---|---|
 | **Codex 設定** | App 的「本機工具」頁 → 把 Codex 的開關**關掉**（會還原接管前備份） |
 | 手動還原單一檔案 | 備份在 `%APPDATA%\com.tokencounter.gateway\backups\codex\`，挑 `config.toml.bak-*` 複製回 `~/.codex/config.toml` |
 | 資料庫 | 每次動資料庫前我都會先備份（例如 `.workbuddy/tmp/app.db.before-*`） |
+| 誤封存的對話 | `codex unarchive <session-id>` |
+| 被刪掉的鎖檔 | `%USERPROFILE%\.codex\thread-writer-locks-backup\`（工具會自動備份） |
 
 **回報時請附上**：
 
@@ -250,7 +301,7 @@ Copy-Item "$env:TEMP\config.backup-before-test.toml" "$env:USERPROFILE\.codex\co
 
 ---
 
-## 9. 現況一覽：還有什麼沒做
+## 10. 現況一覽：還有什麼沒做
 
 | 項目 | 狀態 |
 |---|---|
@@ -261,4 +312,6 @@ Copy-Item "$env:TEMP\config.backup-before-test.toml" "$env:USERPROFILE\.codex\co
 | 測試 E（`wire_api`） | ✅ 我代跑 + 實機修復驗證 |
 | 測試 F（DSH 用量不出現） | ✅ 已查明：DSH 直連 `opencode.ai`，**沒經過網關**。要統計請把 DSH 的 `oc-go` baseURL 指向網關（`TESTING.md` §6.7） |
 | 測試 G（本機工具標籤） | ✅ 已修 |
+| **封存舊對話** | ✅ 根因已查明（Codex 鎖檔），工具已附 → 第 8 節 |
 | Phase 5 錯誤型別轉換 | ⛔ **刻意維持 6/108**：每次轉換都應該有人能實測，屬獨立的漸進工作 |
+

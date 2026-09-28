@@ -317,7 +317,16 @@ pub fn apply_switch(
             // 不減：若清單只來自 DB，一旦 threads 變少（例如使用者**封存對話**
             // 之後該 provider 不再出現在 `SELECT DISTINCT model_provider`），
             // 舊的別名段就會被 `codex_apply` 剔除，舊會話的 provider 段因而
-            // 消失 —— 這正是「舊會話無法續用／無法封存」的可能成因。
+            // 消失。
+            //
+            // ⚠️ 2026-09-28 更正：這裡原本還寫著「這正是舊會話無法續用／無法
+            // 封存的可能成因」——**那個推論是錯的**。實際追查後，封存失敗與
+            // provider 段完全無關（失敗的 session 其 provider 段一切正常），
+            // 真因是 Codex 自己的殘留鎖檔
+            // `~/.codex/thread-writer-locks/<thread-id>.lock`，見
+            // docs/TESTING.md §0.8。保留「只增不減」是因為它對**舊會話續用**
+            // 仍然必要（provider 段不見了，舊 session 就真的開不起來），
+            // 但不要再把它當成封存問題的線索。
             let gw_url = gateway_url(port, "codex");
             let db_aliases = match cfg.parent().map(codex_legacy_providers_report) {
                 Some(LegacyProviders::Ok { providers, .. }) => providers,

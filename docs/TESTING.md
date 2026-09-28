@@ -572,6 +572,87 @@ pub const CODEX_WIRE_API: &str = "responses";
 
 ---
 
+## 0.8 2026-09-28（第三輪）：「無法封存舊對話」的根因
+
+**你先回報的症狀**：Codex 開啟與使用舊 session 對話都正常，但**無法封存**
+舊對話，試了兩個 test 都失敗。
+
+### 0.8.1 結論先講：**這不是 Token Gateway 的問題**
+
+封存是**純本機**動作（搬移 rollout 檔＋更新 sqlite），不會經過網關、
+不呼叫模型。根因是 Codex 自己留在
+`%USERPROFILE%\.codex\thread-writer-locks\` 底下的**殘留鎖檔**：
+
+```
+%USERPROFILE%\.codex\thread-writer-locks\<thread-id>.lock
+```
+
+只要那個 0 byte 的 `.lock` 還在，`codex archive <id>` 就會失敗。把它刪掉，
+同一條指令立刻成功。
+
+### 0.8.2 完整證據鏈
+
+| # | 動作 | 結果 |
+|---|---|---|
+| 1 | `threads` 表有 `archived`／`archived_at` 欄位；09-26 有成功封存過 | 機制本身正常 |
+| 2 | 所有相關 rollout 檔都在、大小正常、projection offset 也等於檔案大小 | 排除「檔案遺失／投影不完整」 |
+| 3 | 把 doctor 報的 `no usable header record` 那個 **0 byte 檔**移走再試 | **仍然失敗** → 不是它 |
+| 4 | 換別的 test session 試封存 | **成功**（`Archived session …`，exit 0）→ 不是全體故障 |
+| 5 | 比對失敗 vs 成功的 session | 失敗的那個有 `.lock`；成功的三個都**沒有** |
+| 6 | 刪掉失敗那個 session 的 `.lock`，立刻重試 | **成功封存**（`archived=1`、rollout 搬進 `archived_sessions\`） |
+| 7 | 刪掉另一個 `.lock` 後等 100 秒 | **沒有自己長回來** → 是真殘留，不是現行寫入中 |
+| 8 | 用 `CreateFileW`（share mode = 0）檢查每個鎖檔 | 6 個裡有 5 個**仍有行程開著 handle** |
+
+> **第 8 點是關鍵**：那些鎖檔的 handle 由**還在跑的 Codex 行程**持有
+> （`codex` PID 3328，20:45:07 啟動），所以 Codex 一開著，這些鎖就永遠
+> 不會自己消失 —— 這才是「試幾次都失敗」的原因。刪檔之所以仍可行，
+> 是因為它以 `FILE_SHARE_DELETE` 開啟；但 Codex 的判斷是**看檔案在不在**，
+> 所以刪掉就通了。
+
+### 0.8.3 為什麼會殘留（推論，非直證）
+
+`thread-writer-locks` 是 Codex 用來記錄「這個 thread 有人正在寫」的機制。
+09-28 21:03:12～21:03:50 之間有 **7 個 thread 被依序更新、並各留下一把鎖**
+（間隔 5～10 秒，看起來是逐一開啟對話）。合理推論是：**在 Codex Desktop 裡
+開過那些對話，之後鎖沒有被釋放**；而只要鎖在，之後每一次封存都會失敗。
+我沒有去證明「關閉對話是否會釋放」，因為那需要動你的 app 狀態。
+
+### 0.8.4 怎麼修（附工具）
+
+我新增了 `scripts/codex_clear_stale_locks.py`：
+
+```powershell
+py scripts\codex_clear_stale_locks.py            # 只報告，不動任何東西
+py scripts\codex_clear_stale_locks.py --apply    # 刪除，且先備份到
+                                                 # .codex\thread-writer-locks-backup
+```
+
+它**只會**刪 0 byte 的 `<uuid>.lock`，而且會先檢查有沒有行程還開著 handle，
+**有在用的絕對不碰**；`.coordination.lock` 與 rollout 檔一律不碰。
+
+**建議流程**（順序有意義）：
+
+1. **完全關閉 Codex**（Desktop 與任何 `codex` 行程）。這樣 handle 才會放掉。
+2. `py scripts\codex_clear_stale_locks.py` —— 這時應該全部列為 stale。
+3. 加上 `--apply` 真的刪除。
+4. 再封存：`codex archive <session-id>`，或在 Desktop 裡封存
+   （**對話要先關掉**，別在它開著的時候封存）。
+
+> **我實測時 Codex 開著，工具只判定 1 個為 stale、5 個「IN USE」**。
+> 那是正確且保守的行為：Codex 沒關就別硬刪。
+
+### 0.8.5 我在診斷過程中動到的東西（誠實揭露）
+
+| 動作 | 影響 | 怎麼還原 |
+|---|---|---|
+| 封存了 4 個標題為 `test` 的 session：`01a08b17`、`01a08b19`、`01a0924b`、`01a0924c` | 它們現在是已封存狀態 | `codex unarchive <id>` |
+| 刪除並還原了 `01a063d2`（標題 `OK 你好`）的鎖檔 | 已用備份還原 | 備份在 `.workbuddy\tmp\lock-backup\` |
+| 曾把一個 0 byte rollout 檔暫時移走再放回 | 已還原 | 該檔本來就是 0 byte |
+
+**沒有**改動任何 rollout 內容、沒有改 `config.toml`、沒有改 state DB 的資料。
+
+---
+
 ## 1. 產物位置
 
 | 產物 | 路徑 |
