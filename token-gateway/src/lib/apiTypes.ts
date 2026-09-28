@@ -1,0 +1,303 @@
+// 型別／常數宣告：核心資料模型（自 api.ts 原樣搬移，未改動任何內容）。
+// 其餘型別分置 apiTypesPricing.ts / apiTypesDiagnostics.ts，於此檔尾 re-export。
+
+export interface DbStatus {
+  path: string;
+  schema_version: number;
+  provider_count: number;
+  key_count: number;
+  log_count: number;
+}
+
+export interface ProxyStatus {
+  running: boolean;
+  listen: string;
+  port: number;
+  started_at: number | null;
+}
+
+export interface Provider {
+  id: number;
+  name: string;
+  app_type: string;
+  api_format: string;
+  base_url: string;
+  api_key: string;
+  /** bearer（預設）| goog-key（Google x-goog-api-key） */
+  auth_scheme: string;
+  models: string[];
+  priority: number;
+  enabled: boolean;
+}
+
+export interface ProviderInput {
+  name: string;
+  app_type: string;
+  api_format: string;
+  base_url: string;
+  api_key: string;
+  auth_scheme: string;
+  models: string[];
+  priority: number;
+  enabled: boolean;
+}
+
+export interface ToolStatus {
+  app: string;
+  display: string;
+  installed: boolean;
+  config_path: string | null;
+  current_base_url: string | null;
+  current_model: string | null;
+  gateway_active: boolean;
+  supported_switch: boolean;
+}
+
+export interface ToolVersion {
+  app: string;
+  display: string;
+  installed: boolean;
+  version: string | null;
+  update_argv: string[];
+  update_label: string | null;
+  up_to_date: boolean | null;
+}
+
+export interface ToolLatest {
+  app: string;
+  latest: string | null;
+  up_to_date: boolean | null;
+}
+
+export interface SwitchRequest {
+  app: string;
+  /** 佔位值：後端一律覆寫成網關 URL（唯一模式就是經網關）。 */
+  base_url: string;
+  api_key: string;
+  model: string;
+  provider_id: number | null;
+  provider_format: string | null;
+  reasoning: string | null;
+  context_window: number | null;
+  gen_catalog: boolean;
+  catalog_union: boolean;
+  direct_upstream: boolean;
+  /** 下拉選中的本地 Key id（僅回填選項；後端以 api_key 為準）。 */
+  key_id?: number | null;
+  /** Claude Code 模型映射（僅 claude 有效）。 */
+  claude_map?: {
+    default: string;
+    haiku: string;
+    sonnet: string;
+    opus: string;
+    fable: string;
+  } | null;
+}
+
+export interface SwitchPlan {
+  app: string;
+  config_path: string;
+  supported: boolean;
+  will_backup: boolean;
+  edits: string[];
+  env_setup: string[];
+  warnings: string[];
+}
+
+export interface SwitchResult {
+  config_path: string;
+  backup_path: string | null;
+  extra_files: string[];
+}
+
+export interface AppSettings {
+  gateway_port: number;
+  auto_start_proxy: boolean;
+  accent: string;
+}
+
+export interface LocalKey {
+  id: number;
+  name: string;
+  key_prefix: string;
+  quota_tokens: number;
+  used_tokens: number;
+  rate_limit_qpm: number;
+  allowed_models: string[];
+  allowed_apps: string[];
+  provider_id: number | null;
+  provider_name: string | null;
+  expires_at: number | null;
+  enabled: boolean;
+  created_at: number;
+}
+
+export interface KeyInput {
+  name: string;
+  provider_id: number | null;
+  quota_tokens: number;
+  rate_limit_qpm: number;
+  allowed_models: string[];
+  allowed_apps: string[];
+  expires_at: number | null;
+}
+
+export interface KeyCreated {
+  id: number;
+  /** 明文，僅返回一次，UI 必須提示立即複製。 */
+  secret: string;
+}
+
+export interface LogRow {
+  id: number;
+  ts: number;
+  key_id: number | null;
+  app: string;
+  provider_id: number | null;
+  model_raw: string;
+  in_tok: number;
+  out_tok: number;
+  cache_read: number;
+  cache_write: number;
+  cost_usd: number;
+  latency_ms: number;
+  status: number;
+  is_stream: boolean;
+  /** 'gateway'（即時）| 'import'（歷史回填） */
+  source: string;
+}
+
+export type UsageRange = "today" | "7d" | "30d" | "90d" | "180d" | "365d";
+
+export interface UsageSummary {
+  requests: number;
+  ok_requests: number;
+  success_rate: number;
+  in_tok: number;
+  out_tok: number;
+  cache_read: number;
+  cache_write: number;
+  total_tokens: number;
+  cache_hit_rate: number;
+  cost_usd: number;
+}
+
+export interface TrendBucket {
+  ts: number;
+  requests: number;
+  tokens: number;
+  cost_usd: number;
+}
+
+export interface TrendAppRow {
+  ts: number;
+  app: string;
+  requests: number;
+  tokens: number;
+  cost_usd: number;
+}
+
+export interface HourlyBucket {
+  hour: number;
+  requests: number;
+  tokens: number;
+  cost_usd: number;
+}
+
+export interface PriceQuote {
+  cost_usd: number;
+  in_pm: number;
+  out_pm: number;
+  cache_read_pm: number;
+  cache_create_pm: number;
+  source: string;
+  mode: string;
+  sub_fee_usd: number;
+  sub_included_tokens: number;
+  sub_used_this_month: number;
+  sub_over_tokens: number;
+}
+
+export interface SubscriptionFee {
+  provider_id: number;
+  provider_name: string;
+  model_norm: string;
+  sub_fee_usd: number;
+  sub_included_tokens: number;
+  used_this_month: number;
+}
+
+export interface SubscriptionFees {
+  fees: SubscriptionFee[];
+  total_fee: number;
+}
+
+export interface QuotaWindow {
+  label: string;
+  percent: number;
+  resets_at: string | null;
+}
+
+export interface SubscriptionQuota {
+  key: string;
+  title: string;
+  kind: string;
+  status: "ok" | "no_credentials" | "expired" | "error" | "not_subscribed";
+  message: string | null;
+  windows: QuotaWindow[];
+  queried_at: number;
+}
+
+export interface ProviderStat {
+  provider_id: number | null;
+  provider_name: string;
+  requests: number;
+  ok_requests: number;
+  success_rate: number;
+  in_tok: number;
+  out_tok: number;
+  cache_read: number;
+  cache_write: number;
+  tokens: number;
+  /** 快取命中率，後端 `hit_rate()` 演算法，與 UsageSummary 同口徑。 */
+  cache_hit_rate: number;
+  cost_usd: number;
+}
+
+export interface ModelStat {
+  model: string;
+  requests: number;
+  in_tok: number;
+  out_tok: number;
+  cache_read: number;
+  cache_write: number;
+  tokens: number;
+  /** 快取命中率，後端 `hit_rate()` 演算法，與 UsageSummary 同口徑。 */
+  cache_hit_rate: number;
+  cost_usd: number;
+}
+
+/**
+ * 分本機工具統計（「工具」視角）。唯一能並排比較各工具的來源。
+ *
+ * ⚠️ 整體命中率**不可**由本表各行自行平均：各工具 token 量差距極大，
+ * 簡單平均與以 token 加權的正確值實測可差 19.7 個百分點。
+ * 需要整體數字時一律用 `usageSummary`。
+ */
+export interface AppStat {
+  app: string;
+  requests: number;
+  ok_requests: number;
+  success_rate: number;
+  in_tok: number;
+  out_tok: number;
+  cache_read: number;
+  cache_write: number;
+  tokens: number;
+  /** 快取命中率，後端 `hit_rate()` 演算法，與 UsageSummary 同口徑。 */
+  cache_hit_rate: number;
+  cost_usd: number;
+}
+
+export * from "./apiTypesPricing";
+export * from "./apiTypesDiagnostics";
