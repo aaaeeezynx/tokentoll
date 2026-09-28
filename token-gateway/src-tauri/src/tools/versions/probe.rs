@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{first_line, npm_package, which_bin};
+use super::{npm_package, which_bin};
 
 /// 讀 npm 全局包 package.json 的 version（純讀檔，不起進程，最快最穩）。
 pub(crate) fn npm_pkg_version_at(root: &Path, pkg: &str) -> Option<String> {
