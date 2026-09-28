@@ -551,7 +551,7 @@ py scripts\dump_traces.py --problems -n 100
   釘住。要統一說法或統一門檻屬於產品決策，未動。
 - **`db.rs` migration 仍無自動化測試**（§2.1 F6）。目前唯一驗證是需人工觸發的
   `live_migrate_real_db_copy`。
-- **前端三個肥檔未動**：`Keys.tsx` 884、`Calc.tsx` 818、`lib/api.ts` 758
+- **前端三個肥檔未動**：`Keys.tsx` 876、`Calc.tsx` 809、`lib/api.ts` 803
   （不在本輪授權範圍）。
 
 **已做但未達標**：
@@ -559,8 +559,9 @@ py scripts\dump_traces.py --problems -n 100
 - `proxy_handler` **86 行**（目標 < 80）。差的 6 行是三個階段脈絡重複列出
   同 5 個欄位，要再壓得引入共用 `ReqCtx`、牽動約 56 處存取換 7 行 ——
   判斷為行數高爾夫，不做。
-- **拆檔後仍 > 400 行的檔案**：`Providers.tsx` 781、`ModelCatalog.tsx` 613、
-  `tools/tests/codex.rs` 603、`ProviderForm.tsx` 600、`usage/usageCharts.tsx` 551。
+- **拆檔後仍 > 400 行的檔案**（§0.3 之後的實測值）：
+  `Providers.tsx` 778、`ModelCatalog.tsx` 608、`tools/tests/codex.rs` 566、
+  `ProviderForm.tsx` 590、`usage/usageCharts.tsx` 546。
   再拆需要先決定分組維度（例如 `Providers.tsx` 要先把拖拽排序抽成 hook），
   屬於獨立一步。
 - **Phase 5 錯誤型別只轉了 6/108 處**。`keys.rs` 是刻意選的試點；其餘維持
@@ -569,12 +570,12 @@ py scripts\dump_traces.py --problems -n 100
 
 **已驗證但你可能想自己再看一次**：
 
-- `cargo test --offline` → **204 passed / 0 failed / 9 ignored**
-- `cargo clippy --offline --all-targets` → exit 0，僅 5 條**既有**風格提示
-  （`tools/codex.rs` ×2、`price_extract.rs` ×1、`tools/tests/restore.rs` ×2）
+- `cargo test --offline` → **216 passed / 0 failed / 8 ignored**（第一階段 F 後的現況）
+- `cargo clippy --offline --all-targets` → exit 0，僅 4 條**既有**風格提示
+  （`tools/codex.rs` ×2、`price_extract.rs` ×1、`tools/tests/restore.rs` ×1）
 - `npx tsc --noEmit` → 0 錯誤
-- `npm run build` → 成功，bundle 542.38 kB
-- `npx tauri build` → exe + MSI + NSIS 三種產物皆成功
+- `pnpm build` → 成功，bundle 551.02 kB（gzip 151.31 kB）
+- `pnpm exec tauri build` → exe + MSI + NSIS 三種產物皆成功（最新為 09-28 04:34，見 §9.4）
 - **拆 `keys.rs` 錯誤型別時的中文訊息逐字比對**：15 條 → 15 條，零遺漏、
   零新增、零改字（腳本：`.workbuddy/tmp/verify_msg_text.py`）
 
@@ -590,7 +591,39 @@ py scripts\dump_traces.py --problems -n 100
 
 ## 9. 建置資訊
 
-### 9.3 最新建置（2026-09-28 03:28，第一階段 D-1／A／E）—— 你目前安裝的就是這一個
+### 9.4 最新建置（2026-09-28 04:34，第一階段 F）—— **你目前安裝的就是這一個**
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | **2026-09-28 04:34:43** |
+| 執行檔大小 | 9,009,152 bytes（8,798 KB） |
+| MSI 大小 | 7,344,128 bytes（7,172 KB） |
+| NSIS 大小 | 3,830,837 bytes（3,741 KB） |
+| 後端測試 | **216 passed / 0 failed / 8 ignored**（本輪實跑 `cargo test --offline`，exit 0） |
+| clippy | **4 個警告**（原為 5；少的那個在被刪的 hermes 測試裡） |
+| 前端型別檢查 | `npx tsc --noEmit` exit 0 |
+| 前端資源指紋 | `index-B1Ek3VaH.js`（前版 `index-BAemutFc.js`）、`index-DnRx7SDk.css`（未變） |
+
+**已驗證產物比所有原始碼新**（最新原始碼 `Providers.tsx` 為 `04:11:21`，產物 `04:34:43`）。
+
+**二進位內容抽查**：
+
+| 字串 | 結果 | 意義 |
+|---|---|---|
+| `index-B1Ek3VaH.js` | ✅ 存在 | 內嵌的是本次建置的前端（含工具頁版本面板） |
+| `hermes_home` / `parse_hermes_model` / `HERMES_CUSTOM_TOKENGATEWAY_API_KEY` | ❌ **全部不存在** | F 真的編進去了（hermes 支援整塊消失） |
+| `usage_by_app` | ✅ 存在 | 用量設施仍在（要求二未被犧牲） |
+
+**安裝驗證**：
+
+| 檢查 | 結果 |
+|---|---|
+| 安裝前 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 2026-09-28 03:27:52，內含 `index-BAemutFc.js`（前一版） |
+| 執行 NSIS 安裝檔（`/S`） | exit code 0 |
+| 安裝後同一路徑 | 2026-09-28 04:34:36、9,009,152 bytes，內含 `index-B1Ek3VaH.js`、且無 hermes 字串 ✅ |
+| 實機 GUI | 見 §0.3（工具清單 4 個、頁籤讀「2/4 接管中」、全程未寫入任何設定） |
+
+### 9.3 前一次建置（2026-09-28 03:28，第一階段 D-1／A／E，已被 9.4 取代）
 
 | 項目 | 值 |
 |---|---|
