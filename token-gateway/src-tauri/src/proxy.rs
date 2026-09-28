@@ -53,6 +53,7 @@ mod forward;
 mod retry;
 mod finish;
 mod pipeline;
+mod reqctx;
 
 // 子模組共用匯入：各子模組開頭的 `use super::*;` 會取得這裡的綁定，
 // 因此某個模組要用兄弟模組的項目時，只要在這裡補一行即可。
@@ -70,6 +71,7 @@ use {
         Prelude, ReqMeta,
     },
     retry::{send_with_strip_retry, RetryCtx, Upstream},
+    reqctx::ReqCtx,
     stream::{
         relay_sse, responses_line_events, sse_response, AnthropicRelay, ResponsesRelay, StreamLog,
     },
@@ -175,6 +177,9 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         content_type,
         model_raw,
     } = request_meta(&parts, &bytes);
+    // 共用脈絡：後續每個階段（解析來源／準備／重試／收尾）都要這 4 個值，
+    // 集中在 `ReqCtx` 建一次，各階段自己的 ctx 再嵌入它。
+    let rc = ReqCtx::new(&ctx, &started, &app, &model_raw);
     // ---- 模型白名單 + 來源解析（見 resolve_model）
     if let Err(resp) = resolve_model(&ctx, &started, &app, &conn, &model_raw, &mut authed) {
         return *resp;
@@ -182,13 +187,10 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
 
     // ---- 格式矩陣 + 請求體轉譯與剝離（見 prepare_request）
     let prep = match prepare_request(PrepareInput {
-        ctx: &ctx,
-        started: &started,
-        app: &app,
+        req: rc,
         conn: &conn,
         provider_id: authed.provider_id,
         api_format: &authed.provider_api_format,
-        model_raw: &model_raw,
         content_type: &content_type,
         path_hint: &path_hint,
         raw: &bytes,
@@ -197,45 +199,44 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         Ok(p) => p,
         Err(resp) => return *resp,
     };
-    let Prepared {
-        in_fmt,
-        target_fmt,
-        kind,
-        translated,
-        bytes: body_bytes,
-        model: translated_model,
-    } = prep;
+    let (in_fmt, target_fmt, kind) = (prep.in_fmt, prep.target_fmt, prep.kind);
+    let translated = prep.translated;
+    let body_bytes = prep.bytes;
+    let translated_model = prep.model;
 
     // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
     let up = upstream_for(&ctx, &parts, &authed, translated, &app);
 
-    let rc = RetryCtx {
-        ctx: &ctx,
-        started: &started,
-        app: &app,
-        model_raw: &model_raw,
-        content_type: &content_type,
-        in_fmt,
-        target_fmt,
-        kind,
-    };
-    let upstream = match send_with_strip_retry(&rc, authed.provider_id, &up, body_bytes).await {
+    let upstream = match send_with_strip_retry(
+        &RetryCtx {
+            req: rc,
+            content_type: &content_type,
+            in_fmt,
+            target_fmt,
+            kind,
+        },
+        authed.provider_id,
+        &up,
+        body_bytes,
+    )
+    .await
+    {
         Ok(r) => r,
         Err(resp) => return *resp,
     };
-    let fc = FinishCtx {
-        ctx: &ctx,
-        started: &started,
-        app: &app,
-        model_raw: &model_raw,
-        translated_model: &translated_model,
-        body_json: &body_json,
-        key_id: if authed.direct { None } else { Some(authed.id) },
-        provider_id: authed.provider_id,
-        translated,
-        kind,
-    };
-    finish_response(upstream, &fc).await
+    finish_response(
+        upstream,
+        &FinishCtx {
+            req: rc,
+            translated_model: &translated_model,
+            body_json: &body_json,
+            key_id: if authed.direct { None } else { Some(authed.id) },
+            provider_id: authed.provider_id,
+            translated,
+            kind,
+        },
+    )
+    .await
 }
 
 pub async fn serve(db_path: PathBuf, listener: TcpListener) -> Result<(), String> {

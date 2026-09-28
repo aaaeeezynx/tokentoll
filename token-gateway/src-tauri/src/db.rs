@@ -724,9 +724,133 @@ mod tests {
         assert!(after.3 && after.4, "Phase 1 的兩張表應被補上");
     }
 
+    /// **自動化版的 migration 測試（取代只能人工跑的 `live_migrate_real_db_copy`）。**
+    ///
+    /// 對「每一個歷史版本」各造一個資料庫，逐一確認升級到最新版之後：
+    /// 1. 版本升到 [`SCHEMA_VERSION`]
+    /// 2. 既有資料一列不少（providers／request_logs／settings）
+    /// 3. 最新結構該有的表全部存在
+    ///
+    /// 為什麼要逐版跑而不是只跑 v7：`open_and_ensure` 是「一次補到最新」，
+    /// 真實使用者可能停在**任何**一個舊版，任何一版的落差都會讓他開不起來。
+    /// 這個測試讓「每個起點」都被走過一次，且不需人工介入。
+    ///
+    /// 作法：先建到最新，記下所有表名，再把「比目標版本新的表」與「較新的
+    /// schema_version 列」刪掉，即得該版本的等價資料庫（與
+    /// `v7_db_without_phase1_tables_upgrades_preserving_data` 同一個手法，
+    /// 但對所有版本自動化）。
     #[test]
-    fn open_and_ensure_is_idempotent() {
-        let dir = tempfile::tempdir().unwrap();
+    fn every_legacy_version_upgrades_preserving_data() {
+        // 各版本「新增」的表；升級到該版時應該要有。
+        // v8 = Phase 1 的兩張觀測表；其餘版本沒有新增表（改欄位／索引）。
+        for target in 1..SCHEMA_VERSION as i64 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(format!("v{target}.db"));
+            {
+                let c = open(&path);
+                // 放進可辨識的既有資料
+                c.execute(
+                    "INSERT INTO providers (name, app_type, api_format, base_url, api_key,
+                     models_json, priority, enabled, created_at, updated_at)
+                     VALUES ('keepme','codex','openai-chat','http://x','k','[]',0,1,0,0)",
+                    [],
+                )
+                .unwrap();
+                for i in 0..5 {
+                    c.execute(
+                        "INSERT INTO request_logs (ts, app, model_raw, model_norm, in_tok, out_tok,
+                         cost_usd, latency_ms, status, is_stream)
+                         VALUES (?1,'codex','m','m',1,2,0.0,10,200,0)",
+                        [1000 + i],
+                    )
+                    .unwrap();
+                }
+                c.execute(
+                    "INSERT INTO settings (key, value) VALUES ('probe','v')",
+                    [],
+                )
+                .unwrap();
+
+                // 退回目標版本：刪掉比它新的表與版本列
+                if target < 8 {
+                    c.execute_batch(
+                        "DROP TABLE IF EXISTS proxy_trace;
+                         DROP TABLE IF EXISTS provider_stripped_fields;",
+                    )
+                    .unwrap();
+                }
+                c.execute(
+                    "DELETE FROM schema_version WHERE version > ?1",
+                    [target],
+                )
+                .unwrap();
+                assert_eq!(max_version(&c), target, "前置條件：版本應為 {target}");
+            }
+
+            let before = {
+                let c = Connection::open(&path).unwrap();
+                (
+                    count_rows(&c, "providers"),
+                    count_rows(&c, "request_logs"),
+                    count_rows(&c, "settings"),
+                )
+            };
+
+            // 再次開啟 == 使用者啟動新版
+            let c = open(&path);
+            assert_eq!(
+                max_version(&c),
+                SCHEMA_VERSION as i64,
+                "v{target} 應升級到 {}",
+                SCHEMA_VERSION
+            );
+            assert_eq!(
+                count_rows(&c, "providers"),
+                before.0,
+                "v{target} 升級後 providers 不得增減"
+            );
+            assert_eq!(
+                count_rows(&c, "request_logs"),
+                before.1,
+                "v{target} 升級後 request_logs 不得增減"
+            );
+            // settings 可能被升級流程「補上」新鍵（種子），所以只驗既有鍵沒被動。
+            assert!(
+                count_rows(&c, "settings") >= before.2,
+                "v{target} 升級後 settings 不得減少"
+            );
+            assert_eq!(
+                c.query_row(
+                    "SELECT value FROM settings WHERE key='probe'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "v",
+                "v{target} 升級後設定值不得變"
+            );
+            // 最新結構的表必須齊全（與 fresh_db_has_all_core_tables 同一份清單）
+            for t in [
+                "schema_version",
+                "providers",
+                "local_keys",
+                "request_logs",
+                "import_state",
+                "pricing",
+                "settings",
+                "provider_pricing",
+                "pricing_periods",
+                "provider_models",
+                "provider_stripped_fields",
+                "proxy_trace",
+            ] {
+                assert!(has_table(&c, t), "v{target} 升級後缺少表 {t}");
+            }
+        }
+    }
+
+    #[test]
+    fn open_and_ensure_is_idempotent() {        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.db");
         let c1 = open(&path);
         assert_eq!(max_version(&c1), SCHEMA_VERSION as i64);

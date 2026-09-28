@@ -27,11 +27,11 @@ impl Upstream<'_> {
     }
 }
 /// 400 重試階段所需的請求脈絡（留痕與拒絕都要用）。
+///
+/// 共用的 4 個欄位（`ctx`／`started`／`app`／`model_raw`）來自 [`ReqCtx`]；
+/// 這裡只補本階段額外需要的轉譯脈絡。
 pub(super) struct RetryCtx<'a> {
-    pub(super) ctx: &'a ProxyCtx,
-    pub(super) started: &'a Instant,
-    pub(super) app: &'a str,
-    pub(super) model_raw: &'a str,
+    pub(super) req: ReqCtx<'a>,
     pub(super) content_type: &'a str,
     pub(super) in_fmt: InFmt,
     pub(super) target_fmt: TargetFmt,
@@ -42,13 +42,13 @@ impl RetryCtx<'_> {
     /// `retry_count` 由「有沒有真的剝掉東西」推導 —— 有剝才叫重試。
     pub(super) fn trace(&self, status: u16, stripped: Vec<String>, note: &str) -> TraceRecord {
         TraceRecord {
-            app: self.app.to_string(),
-            model_raw: self.model_raw.to_string(),
+            app: self.req.app.to_string(),
+            model_raw: self.req.model_raw.to_string(),
             in_fmt: self.in_fmt.as_str().to_string(),
             target_fmt: self.target_fmt.as_str().to_string(),
             trans_kind: self.kind.as_str().to_string(),
             upstream_status: status,
-            latency_ms: self.started.elapsed().as_millis() as i64,
+            latency_ms: self.req.started.elapsed().as_millis() as i64,
             retry_count: if stripped.is_empty() { 0 } else { 1 },
             stripped_fields: stripped,
             content_type: self.content_type.to_string(),
@@ -59,10 +59,10 @@ impl RetryCtx<'_> {
 
     pub(super) fn connect_failed(&self, e: &reqwest::Error) -> Response {
         reject(
-            self.ctx,
-            self.started,
-            self.app,
-            self.model_raw,
+            self.req.ctx,
+            self.req.started,
+            self.req.app,
+            self.req.model_raw,
             StatusCode::BAD_GATEWAY,
             format!("上游連接失敗：{e}"),
         )
@@ -106,7 +106,7 @@ pub(super) async fn send_with_strip_retry(
         // `rusqlite::Connection` 是 Send 但**不是 Sync**，所以 `&Connection`
         // 跨 await 會讓整個 future 變成 !Send，axum 的 Handler 就不成立。
         // 開新連線也與 `trace::log_to` 的既有做法一致。
-        let mem = open_conn(&rc.ctx.db_path).ok();
+        let mem = open_conn(&rc.req.ctx.db_path).ok();
         for field in &fields {
             if let Some(n) = strip_json_field(&nb, field) {
                 match mem.as_ref().map(|c| trace::remember_stripped(c, provider_id, field)) {
@@ -126,7 +126,7 @@ pub(super) async fn send_with_strip_retry(
                 .trace(400, applied.clone(), "上游 400 拒收欄位，已剝離並重試")
                 .with_body(&body)
                 .with_upstream_error(&upstream_full);
-            trace::log_to(&rc.ctx.db_path, &rec);
+            trace::log_to(&rc.req.ctx.db_path, &rec);
             match up.send(nb).await {
                 Ok(r) => retried = Some(r),
                 Err(e) => return Err(Box::new(rc.connect_failed(&e))),
@@ -144,12 +144,12 @@ pub(super) async fn send_with_strip_retry(
                 .trace(st.as_u16(), applied.clone(), "剝離後重試仍失敗（未解決）")
                 .with_body(&body)
                 .with_upstream_error(&eb2_full);
-            trace::log_to(&rc.ctx.db_path, &rec);
+            trace::log_to(&rc.req.ctx.db_path, &rec);
             Err(Box::new(reject(
-                rc.ctx,
-                rc.started,
-                rc.app,
-                rc.model_raw,
+                rc.req.ctx,
+                rc.req.started,
+                rc.req.app,
+                rc.req.model_raw,
                 st,
                 upstream_err_text(&eb2),
             )))
@@ -165,12 +165,12 @@ pub(super) async fn send_with_strip_retry(
                 .trace(400, applied.clone(), note)
                 .with_body(&body)
                 .with_upstream_error(&upstream_full);
-            trace::log_to(&rc.ctx.db_path, &rec);
+            trace::log_to(&rc.req.ctx.db_path, &rec);
             Err(Box::new(reject(
-                rc.ctx,
-                rc.started,
-                rc.app,
-                rc.model_raw,
+                rc.req.ctx,
+                rc.req.started,
+                rc.req.app,
+                rc.req.model_raw,
                 StatusCode::BAD_REQUEST,
                 upstream_text,
             )))

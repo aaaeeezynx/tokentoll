@@ -209,15 +209,14 @@ pub(super) fn resolve_model(
     }
 }
 /// `prepare_request` 的輸入（欄位較多，故用參數物件而非長參數列）。
+///
+/// 共用脈絡走 [`ReqCtx`]，這裡只列本階段額外需要的欄位。
 pub(super) struct PrepareInput<'a> {
-    pub(super) ctx: &'a ProxyCtx,
-    pub(super) started: &'a Instant,
-    pub(super) app: &'a str,
+    pub(super) req: ReqCtx<'a>,
     pub(super) conn: &'a rusqlite::Connection,
     pub(super) provider_id: i64,
     /// 渠道協議（`providers.api_format`），用於矩陣判定。
     pub(super) api_format: &'a str,
-    pub(super) model_raw: &'a str,
     pub(super) content_type: &'a str,
     pub(super) path_hint: &'a str,
     pub(super) raw: &'a [u8],
@@ -251,25 +250,25 @@ pub(super) fn prepare_request(input: PrepareInput<'_>) -> Result<Prepared, Box<R
         Ok(k) => k,
         Err(msg) => {
             trace::log_to(
-                &input.ctx.db_path,
+                &input.req.ctx.db_path,
                 &TraceRecord {
-                    app: input.app.to_string(),
-                    model_raw: input.model_raw.to_string(),
+                    app: input.req.app.to_string(),
+                    model_raw: input.req.model_raw.to_string(),
                     in_fmt: in_fmt.as_str().to_string(),
                     target_fmt: target_fmt.as_str().to_string(),
                     trans_kind: "unsupported".to_string(),
                     upstream_status: 400,
-                    latency_ms: input.started.elapsed().as_millis() as i64,
+                    latency_ms: input.req.started.elapsed().as_millis() as i64,
                     note: msg.to_string(),
                     ..Default::default()
                 }
                 .warn(),
             );
             return Err(Box::new(reject(
-                input.ctx,
-                input.started,
-                input.app,
-                input.model_raw,
+                input.req.ctx,
+                input.req.started,
+                input.req.app,
+                input.req.model_raw,
                 StatusCode::BAD_REQUEST,
                 msg,
             )));
@@ -284,7 +283,7 @@ pub(super) fn prepare_request(input: PrepareInput<'_>) -> Result<Prepared, Box<R
         input.provider_id,
         input.raw,
         input.body_json,
-        input.model_raw,
+        input.req.model_raw,
         TransSpec { kind, translated },
         want_usage_opt,
     ) {
@@ -296,15 +295,15 @@ pub(super) fn prepare_request(input: PrepareInput<'_>) -> Result<Prepared, Box<R
             // 「去引號後」的長度，無法區分「真解析失敗」與「debug 儀器弄壞 body」。
             // 這裡把**原始位元組前綴的 hex** 落庫，下次失敗即可直接定案。
             trace::log_to(
-                &input.ctx.db_path,
+                &input.req.ctx.db_path,
                 &TraceRecord {
-                    app: input.app.to_string(),
-                    model_raw: input.model_raw.to_string(),
+                    app: input.req.app.to_string(),
+                    model_raw: input.req.model_raw.to_string(),
                     in_fmt: in_fmt.as_str().to_string(),
                     target_fmt: target_fmt.as_str().to_string(),
                     trans_kind: kind.as_str().to_string(),
                     upstream_status: 400,
-                    latency_ms: input.started.elapsed().as_millis() as i64,
+                    latency_ms: input.req.started.elapsed().as_millis() as i64,
                     content_type: input.content_type.to_string(),
                     note: format!(
                         "請求體不是合法 JSON，無法翻譯（原始 {} bytes，已記錄 hex）",
@@ -316,10 +315,10 @@ pub(super) fn prepare_request(input: PrepareInput<'_>) -> Result<Prepared, Box<R
                 .warn(),
             );
             return Err(Box::new(reject(
-                input.ctx,
-                input.started,
-                input.app,
-                input.model_raw,
+                input.req.ctx,
+                input.req.started,
+                input.req.app,
+                input.req.model_raw,
                 StatusCode::BAD_REQUEST,
                 format!("{} 請求體不是 JSON，無法轉換為上游格式", in_fmt.label()),
             )));

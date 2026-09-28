@@ -286,8 +286,7 @@ fn range_start(range: &str) -> i64 {
 }
 
 /// 自訂期間（range="custom"）必須帶起止；起必須早於止，跨度上限 365 天，止不能是未來。
-pub(crate) fn resolve_filter(
-    range: &str,
+pub(crate) fn resolve_filter(    range: &str,
     app: Option<String>,
     provider_id: Option<i64>,
     model: Option<String>,
@@ -303,7 +302,7 @@ pub(crate) fn resolve_filter(
     if start >= end {
         return Err("起始時間必須早於結束時間".to_string());
     }
-    if end - start > 366 * 86400 * 1000 {
+    if end - start > 365 * 86400 * 1000 {
         return Err("自訂期間跨度上限 365 天".to_string());
     }
     if end > now + 60 * 1000 {
@@ -1167,25 +1166,34 @@ mod tests {
         assert_eq!(range_bucket_span(now - 100 * 86400 * 1000, None), 86400);
     }
 
-    /// 跨度上限的寫法必須真的擋得住 366 天，且不誤擋 365 天。
+    /// 跨度上限：訊息與判斷式口徑一致（皆為 365 天）。
     ///
-    /// 註：`resolve_filter` 的訊息寫「上限 365 天」但程式用的是 366 天
-    /// （`> 366 * 86400 * 1000`）。這裡把**實際行為**釘住，讓那個落差
-    /// 是可見的、而不是靠人記得。
+    /// 歷史：訊息寫「上限 365 天」但程式用的是 `> 366 * 86400 * 1000`，
+    /// 造成 366 天可通過、367 天才被擋。2026-09-28 統一為 365，
+    /// 讓「訊息說的」就是「程式做的」。
     #[test]
-    fn resolve_filter_span_limit_actual_behaviour() {
+    fn resolve_filter_span_limit_is_365_days() {
         let now = chrono::Local::now().timestamp_millis();
         let day = 86400 * 1000;
-        // 365 天：必須通過
+        // 365 天整：必須通過（邊界含等於）
         assert!(
             resolve_filter("custom", None, None, None, Some(now - 365 * day), Some(now)).is_ok(),
             "365 天應該允許"
+        );
+        // 366 天：必須擋下（先前會被放行，這是本次修掉的落差）
+        assert!(
+            resolve_filter("custom", None, None, None, Some(now - 366 * day), Some(now)).is_err(),
+            "366 天應該被擋（訊息說上限 365 天）"
         );
         // 367 天：必須擋下
         assert!(
             resolve_filter("custom", None, None, None, Some(now - 367 * day), Some(now)).is_err(),
             "367 天應該被擋"
         );
+        // 錯誤訊息本身也一併釘住，避免日後只改一邊
+        let err = resolve_filter("custom", None, None, None, Some(now - 366 * day), Some(now))
+            .expect_err("應為錯誤");
+        assert!(err.contains("365 天"), "訊息必須寫 365 天：{err}");
     }
 
     /// 空字串的 app／model 要正規化成 None，否則 SQL 會用 `app = ''` 過濾掉全部。

@@ -4,11 +4,11 @@ use super::*;
 use crate::translate::SseUsage;
 
 /// 回應收尾階段所需的請求脈絡。
+///
+/// 共用的 4 個欄位（`ctx`／`started`／`app`／`model_raw`）來自 [`ReqCtx`]；
+/// 這裡只補收尾額外需要的欄位。
 pub(super) struct FinishCtx<'a> {
-    pub(super) ctx: &'a ProxyCtx,
-    pub(super) started: &'a Instant,
-    pub(super) app: &'a str,
-    pub(super) model_raw: &'a str,
+    pub(super) req: ReqCtx<'a>,
     /// 送往上游的實際模型名（翻譯或直通改寫時）；未改寫則為空字串。
     pub(super) translated_model: &'a str,
     pub(super) body_json: &'a Option<serde_json::Value>,
@@ -30,7 +30,7 @@ pub(super) struct FinishCtx<'a> {
 /// ——`f` 是借用，`tokio::spawn` 要求 `'static`。
 pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'_>) -> Response {
     let status = upstream.status();
-    let latency_ms = f.started.elapsed().as_millis() as i64;
+    let latency_ms = f.req.started.elapsed().as_millis() as i64;
     let is_sse = upstream
         .headers()
         .get("content-type")
@@ -51,13 +51,13 @@ pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'
 
     let key_id = f.key_id;
     let provider_id = f.provider_id;
-    let db_path = f.ctx.db_path.clone();
+    let db_path = f.req.ctx.db_path.clone();
     // 記帳模型：送往上游的實際模型（翻譯或直通改寫時），否則用客戶端模型
     //（上游回顯優先，見下方 usage.model）
     let log_fallback = if !f.translated_model.is_empty() {
         f.translated_model.to_string()
     } else {
-        f.model_raw.to_string()
+        f.req.model_raw.to_string()
     };
 
     // Codex 自訂（freeform）工具名：上游端已被 function 化送出
@@ -77,8 +77,8 @@ pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'
             tokio::sync::mpsc::channel::<Result<axum::body::Bytes, axum::Error>>(64);
         if f.kind == TransKind::ResponsesToChat {
             // Responses 流式：chat chunk → Responses 事件；流結束補發 completed/failed
-            let appv = f.app.to_string();
-            let echo = f.model_raw.to_string();
+            let appv = f.req.app.to_string();
+            let echo = f.req.model_raw.to_string();
             let logm = log_fallback.clone();
             let customs = custom_tools.clone();
             tokio::spawn(async move {
@@ -109,8 +109,8 @@ pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'
             return sse_response(builder, rx);
         }
         if f.translated {
-            let appv = f.app.to_string();
-            let echo = f.model_raw.to_string();
+            let appv = f.req.app.to_string();
+            let echo = f.req.model_raw.to_string();
             let logm = log_fallback.clone();
             tokio::spawn(async move {
                 let on_line = |s: &mut AnthropicRelay, t: &str| {
@@ -155,8 +155,8 @@ pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'
             });
             return sse_response(builder, rx);
         }
-        let appv = f.app.to_string();
-        let mr = f.model_raw.to_string();
+        let appv = f.req.app.to_string();
+        let mr = f.req.model_raw.to_string();
         tokio::spawn(async move {
             let mut acc = SseAcc::new();
             let mut stream = upstream.bytes_stream();
@@ -196,10 +196,10 @@ pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'
         Ok(b) => b,
         Err(e) => {
             return reject(
-                f.ctx,
-                f.started,
-                f.app,
-                f.model_raw,
+                f.req.ctx,
+                f.req.started,
+                f.req.app,
+                f.req.model_raw,
                 StatusCode::BAD_GATEWAY,
                 format!("讀取上游響應失敗：{e}"),
             )
@@ -212,10 +212,10 @@ pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'
         // 僅成功狀態才轉換形狀；錯誤回包原樣透出（客戶端按狀態碼讀錯誤）
         if f.translated && status.is_success() {
             if f.kind == TransKind::ResponsesToChat {
-                let r = crate::translate::openai_to_responses(&v, f.model_raw, &custom_tools);
+                let r = crate::translate::openai_to_responses(&v, f.req.model_raw, &custom_tools);
                 out_bytes = serde_json::to_vec(&r).unwrap_or(out_bytes);
             } else {
-                let a = crate::translate::openai_to_anthropic(&v, f.model_raw);
+                let a = crate::translate::openai_to_anthropic(&v, f.req.model_raw);
                 out_bytes = serde_json::to_vec(&a).unwrap_or(out_bytes);
             }
         }
@@ -238,7 +238,7 @@ pub(super) async fn finish_response(upstream: reqwest::Response, f: &FinishCtx<'
             &conn,
             ts,
             key_id,
-            f.app,
+            f.req.app,
             Some(provider_id),
             &model,
             &norm,
