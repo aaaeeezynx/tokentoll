@@ -1,5 +1,5 @@
 //! tools 相關測試的入口。原本 1,524 行全在同一個 `mod tests` 裡，已依主題
-//! 拆成五個子模組；共用 helper 留在這裡。
+//! 拆成六個子模組；共用 helper 留在這裡。
 //!
 //! 子模組的 `use super::*;` 只會帶進**本模組自己的**綁定：看得到父模組的私有
 //! 項目與 `pub(crate) use` 再匯出，但看不到父模組的 `use` 別名。因此這裡把子模組
@@ -154,6 +154,8 @@ fn live_rm_new_baks(app_data: &std::path::Path, app: &str, before: &[String]) {
 }
 
 mod codex;
+mod codex_wire_api;
+mod codex_legacy;
 mod restore;
 mod apply;
 mod live;

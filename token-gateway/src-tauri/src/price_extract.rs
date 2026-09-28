@@ -326,13 +326,8 @@ pub(crate) fn extract_run(
         .and_then(|a| a.first())
         .and_then(|c| c.get("message"))
         .and_then(|m| m.get("content"))
-        .and_then(|c| {
-            if let Some(s) = c.as_str() {
-                Some(s.to_string())
-            } else {
-                Some(c.to_string())
-            }
-        })
+        // 字串就直接用，其餘（陣列／物件）序列化回字串
+        .map(|c| c.as_str().map_or_else(|| c.to_string(), str::to_string))
         .unwrap_or_default();
     if content_str.trim().is_empty() {
         return Err("模型回包為空，請換個模型重試".to_string());

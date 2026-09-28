@@ -42,11 +42,11 @@ pub(crate) fn dedupe_codex_sections(text: &str) -> String {
         let t = line.trim();
         if t.starts_with('[') && !t.starts_with("[[") && t.ends_with(']') {
             let name = t[1..t.len() - 1].trim().to_string();
-            if name == "model_providers" || name.starts_with("model_providers.") {
-                if !seen.insert(name) {
-                    skipping = true;
-                    continue;
-                }
+            if (name == "model_providers" || name.starts_with("model_providers."))
+                && !seen.insert(name)
+            {
+                skipping = true;
+                continue;
             }
             skipping = false;
         }
@@ -409,6 +409,13 @@ pub fn codex_wire_api_declared(provider_format: Option<&str>) -> Option<&'static
 }
 
 
+/// 產生接管後的 config.toml。
+///
+/// 參數多達 8 個是**刻意的**：它們各自對應一個獨立的設定面向（既有內容、
+/// 上游 URL、模型、推理等級、目錄、別名段、內嵌模型、鑑權），且呼叫端
+/// （`switch.rs` 與約 20 條測試）都是逐一具名傳入，比包成 struct 更清楚。
+/// 收斂成 struct 只會把同樣的欄位搬個地方，卻讓每個呼叫點多一層縮排。
+#[allow(clippy::too_many_arguments)]
 pub fn codex_apply(
     existing: &str,
     base_url: &str,

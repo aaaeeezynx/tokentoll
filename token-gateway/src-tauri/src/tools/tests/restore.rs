@@ -336,7 +336,7 @@ fn backup_name_unique_within_same_second() {
     std::fs::write(&p2, "second").unwrap();
     assert_eq!(std::fs::read_to_string(&p1).unwrap(), "first");
     // 後綴不破壞"最新優先"排序（仍排最前）。
-    let mut v = vec![p1, p2];
+    let mut v = [p1, p2];
     v.sort();
     v.reverse();
     assert!(v[0].to_string_lossy().ends_with("-2"));

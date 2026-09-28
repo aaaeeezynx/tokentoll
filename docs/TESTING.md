@@ -543,22 +543,34 @@ py scripts\dump_traces.py --problems -n 100
   `codex_doctor` 把失敗報成 ✅）加上第 5 條 `rows.flatten()` 靜默吞錯。
 - ~~**B4**：無差別強制 `wire_api = "responses"`。~~ **已修** —— 見測試 E。
 - ~~**§5.3 第 2 層**：能力宣告。~~ **已實作**（協議選擇改為宣告優先）。
-- **§5.2 的 body 解析 400**：仍未定案。三份證據用了兩種不同的
-  `bytes_len` 算法，無法區分「真的解析失敗」與「舊的除錯儀器弄壞了 body」。
-  觀測設施已就位，**等真實重現一次**。
-- **`resolve_filter` 的「365 天」訊息與「366 天」判斷式不一致**：新測試
-  `resolve_filter_span_limit_actual_behaviour` 已把**實際行為**（365 過、367 擋）
-  釘住。要統一說法或統一門檻屬於產品決策，未動。
-- **`db.rs` migration 仍無自動化測試**（§2.1 F6）。目前唯一驗證是需人工觸發的
-  `live_migrate_real_db_copy`。
+- ~~**§5.2 的 body 解析 400**：仍未定案。~~ **已定案（2026-09-28）** ——
+  **不是網關的 bug**。把三筆證據的 body 與宣稱的 `bytes_len` 逐一對齊
+  （69／107／132 全部相符，儀器沒有弄壞 body），再實際丟給 JSON 解析器：
+  兩個 FAILED 的 body **key 都沒加引號**（`{model:...}` 而非 `{"model":...}`），
+  那是 JS 物件字面值、本來就不是合法 JSON，`serde_json` 拒絕它們完全正確；
+  OK 那筆是合法 JSON 且成功。網關回 400 是對的行為。完整推理見
+  `docs/evidence/2026-09-28-body-parse-CONCLUSION.md`。
+  留痕設施（記錄原始位元組 hex）**保留**，以備未來真的出現「合法 JSON 卻解析失敗」。
+- ~~**`resolve_filter` 的「365 天」訊息與「366 天」判斷式不一致**~~ **已修** ——
+  前端 `RangePicker.tsx` 的 `CUSTOM_MAX_DAYS` 本來就是 365，三處裡只有後端
+  判斷式是錯的，因此**沒有產品決策空間**。已統一為 365，測試改為
+  `resolve_filter_span_limit_is_365_days`（365 過／366 擋／367 擋，
+  且錯誤訊息本身也釘住「365 天」）。見 `commands.rs`。
+- ~~**`db.rs` migration 仍無自動化測試**（§2.1 F6）。~~ **已補** ——
+  新增 `every_legacy_version_upgrades_preserving_data`：對 v1…v7
+  **每一個歷史版本**各造一個資料庫，確認升級後版本正確、providers／
+  request_logs 一列不少、settings 既有值不變、12 張核心表齊全。
+  原本那條需人工觸發的 `live_migrate_real_db_copy` 保留作為出貨前的額外確認。
 - **前端三個肥檔未動**：`Keys.tsx` 876、`Calc.tsx` 809、`lib/api.ts` 803
   （不在本輪授權範圍）。
 
 **已做但未達標**：
 
-- `proxy_handler` **86 行**（目標 < 80）。差的 6 行是三個階段脈絡重複列出
-  同 5 個欄位，要再壓得引入共用 `ReqCtx`、牽動約 56 處存取換 7 行 ——
-  判斷為行數高爾夫，不做。
+- ~~`proxy_handler` **86 行**（目標 < 80）。~~ **已達標：78 行** ——
+  根因不是「重複 5 個欄位」而是 `RetryCtx`／`FinishCtx`／`PrepareInput`
+  **各自重複宣告** `ctx`／`started`／`app`／`model_raw`。新增
+  `proxy/reqctx.rs` 的 `ReqCtx`，三個階段改為嵌入它，handler 只建一次。
+  純結構重組，語意與呼叫順序不變。詳見 `docs/SIMPLIFICATION-PLAN.md` §11。
 - **拆檔後仍 > 400 行的檔案**（§0.3 之後的實測值）：
   `Providers.tsx` 778、`ModelCatalog.tsx` 608、`tools/tests/codex.rs` 566、
   `ProviderForm.tsx` 590、`usage/usageCharts.tsx` 546。
