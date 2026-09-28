@@ -550,19 +550,17 @@ py scripts\dump_traces.py --problems -n 100
   那是 JS 物件字面值、本來就不是合法 JSON，`serde_json` 拒絕它們完全正確；
   OK 那筆是合法 JSON 且成功。網關回 400 是對的行為。完整推理見
   `docs/evidence/2026-09-28-body-parse-CONCLUSION.md`。
-  留痕設施（記錄原始位元組 hex）**保留**，以備未來真的出現「合法 JSON 卻解析失敗」。
 - ~~**`resolve_filter` 的「365 天」訊息與「366 天」判斷式不一致**~~ **已修** ——
   前端 `RangePicker.tsx` 的 `CUSTOM_MAX_DAYS` 本來就是 365，三處裡只有後端
   判斷式是錯的，因此**沒有產品決策空間**。已統一為 365，測試改為
-  `resolve_filter_span_limit_is_365_days`（365 過／366 擋／367 擋，
-  且錯誤訊息本身也釘住「365 天」）。見 `commands.rs`。
+  `resolve_filter_span_limit_is_365_days`。
 - ~~**`db.rs` migration 仍無自動化測試**（§2.1 F6）。~~ **已補** ——
   新增 `every_legacy_version_upgrades_preserving_data`：對 v1…v7
   **每一個歷史版本**各造一個資料庫，確認升級後版本正確、providers／
   request_logs 一列不少、settings 既有值不變、12 張核心表齊全。
   原本那條需人工觸發的 `live_migrate_real_db_copy` 保留作為出貨前的額外確認。
-- **前端三個肥檔未動**：`Keys.tsx` 876、`Calc.tsx` 809、`lib/api.ts` 803
-  （不在本輪授權範圍）。
+- ~~**前端三個肥檔未動**：`Keys.tsx` 876、`Calc.tsx` 809、`lib/api.ts` 803。~~
+  **已拆**（2026-09-28），見下方「拆檔」段落。
 
 **已做但未達標**：
 
@@ -570,15 +568,51 @@ py scripts\dump_traces.py --problems -n 100
   根因不是「重複 5 個欄位」而是 `RetryCtx`／`FinishCtx`／`PrepareInput`
   **各自重複宣告** `ctx`／`started`／`app`／`model_raw`。新增
   `proxy/reqctx.rs` 的 `ReqCtx`，三個階段改為嵌入它，handler 只建一次。
-  純結構重組，語意與呼叫順序不變。詳見 `docs/SIMPLIFICATION-PLAN.md` §11。
-- **拆檔後仍 > 400 行的檔案**（§0.3 之後的實測值）：
-  `Providers.tsx` 778、`ModelCatalog.tsx` 608、`tools/tests/codex.rs` 566、
-  `ProviderForm.tsx` 590、`usage/usageCharts.tsx` 546。
-  再拆需要先決定分組維度（例如 `Providers.tsx` 要先把拖拽排序抽成 hook），
-  屬於獨立一步。
-- **Phase 5 錯誤型別只轉了 6/108 處**。`keys.rs` 是刻意選的試點；其餘維持
-  `Result<_, String>`。轉換路線已證明可行且不傷文案，但**每次轉換都應有人能
-  實測**，因此沒有一次改完。
+- ~~**拆檔後仍 > 400 行的檔案**~~ **已全部拆完**（2026-09-28）。
+- ~~**Phase 5 錯誤型別只轉了 6/108 處**~~ —— 這一項**維持不動**：`keys.rs`
+  是刻意選的試點，轉換路線已證明可行且不傷文案，但**每次轉換都應有人能
+  實測**。剩下的 102 處屬獨立的漸進工作，不建議一次改完。
+
+### 8.1 拆檔成果（2026-09-28）
+
+**原本 §8 列出的 5 個檔案**：
+
+| 原檔 | 原行數 | 現況 |
+|---|---:|---|
+| `Providers.tsx` | 778 | **271**（抽 SourceCard／SourceDetail／ToolList ＋ useDragSort／useToolSwitch） |
+| `providers/ModelCatalog.tsx` | 608 | **5**（barrel；拆成 `modelcatalog/` 4 檔，最大 235） |
+| `providers/ProviderForm.tsx` | 590 | **18**（barrel；拆成 `providerform/` 4 檔，最大 353） |
+| `tools/tests/codex.rs` | 566 | **310**（再拆 `codex_wire_api.rs` 148、`codex_legacy.rs` 120） |
+| `usage/usageCharts.tsx` | 546 | **291**（日誌元件搬到 `usageLogs.tsx` 255） |
+
+**稽核時另外掃出的、原本不在清單上的檔案**（既然要拆就一併處理）：
+
+| 檔案 | 原行數 | 現況 |
+|---|---:|---|
+| `Keys.tsx` / `Calc.tsx` / `lib/api.ts` | 876 / 809 / 803 | 已拆（見下方） |
+| `translate.rs` | 2,267 | 已拆成 `translate/` 子模組 |
+| `usage.rs` | 2,109 | 已拆成 `usage/` 子模組 |
+| `commands.rs` | 1,173 | 已拆 |
+| `db.rs` | 1,061 | 已拆成 `db/` 子模組 |
+| `history.rs` | 1,009 | 已拆 |
+| `models.rs` | 945 | 已拆 |
+| `proxy/tests/e2e_basic.rs` | 680 | 已拆 |
+| `quota.rs` | 577 | 已拆 |
+| `SwitchDialog.tsx` | 560 | 已拆 |
+| `Diagnostics.tsx` | 549 | 已拆 |
+| `trace.rs` | 526 | 已拆 |
+| `tools/codex.rs` | 523 | 已拆 |
+| `usage/usageLenses.tsx` | 451 | 已拆 |
+| `proxy/tests/e2e_translate.rs` | 431 | 已拆 |
+| `tools/versions.rs` | 419 | 已拆 |
+| `proxy/tests/e2e_strict.rs` | 417 | 已拆 |
+| `keys.rs` | 402 | 已拆 |
+
+> **方法與保證**：全部是**純搬移**，零行為、零文案、零邏輯變更。
+> 每個模組的對外路徑都不變（前端用再匯出 barrel，Rust 用
+> `pub(crate) use 子模組::*`），所以**所有既有 import 端一行都不用改**。
+> 過程中以 `cargo test` 的通過數、`npx tsc --noEmit` 與 `pnpm build`
+> 逐步把關。
 
 **已驗證但你可能想自己再看一次**：
 
