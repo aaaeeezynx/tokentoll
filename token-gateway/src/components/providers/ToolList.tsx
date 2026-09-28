@@ -68,7 +68,7 @@ export function ToolList(props: {
                 title={
                   t.supported_switch
                     ? t.gateway_active
-                      ? "關閉：還原接管前備份"
+                      ? "關閉：還原接管前備份，並切回這個工具的原生來源"
                       : "開啟：直接接管（詳情點行左側）"
                     : "僅檢測，自動切換待支援"
                 }

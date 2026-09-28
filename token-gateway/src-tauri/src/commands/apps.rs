@@ -126,6 +126,25 @@ pub fn switch_restore(
     tools::restore_backup_port(&data, &app_name, port)
 }
 
+/// 「關閉網關」：忠實還原接管前備份，**再**把來源換回該工具的第一方
+/// （Codex→OpenAI/GPT、Claude Code→Claude、OpenCode→自己的登入）。
+///
+/// 與 [`switch_restore`] 的差別：那支只還原備份，忠實到連「兩天前的舊快照」
+/// 都照寫 —— 使用者關掉網關後會卡在一個早就不用的第三方來源上。詳見
+/// `tools/native.rs` 的模組註解。
+#[tauri::command]
+pub fn switch_off(
+    app: AppHandle,
+    app_name: String,
+    port: u16,
+) -> Result<String, String> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    tools::restore_native_port(&data, &app_name, port)
+}
+
 #[tauri::command]
 pub fn codex_doctor(port: u16) -> Vec<String> {
     tools::codex_doctor(port)

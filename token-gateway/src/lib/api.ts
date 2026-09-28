@@ -93,8 +93,24 @@ export const api = {
     invoke("switch_plan", { req, port }),
   switchApply: (req: SwitchRequest, port: number): Promise<SwitchResult> =>
     invoke("switch_apply", { req, port }),
+  /**
+   * **只**還原接管前備份（逐字寫回，不加工）。
+   *
+   * 2026-09-28 起 UI 不再呼叫這支 —— 開關的 OFF 走 `switchOff`（還原＋切回原生
+   * 來源）。留著是當作安全網／救援入口：需要「完全照備份還原、不要任何加工」時，
+   * 可以從命令層直接叫（`監控`→ 見 `docs/TESTING.md` 的還原章節）。
+   */
   switchRestore: (appName: string, port: number): Promise<string> =>
     invoke("switch_restore", { appName, port }),
+  /**
+   * 關閉網關：還原接管前備份，**再**把來源換回該工具的第一方
+   * （Codex→OpenAI/GPT、Claude Code→Claude、OpenCode→自己的登入）。
+   *
+   * 與 `switchRestore` 的差別：那支只忠實還原備份，所以會停在備份當時的
+   * 第三方來源（可能就是兩天前的舊快照）。開關的 OFF 走這支。
+   */
+  switchOff: (appName: string, port: number): Promise<string> =>
+    invoke("switch_off", { appName, port }),
   codexDoctor: (port: number): Promise<string[]> =>
     invoke("codex_doctor", { port }),
   keysList: (): Promise<LocalKey[]> => invoke("keys_list"),

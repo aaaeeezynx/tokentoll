@@ -34,7 +34,7 @@
 > 逐字比對過所有中文訊息（15 → 15，零改字）。**若你看到非預期的行為變化，
 > 那是我拆壞了，請回報。**
 
-> **目前狀態（2026-09-28 20:30 更新）**：測試 **A 已通過**（2026-09-27 22:07
+> **目前狀態（2026-09-28 22:30 更新）**：測試 **A 已通過**（2026-09-27 22:07
 > 你提供的截圖，已與資料庫逐項核對）。**B、D 已由我代跑並全部通過**；
 > **E 在代跑時抓到一個真實故障**（接管會寫出 Codex 已不接受的
 > `wire_api = "chat"`，導致 Codex 報「Unable to log in」），**已修正**，
@@ -42,8 +42,8 @@
 > 修回 `responses`」—— 詳見 §0.6、§0.7.5。
 > **C 仍然只能你自己在真實使用情境下測**（見 §6 與
 > [`MANUAL-TESTS.md`](./MANUAL-TESTS.md)），**這是唯一還沒跑過的測試**。
-> 後端測試 **217 passed / 0 failed / 8 ignored**、clippy **0 警告**。
-> 最新的實機驗證與建置見 §0.5、§0.6、§0.7 與 §9.8。
+> 後端測試 **226 passed / 0 failed / 8 ignored**、clippy **0 警告**。
+> 最新的實機驗證與建置見 §0.5、§0.6、§0.7、§0.9 與 §9.9。
 >
 > <small>（以下為歷史紀錄，數字是當時的基線，已被上面的現況取代）</small>
 
@@ -650,6 +650,128 @@ py scripts\codex_clear_stale_locks.py --apply    # 刪除，且先備份到
 | 曾把一個 0 byte rollout 檔暫時移走再放回 | 已還原 | 該檔本來就是 0 byte |
 
 **沒有**改動任何 rollout 內容、沒有改 `config.toml`、沒有改 state DB 的資料。
+
+---
+
+## 0.9 2026-09-28（第四輪）：「關掉網關，Codex 卻沒回到原生來源」
+
+### 0.9.1 你回報的症狀
+
+> 在我關閉該工具的網關後應該要恢復成原本使用的原生來源/模型，
+> 目前 codex 沒有恢復，來源還是 NIM 的來源/模型
+
+⚠️ **你附的截圖我讀不到** —— 這個 session 的模型不接受圖片輸入
+（`read_image` 直接回「does not declare image input」）。以下是我從檔案 mtime
+與資料庫重建出來的，若與截圖不符請直接告訴我。
+
+### 0.9.2 真因：基線是**很久以前的快照**，而「關」只會照抄它
+
+| 時間 | 事件（可複核：檔案 mtime ＋ `backups/codex/`） |
+|---|---|
+| 09-26 05:47:16 | `config.toml.baseline-20260926-054716` 產生。內容**已經是 NIM**：`model_provider = "custom"`、`model = "moonshotai/kimi-k3"`、`model_catalog_json = …\catalogs\codex-15.json` |
+| 09-28 20:24:52 | 你切到 opencode-go，寫入 `catalogs\codex-22.json` |
+| 09-28 21:26:16 | 你切回 NIM，寫入 `catalogs\codex-15.json` |
+| 09-28 21:29:47 | 你把開關關掉 → App 把 baseline 寫回去 → 你又回到 NIM |
+
+兩個獨立的原因疊在一起：
+
+1. **基線只在你「進入接管」的那一刻拍一次**（`ensure_baseline_before_prune` 的語義
+   是「接管前的乾淨設定」）。之後你在 App 裡換來源／模型，改的都只是「指向網關」
+   的那份設定，基線不會更新 —— 所以只要你不曾真正離開接管態，下一次「關」還是
+   回到同一個舊快照，然後這個舊快照又被拍成新基線（自我延續）。
+   （補：基線在每次還原後會被清掉，下次接管會重拍 —— 也就是說**從現在起**
+   基線會是你剛拿回來的原生設定，這也是這次修正的一個額外好處。）
+2. **「關」的語義本身太窄**：它假設「接管前」就是你要的終點。你要的是
+   「這個工具回到它自己的來源」。
+
+### 0.9.3 修法：關 = 忠實還原 ＋ 原生來源化
+
+新增 `switch_off` 命令（`tools/native.rs`），關閉流程變成兩步：
+
+1. `restore_backup_port` —— 忠實還原，保住你自己的設定與別名 provider 段。
+2. `to_native` —— 只把**來源**相關的鍵換回第一方：
+
+| 工具 | 做什麼 |
+|---|---|
+| **codex** | `model_provider = "openai"`、`model = "gpt-5.6-luna"`、移除 `model_catalog_json`（移除後 Codex 才會用內建的 GPT 模型清單） |
+| **claude** | 移除指向網關的 `ANTHROPIC_BASE_URL`／`ANTHROPIC_AUTH_TOKEN`；移除非 `claude-*` 的模型對映 |
+| **opencode** | 移除指向網關的 `provider.*.options.baseURL` 與本地 `sk-local-` key |
+
+**為什麼保留別名 provider 段**（`custom`／`nvidia-nim`／`opencode-zen`…）：舊對話
+的 rollout 裡記著 provider 名，段被刪掉那些對話就開不起來。所以關閉後
+`config.toml` 裡**仍然看得到**它們與其 URL —— 那是刻意的，是你 2026-09-28
+選的方案（「原生來源 + 保留舊對話通道」）。
+
+**Codex 的原生模型清單**（用乾淨的 `CODEX_HOME` 探到的，config 的 catalog 會
+蓋掉它）：`gpt-6-astra`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、
+`gpt-5.5`、`gpt-5.2`。`gpt-5.6-luna` 是你自己舊對話用過的模型，也是你選的預設。
+另外確認你的 `~/.codex/auth.json` 是 `auth_mode = "chatgpt"`（id/access/refresh
+token 齊全）→ 回到官方是可行的。
+
+### 0.9.4 順手修掉一個因此暴露的假警報
+
+`restore_summary` 的「直連第三方 URL 卻走 responses 協議（會 404）」警告原本是
+**掃整份文本**找 `https://` ＋ `wire_api = "responses"` ＋ 沒有
+`api.openai.com`。別名段留著之後，即使來源已經切回 `openai`，畫面還是會端出
+那句「不可用請改走網關接管或官方登入」—— 正好在使用者剛回到官方來源時嚇他
+一次。已改成**只看 `model_provider` 指名的那個段**
+（`summary.rs` 的 `active_provider_is_direct_chat`）。
+
+### 0.9.5 我這輪動到的東西（誠實揭露）
+
+| 動作 | 說明 |
+|---|---|
+| 新增 `tools/native.rs`、`tools/summary.rs`、`tools/tests/native.rs` | 分別是原生化、還原摘要（從 `backup.rs` 搬出，因為它一度到 421 行）、9 條新測試 |
+| 改 `commands/apps.rs`＋`lib.rs` | 新增 `switch_off` 命令 |
+| 改前端 4 檔 | `api.ts`（新增 `switchOff`）、`useToolSwitch.ts`、`ToolList.tsx`、`switchdialog/*`（開關 OFF 改走新命令、文案更新） |
+| 保留 `switch_restore`／`api.switchRestore` | 它是「逐字還原、不加工」的安全網。UI 已不再呼叫，程式碼裡的說明有寫明 |
+
+**這一輪第一次動到你的 `config.toml` —— 就是下面那次實機驗證**（接管再關閉，
+把 Codex 從 NIM 帶回 OpenAI）。在那之前只改程式與文件。細節見 §0.9.7。
+
+### 0.9.6 這一輪的閘門
+
+| 項目 | 結果 |
+|---|---|
+| `cargo test --offline` | **226 passed / 0 failed / 8 ignored**（exit 0） |
+| 新增測試 | 9 條：冪等、壞 TOML 不猜、別名段完整保留、只認網關痕跡、`switch_off` 端到端（還原＋轉換都真的落到檔案） |
+| `cargo clippy --offline --all-targets` | **0 警告** |
+| `pnpm exec tsc --noEmit` | exit 0 |
+| 檔案行數 | 205 檔全部 ≤ 400 行 |
+
+### 0.9.7 實機驗證（安裝後的正式版本，真實 UI 點擊）
+
+安裝 2026-09-28 22:32 的建置到 `%LOCALAPPDATA%\token-gateway`（NSIS `/S`，
+exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的事做一遍**：
+
+| 步驟 | 觀察 |
+|---|---|
+| 開 App →「上游來源」→「本機工具」 | Codex 的開關標題已經是 **「關閉：還原接管前備份，並切回這個工具的原生來源」**（新文案真的進了 bundle） |
+| 當時狀態 | `本機工具（1/4 接管中）`；Codex 是「開啟」態、Claude Code 是接管中 |
+| 按 Codex 開關 → **接管** | `config.toml` 7,718 bytes、8 個 `base_url` 全指向 `http://127.0.0.1:15722/v1` |
+| 再按同一個開關 → **關閉** | 卡片下方出現：`…｜還原自 config.toml.baseline-20260928-223526｜provider=openai model=gpt-5.6-luna｜已切回原生來源：model_provider → openai、model → gpt-5.6-luna、移除 model_catalog_json…` |
+
+關閉後的 `config.toml`（6,913 bytes、sha256 `8A1ADF7F…`）：
+
+| 檢查項 | 結果 |
+|---|---|
+| `model_provider` / `model` | **`openai`** / **`gpt-5.6-luna`** ✅ |
+| `model_catalog_json` | **0 次**（已移除）✅ |
+| `[model_providers.*]` | **8 段全在**（`custom`／`tokengateway`／`gw`／`mock`／`nim-direct`／`nvidia-nim`／`nvidia-proxy`／`opencode-zen`，都指向 `https://integrate.api.nvidia.com/v1`）✅ 舊對話通道保留 |
+| 指向網關的段 | **0 段** ✅ |
+| 你自己的鍵 | `model_reasoning_effort = "high"`、`disable_response_storage`、`model_context_window`、`model_auto_compact_token_limit`、`[plugins.*]` ×11、`[mcp_servers.*]` ×2、`[windows]`、`appearanceTheme` 全在 ✅ |
+| **假警報** | 訊息裡**沒有**「不可用請改走網關接管」那句 ✅（§0.9.4 的修正生效） |
+| `codex doctor` | `✓ config loaded`、`model gpt-5.6-luna · openai`、`config.toml parse ok`、`✓ auth auth is configured`、`stored auth mode chatgpt` ✅ |
+| **Codex 的模型清單** | `codex debug models` → **`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`**（＋2 個隱藏），NIM 的模型全部消失 ✅ |
+
+> **我實際改了你的東西**：`~/.codex/config.toml` 現在是原生設定（上面那份）。
+> 接管前的那份備份在
+> `%APPDATA%\com.tokencounter.gateway\backups\codex\config.toml.bak-20260928-223526`
+> （7,022 bytes），要退回 NIM 就把它複製回去。基線在還原時被清掉了（那是既有
+> 行為），所以**下一次接管會拿現在這份原生設定當基線** —— 這是好事。
+> 另外驗證過程中**有一件事不是我做的**：22:29:03 Codex Desktop 自己改了
+> `config.toml`（更新它自己的 runtime 路徑、版本 `26.917.62051`→`26.924.22138`、
+> 補上 `enabled-reasoning-efforts`）。這個檔案是共用的，不是你我在搶它。
 
 ---
 
@@ -1270,7 +1392,44 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.8 最新建置（2026-09-28 20:15，未完成清單收乾輪）—— **你目前安裝的就是這一個**
+### 9.9 最新建置（2026-09-28 22:32，「關閉網關回到原生來源」輪）—— **你目前安裝的就是這一個**
+
+這一輪做 §0.9：新增 `switch_off`（還原 ＋ 原生來源化），並修掉因此暴露的
+還原摘要假警報。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-28 22:26 起算 → 產物 22:32:32（release 6m24s） |
+| 執行檔大小 | 9,026,048 bytes |
+| NSIS 大小 | 3,839,502 bytes |
+| MSI 大小 | 7,352,320 bytes |
+| **安裝後執行檔 SHA-256** | **`1C9D27A727FD7FD30B802F9DD5FFD52F40DCC71548220384D8CB59051EB2A6E6`**（前一版 `E098655E…`） |
+| 前端 bundle | `index-CjANaaGO.js`（544,688 bytes）—— 內含 `switch_off`／`switchOff` |
+| 後端測試 | **226 passed / 0 failed / 8 ignored**（+9） |
+| clippy | **0 個警告** |
+| 前端 | `tsc --noEmit` exit 0 |
+| 檔案行數 | 205 檔全部 ≤ 400 行 |
+| 實機驗證 | §0.9.7（接管 → 關閉 → Codex 回到 `openai` ＋ `gpt-5.6-luna`，模型清單變回 GPT） |
+
+**這一輪改到的檔案**：
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/tools/native.rs` | **新增**：`to_native`（codex／claude／opencode 的原生來源化）＋ `restore_native_to_port`／`restore_native_port` |
+| `src-tauri/src/tools/summary.rs` | **新增**：`restore_summary` 從 `backup.rs` 搬出（該檔一度 421 行）；新增 `active_provider_is_direct_chat` |
+| `src-tauri/src/tools/tests/native.rs` | **新增**：9 條測試 |
+| `src-tauri/src/tools/backup.rs` | 摘要邏輯搬走（行為不變） |
+| `src-tauri/src/tools.rs`／`tools/tests.rs` | 模組與再匯出清單同步 |
+| `src-tauri/src/commands/apps.rs`／`src/lib.rs` | 新增 `switch_off` 命令 |
+| `src/lib/api.ts` | 新增 `switchOff`；`switchRestore` 保留為「逐字還原」安全網（UI 不再呼叫） |
+| `src/components/providers/useToolSwitch.ts` | 行開關 OFF 改走 `switchOff` |
+| `src/components/providers/ToolList.tsx` | 開關 tooltip 更新 |
+| `src/components/providers/switchdialog/useSwitchDialog.ts`／`SwitchDialog.tsx` | 詳情開關 OFF 改走 `switchOff`；確認框與說明文案更新 |
+| 文件 | 本檔 §0.9／§9.9、`SIMPLIFICATION-PLAN.md` §10.15、`MANUAL-TESTS.md` 第 9 節（新增） |
+
+---
+
+### 9.8 前一次建置（2026-09-28 20:15，未完成清單收乾輪，已被 9.9 取代）
 
 這一輪把 §0.7 的四項全部做完（靜默重接管、`wire_api` 機制移除、
 體檢假警報、測試 B 殘留資料），因此重新建置。

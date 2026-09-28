@@ -22,6 +22,8 @@ mod apply;
 mod codex;
 mod switch;
 mod backup;
+mod native;
+mod summary;
 
 // 對外 API 再匯出（原本都在 `tools.rs` 頂層，`crate::tools::X` 路徑不變）。
 //
@@ -88,6 +90,14 @@ pub(crate) use {
     backup::ensure_baseline_before_prune,
     backup::prune_backups_keep_clean,
     backup::restore_backup_port,
+
+    // ---- native ----
+    // 只再匯出命令層真的用到的那個；`to_native` / `NativeOutcome` /
+    // `CODEX_NATIVE_*` 由測試以 `crate::tools::native::…` 直接取用。
+    native::restore_native_port,
+
+    // ---- summary ----
+    summary::restore_summary,
 };
 
 #[cfg(test)]

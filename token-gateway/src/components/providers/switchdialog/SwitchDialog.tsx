@@ -92,7 +92,7 @@ export function SwitchDialog(props: SwitchDialogProps) {
             checked={viaGateway}
             onChange={flip}
             disabled={switchDisabled}
-            title="經本地網關：開=寫入網關接管，關=還原接管前配置"
+            title="經本地網關：開=寫入網關接管，關=還原接管前配置並切回原生來源"
           />
         </div>
         {providers.length === 0 ? (
@@ -207,7 +207,7 @@ export function SwitchDialog(props: SwitchDialogProps) {
               {keyMsg && <p className="mt-1 text-xs text-amber-400">{keyMsg}</p>}
               <p className="mt-1 text-[11px] text-white/30">
                 {pickedKey
-                    ? "經網關時以本地 Key 計量與限流；開關關閉則還原接管前配置。"
+                    ? "經網關時以本地 Key 計量與限流；開關關閉則還原接管前配置並切回原生來源。"
                   : "留空 = 使用所選來源的上游 Key（不經本地 Key 轉發，用量照常記錄）"}
               </p>
             </div>

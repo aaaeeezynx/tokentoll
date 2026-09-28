@@ -162,14 +162,26 @@ export function useToolSwitch(deps: {
     }
   };
 
-  /** 行開關（只開/關，永不彈框）：關=還原接管前備份；開=按上次來源/模型強制經網關接管。詳情設定一律點行左側進入。 */
+  /**
+   * 行開關（只開/關，永不彈框）。
+   *
+   * 關 = **還原接管前備份，再切回該工具的原生來源**（Codex→OpenAI/GPT、
+   * Claude Code→Claude、OpenCode→自己的登入）。
+   *
+   * 為什麼不是單純還原備份：備份可能是很久以前的快照。2026-09-28 的實例是
+   * 基線停在 09-26 的 NIM 設定，使用者關掉網關後 Codex 卡在一個他早就不用的
+   * 第三方來源、模型清單裡只有 NIM 的模型。他只看到「關了卻沒回到 GPT」。
+   * 詳見後端 `tools/native.rs`。
+   *
+   * 開 = 按上次來源/模型強制經網關接管。詳情設定一律點行左側進入。
+   */
   const toggleRow = (t: ToolStatus, on: boolean) => {
     setRowErr(null);
     setRowMsg(null);
     if (!on) {
       setToggling(t.app);
       api
-        .switchRestore(t.app, latest.current.port)
+        .switchOff(t.app, latest.current.port)
         .then((msg) => {
           setRowMsg({ app: t.app, msg });
           refreshTools();

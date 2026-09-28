@@ -36,6 +36,10 @@ pub(crate) use crate::tools::consts::GATEWAY_PROVIDER_ID;
 // ---- detect ----
 pub(crate) use crate::tools::detect::detect_tools;
 
+// ---- native ----
+pub(crate) use crate::tools::native::restore_native_to_port;
+pub(crate) use crate::tools::native::to_native;
+
 // ---- switch ----
 pub(crate) use crate::tools::switch::SwitchRequest;
 pub(crate) use crate::tools::switch::apply_switch;
@@ -156,6 +160,7 @@ mod codex;
 mod codex_wire_api;
 mod codex_legacy;
 mod restore;
+mod native;
 mod apply;
 mod live;
 mod misc;

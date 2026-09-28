@@ -282,11 +282,65 @@ codex archive <session-id>
 
 ---
 
-## 9. 若出現問題：怎麼回復
+## 9. 測試：關掉網關要回到**原生來源**（2026-09-28 新增）
+
+以前的「關」只做一件事：把**接管前的那份備份**逐字寫回去。問題是那份備份可能
+是兩天前的快照 —— 你的實例是基線停在 09-26 的 NIM 設定，所以關掉網關之後
+Codex 停在 NIM 的來源與模型，而不是 GPT。
+
+現在「關」= 還原備份 **＋ 切回這個工具的原生來源**：
+
+| 工具 | 關閉後會變成 |
+|---|---|
+| **Codex** | `model_provider = "openai"`、`model = "gpt-5.6-luna"`、移除 `model_catalog_json` → 模型清單回到 GPT |
+| **Claude Code** | 移除指向網關的 `ANTHROPIC_BASE_URL` 與 `ANTHROPIC_AUTH_TOKEN`，並移除不是 `claude-*` 的模型對映 |
+| **OpenCode** | 移除指向網關的 `provider.*.options.baseURL` 與本地 `sk-local-` key |
+
+**刻意保留**：你自己的設定，以及 `.codex` 裡那些別名 provider 段（`custom`、
+`nvidia-nim`、`opencode-zen`…）。刪掉它們會讓舊對話開不起來（rollout 裡記著
+provider 名）。所以關閉後 `config.toml` 裡**仍然看得到**那些段和它們的 URL ——
+那是正常的，它們已經不是現在的路由。
+
+### 步驟
+
+1. 首頁 →「本機工具」→ 點 Codex 那一行左側進詳情。
+2. 右上開關**打開**（寫入網關接管），等它顯示接管成功。
+3. 再**關掉**同一個開關。確認框應該寫「…並把來源切回這個工具的原生來源…」。
+4. 卡片下方訊息應該出現 `已切回原生來源：model_provider → openai、…`。
+
+> **如果你現在的 Codex 已經停在 NIM（開關本來就是關的）**：先把開關打開、
+> 再關掉，才會走過這條新路徑。或者用第 10 節的手動還原。
+
+### 通過標準
+
+```powershell
+$c = "$env:USERPROFILE\.codex\config.toml"
+Select-String -Path $c -Pattern '^(model_provider|model) ='   # openai / gpt-5.6-luna
+Select-String -Path $c -Pattern 'model_catalog_json'          # 沒有輸出
+Select-String -Path $c -Pattern '^\[model_providers\.'        # 別名段還在（正常）
+codex doctor                                                  # config 全綠、沒有 ❌
+```
+
+Codex 打開後，模型選擇器裡應該是 **GPT-5.x / GPT-6**，不是 NIM 的模型。
+
+### 已知取捨
+
+- Codex 回到官方之後，**舊對話若原本走第三方模型**（例如 `moonshotai/kimi-k3`）
+  仍然開得起來，但送出的請求要看那個別名段指向哪裡 —— 它在關閉後指向你最後
+  一次接管前的上游，不是 OpenAI。
+- Claude Code 還原後如果沒有官方登入（這台機器上找不到
+  `.claude/.credentials.json`），它會要你先登入 —— 那就是「原生」的樣子。
+- 關閉**不會**動你原本就有的 `model_context_window`、`disable_response_storage`
+  之類的鍵（那些不是 App 寫的）。
+
+---
+
+## 10. 若出現問題：怎麼回復
 
 | 想回復什麼 | 怎麼做 |
 |---|---|
-| **Codex 設定** | App 的「本機工具」頁 → 把 Codex 的開關**關掉**（會還原接管前備份） |
+| **Codex 設定** | App 的「本機工具」頁 → 把 Codex 的開關**關掉**（還原接管前備份**並**切回原生來源） |
+| 只想逐字還原備份（不要切回原生） | 備份在 `%APPDATA%\com.tokencounter.gateway\backups\codex\`，挑 `config.toml.bak-*` 複製回 `~/.codex/config.toml` |
 | 手動還原單一檔案 | 備份在 `%APPDATA%\com.tokencounter.gateway\backups\codex\`，挑 `config.toml.bak-*` 複製回 `~/.codex/config.toml` |
 | 資料庫 | 每次動資料庫前我都會先備份（例如 `.workbuddy/tmp/app.db.before-*`） |
 | 誤封存的對話 | `codex unarchive <session-id>` |
@@ -301,7 +355,7 @@ codex archive <session-id>
 
 ---
 
-## 10. 現況一覽：還有什麼沒做
+## 11. 現況一覽：還有什麼沒做
 
 | 項目 | 狀態 |
 |---|---|
@@ -313,5 +367,6 @@ codex archive <session-id>
 | 測試 F（DSH 用量不出現） | ✅ 已查明：DSH 直連 `opencode.ai`，**沒經過網關**。要統計請把 DSH 的 `oc-go` baseURL 指向網關（`TESTING.md` §6.7） |
 | 測試 G（本機工具標籤） | ✅ 已修 |
 | **封存舊對話** | ✅ 根因已查明（Codex 鎖檔），工具已附 → 第 8 節 |
+| **關閉網關回到原生來源** | ✅ 已修（`switch_off` = 還原＋原生化）→ 第 9 節 |
 | Phase 5 錯誤型別轉換 | ⛔ **刻意維持 6/108**：每次轉換都應該有人能實測，屬獨立的漸進工作 |
 

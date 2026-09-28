@@ -103,6 +103,7 @@ pub fn run() {
             commands::switch_plan,
             commands::switch_apply,
             commands::switch_restore,
+            commands::switch_off,
             commands::codex_doctor,
             commands::catalog_fetch,
             commands::catalog_get,

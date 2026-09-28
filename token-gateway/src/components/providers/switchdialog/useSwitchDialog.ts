@@ -253,11 +253,18 @@ export function useSwitchDialog(props: SwitchDialogProps) {
     closeTimer.current = window.setTimeout(requestClose, 1400);
   };
 
-  /** 右上開關 = 開啟網關接管；關閉還原接管前配置。 */
+  /**
+   * 右上開關 = 開啟網關接管；關閉 = 還原接管前備份**並切回該工具的原生來源**。
+   *
+   * 關閉不是單純還原備份：備份可能是很久以前的快照，只還原會停在一個使用者
+   * 早就不用的第三方來源（2026-09-28 實例：Codex 卡在 09-26 的 NIM 設定，
+   * 模型清單裡只有 NIM 的模型）。詳見後端 `tools/native.rs`。
+   */
   const flip = (v: boolean) => {
     if (!v) {
       ask(`關閉 ${tool.display} 的網關接管？`, () => doRestore(), {
-        message: "將還原最近一次接管前的配置，流量不再經網關。",
+        message:
+          "將還原最近一次接管前的配置，並把來源切回這個工具的原生來源（Codex→OpenAI/GPT、Claude Code→Claude、OpenCode→自己的登入），流量不再經網關。",
         confirmLabel: "關閉接管",
       });
       return;
@@ -270,7 +277,7 @@ export function useSwitchDialog(props: SwitchDialogProps) {
     setResult("");
     setRestoring(true);
     api
-      .switchRestore(tool.app, port)
+      .switchOff(tool.app, port)
       .then((msg) => {
         setViaGateway(false);
         setResult(`${msg}\n視窗即將自動關閉…`);

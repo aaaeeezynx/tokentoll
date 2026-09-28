@@ -352,42 +352,6 @@ pub(crate) fn restore_backup_to_inner(
 }
 
 
-/// 還原內容摘要（行級掃描，不依賴嚴格解析）＋死鏈警告。
-pub(crate) fn restore_summary(text: &str) -> String {
-    let mut mp = "未知".to_string();
-    let mut model = "未知".to_string();
-    for line in text.lines() {
-        let t = line.trim();
-        if mp == "未知" && t.starts_with("model_provider") {
-            if let Some(v) = t.split('=').nth(1) {
-                mp = v.trim().trim_matches(['"', '\'']).to_string();
-            }
-        }
-        if model == "未知" && (t.starts_with("model ") || t.starts_with("model=") || t.starts_with("model\t")) {
-            if let Some(v) = t.split('=').nth(1) {
-                model = v.trim().trim_matches(['"', '\'']).to_string();
-            }
-        }
-        if mp != "未知" && model != "未知" {
-            break;
-        }
-    }
-    let mut out = format!("provider={mp} model={model}");
-    if text.parse::<toml_edit::DocumentMut>().is_err() {
-        out.push_str("｜⚠️ 還原內容本身不是合法 TOML，Codex 可能無法載入");
-    }
-    // 直連第三方 https 但 wire_api=responses：多數第三方只說 Chat 協議，Codex 將 404。
-    let direct_chat = text.contains("https://")
-        && text.contains("wire_api = \"responses\"")
-        && !text.contains("api.openai.com")
-        && !text.contains(GATEWAY_HOST);
-    if direct_chat {
-        out.push_str("｜⚠️ 該配置直連第三方 URL 但走 responses 協議（直連 Chat 上游會 404），能用才算數；不可用請改走網關接管或官方登入");
-    }
-    out
-}
-
-
 /// 還原指定工具到接管前狀態（埠由呼叫端提供）。
 /// 註：原本另有 `restore_backup(app_data, app)` 預設埠包裝，只被測試呼叫而成為
 /// dead_code（B7），已降為測試模組內的 helper。
