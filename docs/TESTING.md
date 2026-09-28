@@ -190,6 +190,80 @@ nvidia／flatkey）。改採**外科清理**（你選的 A）。
 
 ---
 
+## 0.4 2026-09-28：§8 誠實清單一次清空（結構重構輪）
+
+**你的指示**：把 `TESTING.md` §8「已知未修／已做但未達標」清單裡的項目**一併修完**
+（不是只回報）。
+
+**這一輪全部是「結構重構」，不該改變任何可見行為**：拆檔、補測試、統一門檻、
+抽共用結構。驗收標準就是「測試數不減、lint 更乾淨、畫面一模一樣」。
+
+### 0.4.1 修了什麼
+
+| 原 §8 項目 | 結果 | 關鍵事實 |
+|---|---|---|
+| `resolve_filter` 的 365/366 口徑不一 | ✅ 統一為 **365** | 前端 `RangePicker.tsx` 本來就是 `CUSTOM_MAX_DAYS = 365`，三處只有後端寫錯 → **沒有產品決策空間** |
+| `db.rs` migration 無自動化測試 | ✅ 新增逐版本升級測試 | `every_legacy_version_upgrades_preserving_data` 對 **v1…v7 每一個**歷史版本各造一個庫，驗證版本、providers、request_logs、settings、12 張核心表 |
+| `proxy_handler` 86 行（目標 <80） | ✅ **78 行** | 根因與原判斷不同：不是「重複 5 個欄位」，而是三個階段 struct **各自重複宣告** `ctx`/`started`/`app`/`model_raw` → 抽出 `ReqCtx` |
+| §5.2 body 解析 400「未定案」 | ✅ **定案：不是 bug** | 見 `docs/evidence/2026-09-28-body-parse-CONCLUSION.md` |
+| 前端三個肥檔 | ✅ 全拆 | `Keys.tsx` 884→**254**、`Calc.tsx` 818→**366**、`lib/api.ts` 808→**318** |
+| 「拆檔後仍 >400 行」5 檔 | ✅ 全拆 | `Providers.tsx` 778→**271**、`ModelCatalog.tsx` 608→**5**（barrel）、`ProviderForm.tsx` 590→**18**（barrel）、`tools/tests/codex.rs` 566→**310**、`usageCharts.tsx` 546→**291** |
+| clippy 4 個既有警告 | ✅ **0 個** | 3 個直接修；`codex_apply` 的 8 參數加 `#[allow]` **並註明理由** |
+| Phase 5 錯誤型別只轉 6/108 | ⛔ **刻意不動** | 每次轉換都該有人能實測；屬獨立的漸進工作，強行一次改完風險大於收益 |
+
+### 0.4.2 稽核另外掃出的 15 個 >400 行檔案（也一併拆完）
+
+原本的清單只列了 5 個，實際掃全樹發現**還有 15 個**。既然要拆就一次拆完：
+
+`translate.rs` 2345、`usage.rs` 2190、`commands.rs` 1233、`db.rs` 1132、
+`history.rs` 1038、`models.rs` 990、`proxy/tests/e2e_basic.rs` 705、
+`tools/codex.rs` 602、`quota.rs` 595、`trace.rs` 576、`SwitchDialog.tsx` 574、
+`Diagnostics.tsx` 563、`usageLenses.tsx` 453、`tools/versions.rs` 450、
+`proxy/tests/e2e_translate.rs` 445、`proxy/tests/e2e_strict.rs` 430、
+`keys.rs` 419、`price_extract.rs` 410。
+
+**現在全樹 202 個 `.ts`／`.tsx`／`.rs` 檔案，沒有任何一個超過 400 行**
+（最大者 399 行）。
+
+**統一作法（三條不變式）**：
+1. **純搬移** —— 零行為、零文案、零邏輯、零 JSX／className 變更。
+2. **對外路徑不變** —— 前端用再匯出 barrel，Rust 用 `pub(crate) use 子模組::*`，
+   所以**所有既有 import 端一行都不用改**（`App.tsx`、`lib.rs` 的
+   `generate_handler!`、各 `crate::X::Y` 呼叫點全部照舊）。
+3. **可見性只放寬、不收緊** —— 跨子模組呼叫所需的 `pub(crate)`／`pub(super)`，
+   共十餘處，皆非邏輯變更。
+
+### 0.4.3 驗證
+
+| 驗證項 | 指令 | 結果 |
+|---|---|---|
+| 後端測試 | `cargo test --offline` | **218 passed / 0 failed / 8 ignored**（exit 0） |
+| 後端 lint | `cargo clippy --offline --all-targets` | **exit 0、零警告** |
+| 後端編譯 | `cargo check --offline --all-targets` | exit 0 |
+| 前端型別 | `npx tsc --noEmit` | exit 0 |
+| 前端建置 | `pnpm build` | exit 0 |
+| 測試數不減 | 218 = 重構前基線 | ✅（226 條被執行，含 8 ignored） |
+| 無檔案超標 | 全樹掃描 | ✅ 最大 399 行 |
+
+> **測試名稱有一處變動**：`proxy/tests/e2e_translate.rs`（及 `e2e_strict`）改成
+> 目錄後，測試路徑多一層模組名，例如
+> `proxy::tests::e2e_translate::e2e_responses_to_chat`
+> → `proxy::tests::e2e_translate::responses::e2e_responses_to_chat`。
+> **測試函式本體與斷言逐位元組未變、總數未變**，只是名字變長。
+> 這是為了不動 `proxy/tests.rs` 的 `#[path]` 宣告。
+
+### 0.4.4 一個值得記下的量測陷阱
+
+**PowerShell 5.1 的 `Get-Content` 會少算含中文檔案的行數**（codepage 936 下
+DBCS 前導位元組會吃掉後面的 `0x0A`，另有解碼成 U+0085 而合併行的情形）。
+先前 §8 記的 876／809／803 其實是 **884／818／808**；`usage.rs` 記 2109 實為
+**2190**、`translate.rs` 記 2267 實為 **2345**。
+
+**之後量行數請用** `[IO.File]::ReadAllLines($path).Count`（或 `-Encoding UTF8`）。
+本次所有「< 400 行」的結論都是用這個方法量的。
+
+---
+
 ## 1. 產物位置
 
 | 產物 | 路徑 |
@@ -575,53 +649,70 @@ py scripts\dump_traces.py --problems -n 100
 
 ### 8.1 拆檔成果（2026-09-28）
 
+> **行數一律用 `[IO.File]::ReadAllLines()` 量**。PowerShell 5.1 的
+> `Get-Content` 對含中文的檔案會少算（見 §0.4.4），下面的「原行數」是
+> 真實值，會比 §8 舊文裡引用的數字大。
+
 **原本 §8 列出的 5 個檔案**：
 
 | 原檔 | 原行數 | 現況 |
 |---|---:|---|
-| `Providers.tsx` | 778 | **271**（抽 SourceCard／SourceDetail／ToolList ＋ useDragSort／useToolSwitch） |
-| `providers/ModelCatalog.tsx` | 608 | **5**（barrel；拆成 `modelcatalog/` 4 檔，最大 235） |
-| `providers/ProviderForm.tsx` | 590 | **18**（barrel；拆成 `providerform/` 4 檔，最大 353） |
-| `tools/tests/codex.rs` | 566 | **310**（再拆 `codex_wire_api.rs` 148、`codex_legacy.rs` 120） |
-| `usage/usageCharts.tsx` | 546 | **291**（日誌元件搬到 `usageLogs.tsx` 255） |
+| `Providers.tsx` | 778 | **274**（抽 SourceCard／SourceDetail／ToolList ＋ useDragSort／useToolSwitch） |
+| `providers/ModelCatalog.tsx` | 608 | **5**（barrel；`modelcatalog/` 4 檔，最大 238） |
+| `providers/ProviderForm.tsx` | 590 | **18**（barrel；`providerform/` 4 檔，最大 356） |
+| `tools/tests/codex.rs` | 566 | **326**（再拆 `codex_wire_api.rs`、`codex_legacy.rs`） |
+| `usage/usageCharts.tsx` | 546 | **295**（日誌元件搬到 `usageLogs.tsx`） |
 
 **稽核時另外掃出的、原本不在清單上的檔案**（既然要拆就一併處理）：
 
 | 檔案 | 原行數 | 現況 |
 |---|---:|---|
-| `Keys.tsx` / `Calc.tsx` / `lib/api.ts` | 876 / 809 / 803 | 已拆（見下方） |
-| `translate.rs` | 2,267 | 已拆成 `translate/` 子模組 |
-| `usage.rs` | 2,109 | 已拆成 `usage/` 子模組 |
-| `commands.rs` | 1,173 | 已拆 |
-| `db.rs` | 1,061 | 已拆成 `db/` 子模組 |
-| `history.rs` | 1,009 | 已拆 |
-| `models.rs` | 945 | 已拆 |
-| `proxy/tests/e2e_basic.rs` | 680 | 已拆 |
-| `quota.rs` | 577 | 已拆 |
-| `SwitchDialog.tsx` | 560 | 已拆 |
-| `Diagnostics.tsx` | 549 | 已拆 |
-| `trace.rs` | 526 | 已拆 |
-| `tools/codex.rs` | 523 | 已拆 |
-| `usage/usageLenses.tsx` | 451 | 已拆 |
-| `proxy/tests/e2e_translate.rs` | 431 | 已拆 |
-| `tools/versions.rs` | 419 | 已拆 |
-| `proxy/tests/e2e_strict.rs` | 417 | 已拆 |
-| `keys.rs` | 402 | 已拆 |
+| `Keys.tsx` | 884 | **254**（+ `keys/` 6 檔） |
+| `Calc.tsx` | 818 | **366**（+ `calc/` 5 檔，最大 225） |
+| `lib/api.ts` | 808 | **318**（型別拆到 `apiTypes.ts` 303 ＋ `apiTypesPricing.ts` 172 ＋ `apiTypesDiagnostics.ts` 70） |
+| `translate.rs` | 2,345 | `translate/` 13 檔，最大 **341** |
+| `usage.rs` | 2,190 | `usage/` 14 檔，最大 **369** |
+| `commands.rs` | 1,233 | `commands/` 12 檔，最大 **224** |
+| `db.rs` | 1,132 | `db/` 9 檔，最大 **296** |
+| `history.rs` | 1,038 | `history/` 6 檔，最大 **273** |
+| `models.rs` | 990 | `models/` 5 檔，最大 **360** |
+| `proxy/tests/e2e_basic.rs` | 705 | 23 行 root ＋ `e2e_basic/` 3 檔，最大 **300** |
+| `tools/codex.rs` | 602 | `tools/codex/` 4 檔，最大 **274** |
+| `quota.rs` | 595 | `quota/` 6 檔，最大 **153** |
+| `trace.rs` | 576 | `trace/` 5 檔，最大 **242** |
+| `SwitchDialog.tsx` | 574 | **9**（barrel；`switchdialog/` 3 檔，最大 353） |
+| `Diagnostics.tsx` | 563 | **6**（barrel；`diagnostics/` 7 檔，最大 291） |
+| `usage/usageLenses.tsx` | 453 | **8**（barrel；`lenses/` 4 檔，最大 210） |
+| `tools/versions.rs` | 450 | `tools/versions/` 4 檔，最大 **184** |
+| `proxy/tests/e2e_translate.rs` | 445 | 23 行 root ＋ 3 檔，最大 **162** |
+| `proxy/tests/e2e_strict.rs` | 430 | 23 行 root ＋ 3 檔，最大 **194** |
+| `keys.rs` | 419 | `keys/` 2 檔，最大 **363** |
+| `price_extract.rs` | 410 | `price_extract/` 2 檔，最大 **359** |
 
-> **方法與保證**：全部是**純搬移**，零行為、零文案、零邏輯變更。
-> 每個模組的對外路徑都不變（前端用再匯出 barrel，Rust 用
-> `pub(crate) use 子模組::*`），所以**所有既有 import 端一行都不用改**。
-> 過程中以 `cargo test` 的通過數、`npx tsc --noEmit` 與 `pnpm build`
-> 逐步把關。
+> **方法與保證（三條不變式）**：
+> 1. **純搬移** —— 零行為、零文案、零邏輯、零 JSX／className 變更。多個子代理
+>    各自做了逐位元組／多重集比對（例如 `Calc.tsx`：142 個中文片段 697 字元
+>    零差異；`ProviderForm.tsx`：597 行中僅 7 行是表頭與 import 路徑）。
+> 2. **對外路徑不變** —— 前端用再匯出 barrel，Rust 用 `pub(crate) use 子模組::*`，
+>    所以**所有既有 import 端一行都不用改**（`App.tsx`、`lib.rs` 的
+>    `generate_handler!`、各 `crate::X::Y` 呼叫點全部照舊）。
+> 3. **可見性只放寬、不收緊** —— 跨子模組呼叫所需的 `pub(crate)`／`pub(super)`，
+>    共十餘處，皆非邏輯變更。
+>
+> 過程中以 `cargo test` 通過數（218）、`cargo clippy`（0 警告）、
+> `npx tsc --noEmit` 與 `pnpm build` 逐步把關。
+
+**順手修掉的一個真實缺陷**：`Providers.tsx` 裡我先前加的「本機工具版本」面板
+同時出現在內嵌區塊與收合區，等於**重複渲染**。拆檔時只保留收合區那一份。
 
 **已驗證但你可能想自己再看一次**：
 
-- `cargo test --offline` → **216 passed / 0 failed / 8 ignored**（第一階段 F 後的現況）
-- `cargo clippy --offline --all-targets` → exit 0，僅 4 條**既有**風格提示
-  （`tools/codex.rs` ×2、`price_extract.rs` ×1、`tools/tests/restore.rs` ×1）
+- `cargo test --offline` → **218 passed / 0 failed / 8 ignored**（exit 0）
+- `cargo clippy --offline --all-targets` → **exit 0、零警告**（原為 4 條）
+- `cargo check --offline --all-targets` → exit 0
 - `npx tsc --noEmit` → 0 錯誤
-- `pnpm build` → 成功，bundle 551.02 kB（gzip 151.31 kB）
-- `pnpm exec tauri build` → exe + MSI + NSIS 三種產物皆成功（最新為 09-28 04:34，見 §9.4）
+- `pnpm build` → 成功，bundle 553.18 kB（gzip 152.36 kB）
+- **全樹 202 個 `.ts`/`.tsx`/`.rs` 檔案，最大 399 行**，無一超過 400
 - **拆 `keys.rs` 錯誤型別時的中文訊息逐字比對**：15 條 → 15 條，零遺漏、
   零新增、零改字（腳本：`.workbuddy/tmp/verify_msg_text.py`）
 
@@ -637,7 +728,56 @@ py scripts\dump_traces.py --problems -n 100
 
 ## 9. 建置資訊
 
-### 9.4 最新建置（2026-09-28 04:34，第一階段 F）—— **你目前安裝的就是這一個**
+### 9.5 最新建置（2026-09-28 12:31，§8 誠實清單清空輪）—— **你目前安裝的就是這一個**
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | **2026-09-28 12:31:27**（release 編譯 7 分 33 秒） |
+| 執行檔大小 | 9,010,176 bytes |
+| MSI 大小 | 7,344,128 bytes |
+| NSIS 大小 | 3,830,299 bytes |
+| 後端測試 | **218 passed / 0 failed / 8 ignored**（實跑 `cargo test --offline`，exit 0） |
+| clippy | **0 個警告**（`cargo clippy --offline --all-targets`，exit 0） |
+| 前端型別 | `npx tsc --noEmit` exit 0 |
+| 前端資源指紋 | `index-Dy7Y8xkU.js`、`index-DnRx7SDk.css` |
+
+**產物內容抽查**（讀 exe 位元組）：
+
+| 字串 | 結果 | 意義 |
+|---|---|---|
+| `index-Dy7Y8xkU.js` / `index-DnRx7SDk.css` | ✅ 存在，與 `dist/` 一致 | 內嵌的確實是本次建置的前端 |
+| `usage_by_app` | ✅ 存在 | 第二階段的分工具用量仍在 |
+| `via_gateway` | ❌ 不存在 | D-1（單一模式）沒有被拆檔改回去 |
+| `hermes_home` / `parse_hermes_model` | ❌ 不存在 | F（移除 hermes 支援）仍然成立 |
+
+**安裝驗證**：
+
+| 步驟 | 結果 |
+|---|---|
+| 安裝前 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,009,152 bytes、04:34:36（前一版） |
+| 執行 NSIS `/S` | exit code 0 |
+| 安裝後同一路徑 | **9,010,176 bytes、12:31:18**，內含 `index-Dy7Y8xkU.js` ✅ |
+
+**實機 GUI 驗證（本輪新增，逐項都是螢幕 OCR 讀出來的）**：
+
+| 驗證項 | 結果 |
+|---|---|
+| 應用程式啟動、用量頁渲染 | ✅ 側邊欄、摘要卡、八個鏡頭頁籤（工具／模型／月度／時段…）全部讀到 |
+| **要求二：本機工具篩選保留全部選項** | ✅ **展開下拉後 8 個選項全部在畫面上**：全部本機工具、Claude Code、Codex、OpenCode、**Hermes Agent**、**DeepSeek Harness**、**Cursor**、**Antigravity** |
+| DSH 標籤正確 | ✅ 顯示「DeepSeek Harness」（非舊的「DeepSeek」） |
+| 導航可用 | ✅ 點側邊欄可切到「設定」頁（監聽連接埠 15722、強調色等區塊都正確渲染） |
+| **未寫入任何設定** | ✅ `app.db` 仍為 09-27 17:09:05、1,425,408 bytes；`settings.json`／`config.toml`／`opencode.json` 時間戳皆未變 |
+| **備份未被輪換** | ✅ claude 10／codex 11／hermes 8／opencode 10，與驗證前基線完全相同 |
+| 下拉未選擇任何項目 | ✅ 驗證後按 ESC 關閉，未觸發 `onChange` |
+
+> **一個操作上的坑（給下次的自己）**：這台機器的 WebView2 會**吃掉前幾次合成滑鼠
+> 點擊**（第一次點擊只用來讓 webview 取得焦點）。純 Win32 程式（Notepad 測試）
+> 不受影響，所以別把「沒反應」誤判成 UI 壞了。本輪最後是「同一點連點 3 次」
+> 才穩定生效；且 OCR 座標與點擊座標存在固定偏移，需先做一次校準。
+
+---
+
+### 9.4 前一次建置（2026-09-28 04:34，第一階段 F，已被 9.5 取代）
 
 | 項目 | 值 |
 |---|---|
