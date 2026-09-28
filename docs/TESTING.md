@@ -7,6 +7,12 @@
 >
 > **只想看「我自己要動手做什麼」→ 直接看 [`MANUAL-TESTS.md`](./MANUAL-TESTS.md)。**
 > 那份是精簡版（7 個測試，含唯一還沒跑過的測試 C）；本檔是完整紀錄。
+>
+> **最新狀態（2026-09-28 23:40）**：後端 **228 passed / 0 failed / 8 ignored**、
+> clippy 0 警告、`tsc --noEmit` exit 0、205 檔全部 ≤ 400 行。這一輪做的是
+> **「關閉網關要回到該工具的原生來源」**（§0.9，Codex 已實機驗證；OpenCode 於
+> §0.9.8 實機驗證並順手修掉一個長期的摘要瑕疵）。手動複驗步驟見
+> [`MANUAL-TESTS.md`](./MANUAL-TESTS.md) 第 9 節。
 
 ---
 
@@ -694,8 +700,12 @@ py scripts\codex_clear_stale_locks.py --apply    # 刪除，且先備份到
 | 工具 | 做什麼 |
 |---|---|
 | **codex** | `model_provider = "openai"`、`model = "gpt-5.6-luna"`、移除 `model_catalog_json`（移除後 Codex 才會用內建的 GPT 模型清單） |
-| **claude** | 移除指向網關的 `ANTHROPIC_BASE_URL`／`ANTHROPIC_AUTH_TOKEN`；移除非 `claude-*` 的模型對映 |
+| **claude** | 移除**任何不是 Anthropic 官方**的 `ANTHROPIC_BASE_URL`（網關或使用者自己的 router 都一樣），連帶移除 `ANTHROPIC_AUTH_TOKEN`；移除非 `claude-*` 的模型對映 |
 | **opencode** | 移除指向網關的 `provider.*.options.baseURL` 與本地 `sk-local-` key |
+
+> **Claude Code 的端點是刻意的例外**（2026-09-28 你選的）：連你自己原本的
+> router（`https://opencode.ai/zen/go/v1`）也一起移除，推回 Anthropic 官方。
+> 代價是這台機器上沒有 `.claude/.credentials.json`，你必須先登入一次。
 
 **為什麼保留別名 provider 段**（`custom`／`nvidia-nim`／`opencode-zen`…）：舊對話
 的 rollout 裡記著 provider 名，段被刪掉那些對話就開不起來。所以關閉後
@@ -764,7 +774,48 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 | `codex doctor` | `✓ config loaded`、`model gpt-5.6-luna · openai`、`config.toml parse ok`、`✓ auth auth is configured`、`stored auth mode chatgpt` ✅ |
 | **Codex 的模型清單** | `codex debug models` → **`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`**（＋2 個隱藏），NIM 的模型全部消失 ✅ |
 
-> **我實際改了你的東西**：`~/.codex/config.toml` 現在是原生設定（上面那份）。
+### 0.9.8 實機驗證（OpenCode）＋ 一個順手抓到的長期瑕疵
+
+照使用者的要求，把 OpenCode 的開關也實機走一遍（接管 → 關閉）：
+
+| 步驟 | 觀察 |
+|---|---|
+| 接管 OpenCode | `opencode.json` 改成 `provider.tokengateway.options.baseURL = http://127.0.0.1:15722/v1`、`apiKey` 寫入上游 Key 明文 |
+| 關閉 OpenCode | 訊息出現：`…｜還原自 opencode.json.baseline-20260928-232249｜**provider=未知 model=未知｜⚠️ 還原內容本身不是合法 TOML，Codex 可能無法載入**｜已切回原生來源：移除 provider.anthropic.options.baseURL（原本指向本網關）、移除 provider.anthropic.options.apiKey（網關的本地 key）` |
+| 結果 | `opencode.json` 570 bytes、**指向網關 0 次**、`provider.anthropic.options = {}`（回到 OpenCode 自己的登入）、`provider.tokengateway` 段留著（舊對話通道）✅ |
+| 它自己的登入 | `~/.local/share/opencode/auth.json` 內有 `nvidia`／`opencode`／`openrouter`／`opencode-go` ✅ 所以離開網關之後仍可用 |
+
+**那串粗體是錯的，而且不是這一輪造成的**：`restore_summary` 原本不分工具都用
+Codex 的 TOML 掃描，於是還原 OpenCode 這種 **JSON** 設定時，畫面端出
+「provider=未知 model=未知｜⚠️ 還原內容本身不是合法 TOML，Codex 可能無法載入」
+—— 三句全是錯的（它不是 TOML，也跟 Codex 無關）。已改成依工具產生：
+
+| 工具 | 摘要長相 |
+|---|---|
+| codex | `provider=custom model=moonshotai/kimi-k3`（＋TOML／死鏈警告，照舊） |
+| claude | `endpoint=opencode.ai model=claude-opus-5`；沒有覆寫端點時 `endpoint=api.anthropic.com（未覆寫，官方）` |
+| opencode | `providers=anthropic,tokengateway` |
+
+JSON 壞掉時也改成講對工具（`⚠️ 還原內容不是合法 JSON，OpenCode 可能無法載入`）。
+
+**第二個瑕疵（同一輪修掉）**：修好摘要之後再實機跑一次，畫面變成
+`…｜providers=anthropic,tokengateway｜⚠️ 設定裡沒有網關痕跡，維持原樣` ——
+**摘要對了，但那個 ⚠️ 是錯的語氣**。第二次關閉時設定本來就已經乾淨（上一次
+已經清過），所以「沒有東西要改」；對一個健康的設定示警，會讓人以為壞了。
+`NativeOutcome` 因此把兩件事分開：
+
+| 欄位 | 意思 | 畫面 |
+|---|---|---|
+| `changes` | 我改了什麼 | `｜已切回原生來源：…` |
+| `note` | **沒有東西要改**（正常） | `｜設定裡沒有網關痕跡，維持原樣`（無 ⚠️） |
+| `warning` | **做不到**（TOML／JSON 壞掉、工具不支援） | `｜⚠️ …` |
+
+> **Claude Code 沒有做實機點擊**：你選了「連端點一起推回 Anthropic 官方」，而這台
+> 機器上沒有 `.claude/.credentials.json` —— 一按下去 Claude Code 就會停用到你登入
+> 為止。那條路徑由單元測試釘住（`claude_native_strips_users_own_third_party_endpoint`
+> 等 3 條），要啟用請先 `claude` 登入一次，再按開關。
+
+> **我實際改了你的東西**：`~/.codex/config.toml` 現在是原生設定（§0.9.7 那份）。
 > 接管前的那份備份在
 > `%APPDATA%\com.tokencounter.gateway\backups\codex\config.toml.bak-20260928-223526`
 > （7,022 bytes），要退回 NIM 就把它複製回去。基線在還原時被清掉了（那是既有
@@ -1399,17 +1450,20 @@ py scripts\dump_traces.py --problems -n 100
 
 | 項目 | 值 |
 |---|---|
-| 建置時間 | 2026-09-28 22:26 起算 → 產物 22:32:32（release 6m24s） |
-| 執行檔大小 | 9,026,048 bytes |
-| NSIS 大小 | 3,839,502 bytes |
-| MSI 大小 | 7,352,320 bytes |
-| **安裝後執行檔 SHA-256** | **`1C9D27A727FD7FD30B802F9DD5FFD52F40DCC71548220384D8CB59051EB2A6E6`**（前一版 `E098655E…`） |
-| 前端 bundle | `index-CjANaaGO.js`（544,688 bytes）—— 內含 `switch_off`／`switchOff` |
-| 後端測試 | **226 passed / 0 failed / 8 ignored**（+9） |
+| 建置時間 | 2026-09-28 23:36 起算 → 產物 23:42:27（release 約 6 分鐘） |
+| 執行檔大小 | 9,038,848 bytes |
+| NSIS 大小 | 3,844,624 bytes |
+| MSI 大小 | 7,356,416 bytes |
+| **安裝後執行檔 SHA-256** | **`66339F9E3519947AC2C6D9E228DB1110123BAD4705CB8BD65ACEF4D0346C907F`**（前一版 `E098655E…`） |
+| 後端測試 | **229 passed / 0 failed / 8 ignored**（+12） |
 | clippy | **0 個警告** |
 | 前端 | `tsc --noEmit` exit 0 |
 | 檔案行數 | 205 檔全部 ≤ 400 行 |
-| 實機驗證 | §0.9.7（接管 → 關閉 → Codex 回到 `openai` ＋ `gpt-5.6-luna`，模型清單變回 GPT） |
+| 實機驗證 | §0.9.7（Codex 回到 `openai` ＋ `gpt-5.6-luna`，模型清單變回 GPT）、§0.9.8（OpenCode 回到自己的登入，摘要有依工具產生） |
+
+> 這一輪共建置 4 次（`switch_off` → Claude 端點推回官方 → 摘要依工具 → note／warning
+> 分離）。上面是最後一次，也就是**你目前安裝的版本**。前一輪（22:32）的
+> 9,026,048 bytes 已被取代。
 
 **這一輪改到的檔案**：
 
@@ -1417,7 +1471,8 @@ py scripts\dump_traces.py --problems -n 100
 |---|---|
 | `src-tauri/src/tools/native.rs` | **新增**：`to_native`（codex／claude／opencode 的原生來源化）＋ `restore_native_to_port`／`restore_native_port` |
 | `src-tauri/src/tools/summary.rs` | **新增**：`restore_summary` 從 `backup.rs` 搬出（該檔一度 421 行）；新增 `active_provider_is_direct_chat` |
-| `src-tauri/src/tools/tests/native.rs` | **新增**：9 條測試 |
+| `src-tauri/src/tools/tests/native.rs` | **新增**：10 條測試（＋1 條 note／warning 分離） |
+| `src-tauri/src/tools/tests/restore.rs` | 新增 `summary_is_per_app_not_codex_only` |
 | `src-tauri/src/tools/backup.rs` | 摘要邏輯搬走（行為不變） |
 | `src-tauri/src/tools.rs`／`tools/tests.rs` | 模組與再匯出清單同步 |
 | `src-tauri/src/commands/apps.rs`／`src/lib.rs` | 新增 `switch_off` 命令 |

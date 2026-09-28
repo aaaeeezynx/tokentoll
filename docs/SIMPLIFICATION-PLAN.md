@@ -808,9 +808,11 @@ session 其 provider 段完全正常）。註解已據此修正，免得後人�
 - **Codex 的目標值由使用者選定**：`model_provider = "openai"`、
   `model = "gpt-5.6-luna"`（他自己舊對話用過的模型）、移除
   `model_catalog_json`（不移除的話 Codex 的模型清單仍是 NIM 那幾個）。
-- **Claude／OpenCode 只清除網關痕跡**（指向網關的 URL／權杖／本地 key）＋
-  移除非 `claude-*` 的模型對映。使用者自己的端點（他原本的 router）不動 ——
-  把它拔掉會讓他連不上，那不是「回到原生」該造成的代價。
+- **Claude／OpenCode 只清除網關痕跡**… 但 2026-09-28 追加決定：**Claude Code 連
+  端點也推回 Anthropic 官方** —— 使用者原本的 router（`opencode.ai/zen/go/v1`）
+  一樣移除。代價是他必須先 `claude` 登入一次（這台機器沒有
+  `.claude/.credentials.json`）。OpenCode 則只清網關痕跡：它有自己的登入
+  （`~/.local/share/opencode/auth.json`），清掉之後就能用。
 - **`switch_restore` 保留**：UI 不再呼叫，但它是「逐字還原、不加工」的安全網，
   需要時可從命令層直接叫。這是刻意留下的第二條路，不是忘記刪的死碼。
 
@@ -836,3 +838,27 @@ session 其 provider 段完全正常）。註解已據此修正，免得後人�
 | `pnpm exec tsc --noEmit` | exit 0 |
 | 檔案行數 | 205 檔全部 ≤ 400 行 |
 | 實機驗證 | 安裝後用真實 UI 做了一遍「接管 → 關閉」：Codex 的 `model_provider` 變 `openai`、`model` 變 `gpt-5.6-luna`、`model_catalog_json` 消失、8 個別名段全留、`codex doctor` 全綠、`codex debug models` 只剩 GPT 模型（`gpt-5.6-terra`／`gpt-5.6-luna`／`gpt-5.5`）。逐項證據見 `TESTING.md` §0.9.7 |
+
+#### 10.15.6 「其他應用也能還原預設來源嗎？」—— 查核結果
+
+使用者接著問了這一句，所以逐個查清楚（結論已寫進 `MANUAL-TESTS.md` §9）：
+
+| 應用 | 能力 | 依據 |
+|---|---|---|
+| Codex | ✅ OpenAI 官方 | 有 `openai` 內建 provider ＋ chatgpt 登入 |
+| OpenCode | ✅ 自己的登入 | 有 `~/.local/share/opencode/auth.json` |
+| Claude Code | ⚠️ 只有模型，端點原本不會回官方 | 備份裡的是他自己的 `opencode.ai/zen/go/v1`；後續依他的決定改成連端點一起推回官方 |
+| DSH | — 不適用 | `supported_switch: false`，App 從未寫入它的來源 |
+| Cursor／Antigravity | — 不適用 | 不提供接管，只當用量標籤 |
+
+兩個查核中發現的**事實**（都不是 bug，但會讓人誤判）：
+
+1. **Claude Code 的端點是他自己設的**，不是 App 硬塞的 —— 還原後會回到
+   `https://opencode.ai/zen/go/v1` ＋ 他那把 `oc_sk_…`（他來源清單裡的
+   opencode-go）。所以他第一次會覺得「怎麼沒回到 Claude」。
+2. **OpenCode 沒有任何一份「接管前」的備份**：10 份全都（最早 09-22 02:27）有
+   provider 指向網關 —— 那是早期版本的 App 寫進 `provider.anthropic` 的。
+   `backup_is_tainted("opencode")` 只看 `provider.tokengateway`（現行接管寫入的
+   位置），所以那些備份被判成乾淨。**我試過收緊規則，結果 10 份全變污染、
+   還原直接失敗**（已實測列出），所以刻意維持寬鬆 —— 真正把 OpenCode 清乾淨的
+   是原生化那一步（它掃所有 provider）。

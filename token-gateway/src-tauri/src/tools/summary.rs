@@ -4,11 +4,71 @@
 //! 超過本專案 400 行的自律上限）。**行為一字未改**，只是搬位置＋新增一個私有
 //! helper；`restore_summary` 由 `tools.rs` 再匯出，`backup.rs` 與 `native.rs`
 //! 都經 `use super::*;` 取用，呼叫端寫法不變。
+//!
+//! **2026-09-28 修正**：摘要改成**依工具**產生。原本不分工具都用 Codex 的 TOML
+//! 掃描，於是還原 OpenCode 這種 JSON 設定時，畫面會顯示
+//! 「provider=未知 model=未知｜⚠️ 還原內容本身不是合法 TOML，Codex 可能無法載入」
+//! —— 三句全是錯的（它不是 TOML，也跟 Codex 無關）。使用者是在關閉 OpenCode
+//! 網關時看到這串的。
 
 use super::*;
 
-/// 還原內容摘要（行級掃描，不依賴嚴格解析）＋死鏈警告。
-pub(crate) fn restore_summary(text: &str) -> String {
+/// 還原內容摘要（依工具）＋死鏈警告。
+pub(crate) fn restore_summary(app: &str, text: &str) -> String {
+    match app {
+        "codex" => codex_summary(text),
+        "claude" => claude_summary(text),
+        "opencode" => opencode_summary(text),
+        other => format!("app={other}"),
+    }
+}
+
+
+/// Claude Code：講「端點」和「模型」。沒有 `ANTHROPIC_BASE_URL` 就是官方。
+fn claude_summary(text: &str) -> String {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
+        return "⚠️ 還原內容不是合法 JSON，Claude Code 可能無法載入".into();
+    };
+    let env = v.get("env").and_then(|e| e.as_object());
+    let endpoint = match env
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .and_then(|u| u.as_str())
+    {
+        Some(u) => reqwest::Url::parse(u)
+            .ok()
+            .and_then(|p| p.host_str().map(str::to_string))
+            .unwrap_or_else(|| u.to_string()),
+        None => "api.anthropic.com（未覆寫，官方）".to_string(),
+    };
+    let model = ["ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_MODEL"]
+        .iter()
+        .find_map(|k| env.and_then(|e| e.get(*k)).and_then(|m| m.as_str()))
+        .unwrap_or("Claude 預設");
+    format!("endpoint={endpoint} model={model}")
+}
+
+
+/// OpenCode：講有哪些 provider 段（它的「來源」就是這些）。
+fn opencode_summary(text: &str) -> String {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
+        return "⚠️ 還原內容不是合法 JSON，OpenCode 可能無法載入".into();
+    };
+    let mut names: Vec<String> = v
+        .get("provider")
+        .and_then(|p| p.as_object())
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default();
+    names.sort();
+    if names.is_empty() {
+        "providers=（沒有 provider 段）".into()
+    } else {
+        format!("providers={}", names.join(","))
+    }
+}
+
+
+/// Codex：原本的行級掃描 ＋ 生效中 provider 的死鏈警告。
+fn codex_summary(text: &str) -> String {
     let mut mp = "未知".to_string();
     let mut model = "未知".to_string();
     for line in text.lines() {

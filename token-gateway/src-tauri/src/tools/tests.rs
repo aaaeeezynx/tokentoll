@@ -40,6 +40,9 @@ pub(crate) use crate::tools::detect::detect_tools;
 pub(crate) use crate::tools::native::restore_native_to_port;
 pub(crate) use crate::tools::native::to_native;
 
+// ---- summary ----
+pub(crate) use crate::tools::summary::restore_summary;
+
 // ---- switch ----
 pub(crate) use crate::tools::switch::SwitchRequest;
 pub(crate) use crate::tools::switch::apply_switch;

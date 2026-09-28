@@ -328,7 +328,7 @@ pub(crate) fn restore_backup_to_inner(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?");
-        let summary = restore_summary(&text);
+        let summary = restore_summary(app, &text);
         let skip_note = if skipped > 0 {
             format!("（跳過 {skipped} 個含網關痕跡的備份）")
         } else {

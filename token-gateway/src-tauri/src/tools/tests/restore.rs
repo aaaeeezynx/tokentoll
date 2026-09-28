@@ -364,3 +364,33 @@ fn restore_returns_numeric_localhost_original() {
     assert!(back.contains("settings.json.bak-20260101-000000"), "{back}");
     assert_eq!(std::fs::read_to_string(&cfg).unwrap(), orig);
 }
+
+
+#[test]
+fn summary_is_per_app_not_codex_only() {
+    // 2026-09-28 修：摘要原本不分工具都用 Codex 的 TOML 掃描，於是還原 OpenCode
+    // 這種 JSON 設定時畫面顯示「provider=未知 model=未知｜⚠️ 還原內容本身不是
+    // 合法 TOML，Codex 可能無法載入」—— 三句全是錯的。使用者就是看到這串。
+    let oc = r#"{"provider": {"anthropic": {"options": {}}, "tokengateway": {"options": {}}}}"#;
+    let s = restore_summary("opencode", oc);
+    assert_eq!(s, "providers=anthropic,tokengateway");
+    assert!(!s.contains("Codex"), "{s}");
+    assert!(!s.contains("TOML"), "{s}");
+
+    let claude = r#"{"env": {"ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go/v1", "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5"}}"#;
+    let s = restore_summary("claude", claude);
+    assert_eq!(s, "endpoint=opencode.ai model=claude-opus-5");
+
+    // 沒有覆寫端點 = 官方。
+    let s = restore_summary("claude", r#"{"env": {}}"#);
+    assert!(s.starts_with("endpoint=api.anthropic.com（未覆寫，官方）"), "{s}");
+
+    // JSON 壞掉時講清楚是哪個工具的 JSON，不要提 TOML。
+    let s = restore_summary("opencode", "{oops");
+    assert!(s.contains("OpenCode"), "{s}");
+    assert!(s.contains("JSON"), "{s}");
+
+    // Codex 仍是原本的 TOML 摘要。
+    let s = restore_summary("codex", "model = \"m\"\nmodel_provider = \"custom\"\n");
+    assert_eq!(s, "provider=custom model=m");
+}

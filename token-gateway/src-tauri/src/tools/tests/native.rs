@@ -123,23 +123,50 @@ fn claude_native_drops_gateway_and_foreign_models_only() {
 
 
 #[test]
-fn claude_native_keeps_users_own_endpoint() {
-    // 使用者自己的 router ＋ Claude 模型名稱：不是接管產物，一個字都不該改。
+fn claude_native_strips_users_own_third_party_endpoint() {
+    // 2026-09-28 使用者選定「連端點也推回 Anthropic 官方」：他自己原本的 router
+    // 也一樣移除（代價是要先登入一次）。模型名稱本來就是 Claude，留著。
     let text = r#"{
   "env": {
-    "ANTHROPIC_AUTH_TOKEN": "",
-    "ANTHROPIC_BASE_URL": "https://router.flatkey.ai/v1",
+    "ANTHROPIC_AUTH_TOKEN": "oc_sk_secret_value",
+    "ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go/v1",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5"
   },
   "theme": "dark"
 }"#;
     let out = to_native("claude", text, 15722);
+    assert!(out.warning.is_none(), "{:?}", out.warning);
+    let v: serde_json::Value = serde_json::from_str(&out.text).unwrap();
+    let env = v["env"].as_object().unwrap();
+    assert!(!env.contains_key("ANTHROPIC_BASE_URL"), "第三方 router 也要移除");
+    assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"), "連帶的權杖一起移除");
+    assert_eq!(
+        env["ANTHROPIC_DEFAULT_SONNET_MODEL"].as_str(),
+        Some("claude-sonnet-5")
+    );
+    // 訊息只講端點，不該把權杖值寫進去。
+    assert!(out.changes.iter().any(|c| c.contains("opencode.ai/zen/go/v1")), "{:?}", out.changes);
+    assert!(!out.text.contains("oc_sk_secret_value"), "權杖不該留在檔案裡");
+}
+
+
+#[test]
+fn claude_native_keeps_official_endpoint_untouched() {
+    // 已經是官方端點：沒有可原生化的地方，原樣返回並附說明。
+    let text = r#"{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5"
+  }
+}"#;
+    let out = to_native("claude", text, 15722);
     assert!(out.changes.is_empty(), "{:?}", out.changes);
-    assert!(out.warning.is_some(), "應說明沒有網關痕跡");
+    assert!(out.warning.is_none(), "不是異常，不該示警：{:?}", out.warning);
+    assert!(out.note.is_some(), "應說明沒有可原生化的地方");
     let v: serde_json::Value = serde_json::from_str(&out.text).unwrap();
     assert_eq!(
         v["env"]["ANTHROPIC_BASE_URL"].as_str(),
-        Some("https://router.flatkey.ai/v1")
+        Some("https://api.anthropic.com")
     );
 }
 
@@ -168,6 +195,7 @@ const OPENCODE_MANAGED: &str = r#"{
 #[test]
 fn opencode_native_drops_gateway_endpoint_and_local_key() {
     let out = to_native("opencode", OPENCODE_MANAGED, 15722);
+    assert!(out.warning.is_none(), "{:?}", out.warning);
     let v: serde_json::Value = serde_json::from_str(&out.text).expect("仍是合法 JSON");
     let opts = v["provider"]["anthropic"]["options"]
         .as_object()
@@ -180,6 +208,18 @@ fn opencode_native_drops_gateway_endpoint_and_local_key() {
         v["provider"]["tokengateway"]["options"]["baseURL"].as_str(),
         Some("https://integrate.api.nvidia.com/v1")
     );
+}
+
+
+#[test]
+fn opencode_native_reports_clean_config_as_note_not_warning() {
+    // 2026-09-28 實機踩到：對一個本來就乾淨的 OpenCode 按關閉，畫面出現
+    // 「⚠️ 設定裡沒有網關痕跡，維持原樣」—— 健康的設定不該被示警。
+    let clean = r#"{"provider": {"anthropic": {"options": {}}, "tokengateway": {"options": {"baseURL": "https://integrate.api.nvidia.com/v1"}}}}"#;
+    let out = to_native("opencode", clean, 15722);
+    assert!(out.changes.is_empty(), "{:?}", out.changes);
+    assert!(out.warning.is_none(), "不該示警：{:?}", out.warning);
+    assert_eq!(out.note.as_deref(), Some("設定裡沒有網關痕跡，維持原樣"));
 }
 
 

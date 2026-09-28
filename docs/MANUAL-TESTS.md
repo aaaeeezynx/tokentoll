@@ -293,8 +293,12 @@ Codex 停在 NIM 的來源與模型，而不是 GPT。
 | 工具 | 關閉後會變成 |
 |---|---|
 | **Codex** | `model_provider = "openai"`、`model = "gpt-5.6-luna"`、移除 `model_catalog_json` → 模型清單回到 GPT |
-| **Claude Code** | 移除指向網關的 `ANTHROPIC_BASE_URL` 與 `ANTHROPIC_AUTH_TOKEN`，並移除不是 `claude-*` 的模型對映 |
-| **OpenCode** | 移除指向網關的 `provider.*.options.baseURL` 與本地 `sk-local-` key |
+| **Claude Code** | 移除**任何不是 Anthropic 官方**的 `ANTHROPIC_BASE_URL`（網關或你自己的 router 都一樣），連帶移除 `ANTHROPIC_AUTH_TOKEN`；並移除不是 `claude-*` 的模型對映 |
+| **OpenCode** | 移除指向網關的 `provider.*.options.baseURL` 與本地 `sk-local-` key → 回到 OpenCode 自己的登入 |
+
+> **Claude Code 有代價**：這台機器上找不到 `.claude/.credentials.json`，所以端點被
+> 推回官方之後，你必須先跑一次 `claude` 登入，在那之前 Claude Code 不能跑。
+> （這是你 2026-09-28 選的：連端點一起推回官方。）
 
 **刻意保留**：你自己的設定，以及 `.codex` 裡那些別名 provider 段（`custom`、
 `nvidia-nim`、`opencode-zen`…）。刪掉它們會讓舊對話開不起來（rollout 裡記著
@@ -328,8 +332,11 @@ Codex 打開後，模型選擇器裡應該是 **GPT-5.x / GPT-6**，不是 NIM �
 - Codex 回到官方之後，**舊對話若原本走第三方模型**（例如 `moonshotai/kimi-k3`）
   仍然開得起來，但送出的請求要看那個別名段指向哪裡 —— 它在關閉後指向你最後
   一次接管前的上游，不是 OpenAI。
-- Claude Code 還原後如果沒有官方登入（這台機器上找不到
-  `.claude/.credentials.json`），它會要你先登入 —— 那就是「原生」的樣子。
+- **Claude Code 還原後會要你先登入**（`claude` 跑一次）。那是「回到官方」的
+  必然結果 —— 這台機器上沒有 Claude 的憑證檔。
+- **OpenCode 沒有任何一份「接管前」的備份**：10 份備份（最早 09-22 02:27）全都
+  有 provider 指向網關，那是早期版本的 App 寫進 `provider.anthropic` 的。
+  所以對它來說「還原」本身給不出乾淨設定，是**原生化那一步**在清理它。
 - 關閉**不會**動你原本就有的 `model_context_window`、`disable_response_storage`
   之類的鍵（那些不是 App 寫的）。
 

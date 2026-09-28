@@ -20,11 +20,15 @@
 //! | 工具 | 做什麼 | 為什麼 |
 //! |---|---|---|
 //! | codex | `model_provider = "openai"`、`model = "gpt-5.6-luna"`、移除 `model_catalog_json` | 移除 App 產生的目錄後，Codex 才會用內建的 GPT 模型清單 |
-//! | claude | 移除指向網關的 `ANTHROPIC_BASE_URL`／`ANTHROPIC_AUTH_TOKEN`；移除非 `claude-*` 的模型對映 | 讓 Claude Code 用 Claude 模型；使用者自己的端點（例如他原本的 router）不動 |
+//! | claude | 移除任何不是 Anthropic 官方的 `ANTHROPIC_BASE_URL`（連帶 `ANTHROPIC_AUTH_TOKEN`）；移除非 `claude-*` 的模型對映 | 讓 Claude Code 回到官方端點與 Claude 模型 |
 //! | opencode | 移除指向網關的 `provider.*.options.baseURL`／`apiKey` | 回到 OpenCode 自己的登入 |
 //!
 //! **刻意保留**：使用者自己寫的鍵、`.codex` 的別名 provider 段、`.claude` 的
 //! `theme`、opencode 的其他 provider 段。關閉網關不該順手刪掉使用者的東西。
+//!
+//! ⚠️ **Claude Code 的端點是例外**：使用者 2026-09-28 明確選定「連端點一起推回
+//! Anthropic 官方」，所以他自己原本的 router（例如 `opencode.ai/zen/go`）也會被
+//! 移除。代價是他必須先 `claude` 登入一次 —— 在那之前 Claude Code 不能跑。
 //!
 //! ## 為什麼不改 `restore_backup_to_inner`
 //!
@@ -37,6 +41,9 @@ use toml_edit::{value, DocumentMut};
 
 /// Codex 的第一方 provider id（Codex 內建，不需要 `[model_providers]` 段）。
 pub const CODEX_NATIVE_PROVIDER: &str = "openai";
+
+/// Claude Code 的第一方端點。`ANTHROPIC_BASE_URL` 指向這裡以外的一律移除。
+pub const ANTHROPIC_HOST: &str = "api.anthropic.com";
 
 /// Codex 還原後預設使用的模型。
 ///
@@ -51,8 +58,13 @@ pub struct NativeOutcome {
     pub text: String,
     /// 人類可讀的變更摘要；沒有變更時為空。
     pub changes: Vec<String>,
-    /// 無法完成轉換的原因（此時 `text` 等於輸入）。
+    /// **無法完成**轉換的原因（此時 `text` 等於輸入）。畫面會加 ⚠️。
     pub warning: Option<String>,
+    /// **沒有東西要改**這種正常結果的說明。畫面**不加** ⚠️ ——
+    /// 「這個工具本來就在原生來源」不是異常，對健康的設定示警會讓人以為壞了
+    /// （2026-09-28 實機就踩到：關閉一個已經乾淨的 OpenCode，畫面出現
+    /// 「⚠️ 設定裡沒有網關痕跡，維持原樣」）。
+    pub note: Option<String>,
 }
 
 
@@ -115,18 +127,37 @@ fn claude_native(text: &str, port: u16) -> NativeOutcome {
         return out;
     };
 
-    // 指向本網關的端點與權杖：這兩個是接管的產物，一律移除。
-    let via_gateway = env
+    // 端點：任何「不是 Anthropic 官方」的覆寫都移除 —— 那一行就是「Claude Code
+    // 被指到別的地方」的全部內容（網關、或使用者自己的 router 都一樣）。
+    //
+    // 2026-09-28 使用者明確選定連端點一起推回官方。代價是他必須先登入一次
+    // （這台機器上沒有 `.claude/.credentials.json`），在那之前 Claude Code 不能跑。
+    let redirect = env
         .get("ANTHROPIC_BASE_URL")
         .and_then(|v| v.as_str())
-        .is_some_and(|u| is_gateway(u, port));
-    if via_gateway {
-        env.remove("ANTHROPIC_BASE_URL");
-        out.changes
-            .push("移除 ANTHROPIC_BASE_URL（原本指向本網關）".into());
-        if env.remove("ANTHROPIC_AUTH_TOKEN").is_some() {
+        .map(|u| {
+            reqwest::Url::parse(u)
+                .map(|p| p.host_str() != Some(ANTHROPIC_HOST))
+                .unwrap_or(true)
+        })
+        .unwrap_or(false);
+    if redirect {
+        let old = env
+            .remove("ANTHROPIC_BASE_URL")
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        if is_gateway(&old, port) {
             out.changes
-                .push("移除 ANTHROPIC_AUTH_TOKEN（網關用的權杖）".into());
+                .push("移除 ANTHROPIC_BASE_URL（原本指向本網關）".into());
+        } else {
+            out.changes
+                .push(format!("移除 ANTHROPIC_BASE_URL（原本是 {old}）"));
+        }
+        // 權杖是為了那個端點而存在的；端點拿掉，它就沒有意義了（值不寫進訊息）。
+        if env.contains_key("ANTHROPIC_AUTH_TOKEN") {
+            env.remove("ANTHROPIC_AUTH_TOKEN");
+            out.changes
+                .push("移除 ANTHROPIC_AUTH_TOKEN（那是給被移除的端點用的）".into());
         }
     }
 
@@ -149,8 +180,8 @@ fn claude_native(text: &str, port: u16) -> NativeOutcome {
         out.changes.push(format!("移除 {k}（{old} 不是 Claude 模型）"));
     }
 
-    if out.changes.is_empty() && !via_gateway {
-        out.warning = Some("設定裡沒有網關痕跡，維持原樣".into());
+    if out.changes.is_empty() {
+        out.note = Some("設定裡沒有可原生化的地方，維持原樣".into());
     }
     out.text = serde_json::to_string_pretty(&root).unwrap_or_else(|_| text.to_string());
     if !out.text.ends_with('\n') {
@@ -198,7 +229,7 @@ fn opencode_native(text: &str, port: u16) -> NativeOutcome {
     }
     out.changes = changes;
     if out.changes.is_empty() {
-        out.warning = Some("設定裡沒有網關痕跡，維持原樣".into());
+        out.note = Some("設定裡沒有網關痕跡，維持原樣".into());
     }
     out.text = serde_json::to_string_pretty(&root).unwrap_or_else(|_| text.to_string());
     if !out.text.ends_with('\n') {
@@ -237,13 +268,16 @@ pub fn restore_native_to_port(
         Some(i) => format!(
             "{}｜{}",
             &restored[..i],
-            restore_summary(&outcome.text)
+            restore_summary(app, &outcome.text)
         ),
         None => restored,
     };
     if !outcome.changes.is_empty() {
         msg.push_str("｜已切回原生來源：");
         msg.push_str(&outcome.changes.join("、"));
+    }
+    if let Some(n) = outcome.note {
+        msg.push_str(&format!("｜{n}"));
     }
     if let Some(w) = outcome.warning {
         msg.push_str(&format!("｜⚠️ {w}"));
