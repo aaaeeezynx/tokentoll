@@ -6,6 +6,8 @@ use super::clamp_percent;
 use super::types::{QuotaWindow, SubscriptionQuota};
 use super::unix_to_rfc3339;
 
+// ------------------------------------------------------------ Codex/ChatGPT ---
+
 pub(crate) fn codex_window_label(seconds: i64) -> String {
     match seconds {
         18_000 => "5 小時".to_string(),

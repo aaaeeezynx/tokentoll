@@ -4,6 +4,8 @@ use super::*;
 use crate::db::open_and_ensure;
 use rusqlite::Connection;
 
+// ─────────────────────────────────────────────────────── 單測 ───
+
 fn mem() -> Connection {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");

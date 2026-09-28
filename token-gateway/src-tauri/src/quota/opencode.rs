@@ -5,6 +5,8 @@ use serde_json::Value;
 use super::clamp_percent;
 use super::types::{QuotaWindow, SubscriptionQuota};
 
+// ------------------------------------------------------------ OpenCode Go ---
+
 pub(crate) fn detect_opencode_go(base_url: &str) -> bool {
     base_url.to_lowercase().contains("opencode.ai/zen/go")
 }
@@ -46,12 +48,7 @@ pub(crate) fn parse_opencode_windows(body: &Value) -> Vec<QuotaWindow> {
     out
 }
 
-pub(crate) fn query_opencode_go(
-    provider_id: i64,
-    name: &str,
-    base_url: &str,
-    api_key: &str,
-) -> SubscriptionQuota {
+pub(crate) fn query_opencode_go(provider_id: i64, name: &str, base_url: &str, api_key: &str) -> SubscriptionQuota {
     let key = format!("opencode-go:{provider_id}");
     let title = format!("OpenCode Go（{name}）");
     if api_key.trim().is_empty() {

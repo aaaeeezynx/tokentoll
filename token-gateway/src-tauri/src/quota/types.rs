@@ -38,13 +38,7 @@ impl SubscriptionQuota {
         }
     }
 
-    pub(super) fn fail(
-        key: &str,
-        title: &str,
-        kind: &str,
-        status: &str,
-        message: impl Into<String>,
-    ) -> Self {
+    pub(super) fn fail(key: &str, title: &str, kind: &str, status: &str, message: impl Into<String>) -> Self {
         Self {
             key: key.to_string(),
             title: title.to_string(),
@@ -56,12 +50,7 @@ impl SubscriptionQuota {
         }
     }
 
-    pub(super) fn no_credentials(
-        key: &str,
-        title: &str,
-        kind: &str,
-        message: impl Into<String>,
-    ) -> Self {
+    pub(super) fn no_credentials(key: &str, title: &str, kind: &str, message: impl Into<String>) -> Self {
         Self::fail(key, title, kind, "no_credentials", message)
     }
 }

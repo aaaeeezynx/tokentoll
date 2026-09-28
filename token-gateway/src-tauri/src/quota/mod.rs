@@ -52,10 +52,10 @@ pub(crate) fn query_all(
     let mut out = vec![];
     for (id, name, base, key, enabled) in providers {
         if *enabled && detect_opencode_go(base) {
-            out.push(opencode::query_opencode_go(*id, name, base, key));
+            out.push(query_opencode_go(*id, name, base, key));
         }
     }
-    out.push(claude::query_claude());
-    out.push(codex::query_codex());
+    out.push(query_claude());
+    out.push(query_codex());
     out
 }

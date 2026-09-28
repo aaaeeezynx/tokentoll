@@ -4,6 +4,8 @@ use rusqlite::Connection;
 
 use crate::fsutil::now_ms;
 
+// ───────────────────────────────────── 上游拒收欄位的持久化記憶 ───
+
 /// 記住某渠道被上游拒收的欄位（冪等）。
 pub fn remember_stripped(conn: &Connection, provider_id: i64, field: &str) -> Result<(), String> {
     if field.is_empty() {

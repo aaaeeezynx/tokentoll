@@ -8,6 +8,8 @@ use crate::fsutil::now_ms;
 
 use super::record::TraceRecord;
 
+// ─────────────────────────────────────────── 追蹤寫入 / 讀取 ───
+
 /// 寫入一筆追蹤，回傳新行 id。
 pub fn insert_trace(conn: &Connection, r: &TraceRecord) -> Result<i64, String> {
     let stripped = serde_json::to_string(&r.stripped_fields).unwrap_or_else(|_| "[]".to_string());

@@ -5,6 +5,8 @@ use serde_json::Value;
 use super::clamp_percent;
 use super::types::{QuotaWindow, SubscriptionQuota};
 
+// ---------------------------------------------------------------- Claude ---
+
 fn tier_label(name: &str) -> String {
     match name {
         "five_hour" => "5 小時".to_string(),
