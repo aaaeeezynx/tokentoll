@@ -140,10 +140,11 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             } else {
                 "env_key = TOKEN_GATEWAY_KEY"
             };
-            // 協議形狀由 provider 宣告（`api_format`）優先、URL 推定為後備；
-            // 預覽必須顯示**實際會寫入的值**，否則預覽會騙人。
-            let wire_api = codex_wire_api_declared(req.provider_format.as_deref())
-                .unwrap_or_else(|| codex_wire_api(&req.base_url));
+            // 協議形狀：指向本網關時一律 `responses`（宣告不得推翻，見
+            // [`codex_wire_api_for`]）；只有真正的第三方才輪到宣告生效。
+            // **必須與 [`codex_apply`] 用同一個函式**，否則預覽會騙人。
+            let wire_api =
+                codex_wire_api_for(&req.base_url, req.provider_format.as_deref());
             if aliases.is_empty() {
                 plan.edits.push(format!(
                     "[model_providers.{CODEX_SHARED_PROVIDER_ID}] 與 [model_providers.{GATEWAY_PROVIDER_ID}] base_url = {} / {auth_desc} / wire_api = {wire_api}",

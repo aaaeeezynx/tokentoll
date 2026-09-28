@@ -246,3 +246,56 @@ fn codex_apply_forces_responses_on_gateway_even_if_declared_chat() {
         "別名段也必須存在：{got:?}"
     );
 }
+
+/// **預覽不得騙人**：`plan_switch` 顯示的 `wire_api` 必須與 `codex_apply`
+/// 實際寫入的值一致。
+///
+/// 這兩處原本**各自算一次**同樣的運算式；修 `gateway_section` 時很容易漏掉
+/// `plan_switch`（我第一版就漏了），結果預覽顯示 `chat`、實際寫 `responses`
+/// —— 而 `plan_switch` 的註解自己寫著「預覽必須顯示實際會寫入的值，
+/// 否則預覽會騙人」。這條測試把兩邊釘在一起。
+#[test]
+fn plan_preview_wire_api_is_responses_on_gateway() {
+    let req = |fmt: Option<&str>| SwitchRequest {
+        app: "codex".into(),
+        base_url: "https://integrate.api.nvidia.com/v1".into(),
+        api_key: "k".into(),
+        model: "m".into(),
+        provider_id: Some(15),
+        provider_format: fmt.map(|s| s.to_string()),
+        reasoning: None,
+        context_window: None,
+        gen_catalog: false,
+        catalog_union: false,
+        direct_upstream: true,
+        key_id: None,
+        claude_map: None,
+    };
+
+    // 生產實際情況：來源宣告 openai-chat，而 base_url 由後端改成網關。
+    let plan = plan_switch(&req(Some("openai-chat")), 15722).unwrap();
+    let line = plan
+        .edits
+        .iter()
+        .find(|e| e.contains("wire_api"))
+        .unwrap_or_else(|| panic!("預覽應提到 wire_api：{:?}", plan.edits));
+    assert!(
+        line.contains("wire_api = responses"),
+        "預覽必須顯示實際會寫入的 responses：{line}"
+    );
+    assert!(
+        !line.contains("wire_api = chat"),
+        "預覽不得顯示 Codex 已不接受的 chat：{line}"
+    );
+    // base_url 仍必須被改寫成網關（另一個既有測試在管，這裡順帶確認）。
+    assert!(line.contains("http://127.0.0.1:15722/v1"), "{line}");
+
+    // 沒宣告時也一樣（URL 推定本來就會給 responses）。
+    let plan = plan_switch(&req(None), 15722).unwrap();
+    let line = plan
+        .edits
+        .iter()
+        .find(|e| e.contains("wire_api"))
+        .unwrap_or_else(|| panic!("預覽應提到 wire_api：{:?}", plan.edits));
+    assert!(line.contains("wire_api = responses"), "{line}");
+}

@@ -562,6 +562,55 @@ cursor／antigravity —— 用量歸屬、篩選選項、歷史資料一個不�
 
 ---
 
+### 10.12 `wire_api` 回歸事故（2026-09-28，commit `b092772` ＋ 後續）
+
+**這一輪不是新功能，是修一個由 §10.9 的 E 階段（`38c5bcd`）引入的迴歸。**
+
+**症狀**：使用者反映「開啟 Codex 有這個錯誤：Unable to log in」。
+
+**真因**：E 階段把 `wire_api` 的判定改成「**provider 宣告的 `api_format`
+優先於 URL 推定**」。但宣告描述的是**上游**說哪種協議，而寫進 `config.toml`
+的 `base_url` **永遠是本網關**（唯一的模式就是經網關 —— 直連分支已於
+§4.4 移除）。使用者 7 個來源的 `api_format` **全部是 `openai-chat`**，
+於是接管後**每一個** provider 段都被寫成 `wire_api = "chat"`。
+
+而 **Codex 已不再接受 `chat`**：
+
+```
+ERROR codex_app_server: Invalid configuration; using defaults.
+config.toml:16:12: `wire_api = "chat"` is no longer supported.
+```
+
+Codex 讀到非法設定就整份 config 丟棄、改用預設值 → 回頭找 ChatGPT 登入 →
+使用者看到「Unable to log in」，**完全看不出真正起因**。
+
+**為何測試沒攔住**：單元測試只驗「網關 URL ＋ **未宣告**」→ `responses`
+（用 `CodexAuth::default()`），而生產路徑（`switch.rs`）**永遠帶著宣告**。
+兩個條件從未在同一條測試裡相遇 —— 測了元件，沒測接線。
+
+**修正**：
+
+| 位置 | 改動 |
+|---|---|
+| `wire.rs` | 新增 `codex_wire_api_for(base_url, declared)`：指向網關／官方 OpenAI 一律 `responses`（宣告不得推翻），真正的第三方才輪到宣告 |
+| `wire.rs::gateway_section` | 改用它（寫入端） |
+| `switch.rs::plan_switch` | **同一類錯誤的第二處** —— 預覽也各自算一份，會顯示 `chat` 而實際寫 `responses`。已改為呼叫同一個函式 |
+| 測試 | 新增 `codex_apply_forces_responses_on_gateway_even_if_declared_chat`（寫入端）與 `plan_preview_wire_api_is_responses_on_gateway`（預覽端） |
+
+**教訓**：同一個決策運算式出現在兩個地方就會漂移。修一處時必須全域搜尋
+同型運算式（`codex_wire_api_for` 就是靠搜尋 `codex_wire_api(` 的使用處
+才找到第二份副本的）。
+
+**仍待決策**：`chat` 在新版 Codex 已**完全**不能用，代表 E 那套「依上游能力
+選 chat/responses」的**前提已經消失**。目前只修了實際會走到的路
+（網關 → `responses`）；「真正的第三方 → `chat`」那條分支在生產路徑已
+不可達，但留著就是地雷。要否整組拿掉、永遠只寫 `responses`，需產品決策。
+
+**閘門**：`cargo test --offline` → **220 passed / 0 failed / 8 ignored**；
+`cargo clippy --offline --all-targets` → **0 警告**。
+
+---
+
 ### 10.8 行數對照（誠實版）
 
 | 方向 | 計畫估算 | 實際 | 說明 |

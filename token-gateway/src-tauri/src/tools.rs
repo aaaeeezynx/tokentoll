@@ -74,8 +74,8 @@ pub(crate) use {
     codex::codex_inline_models,
     codex::codex_legacy_providers_report,
     codex::codex_text_base_url,
-    codex::codex_wire_api,
     codex::codex_wire_api_declared,
+    codex::codex_wire_api_for,
     codex::gateway_url,
 
     // ---- switch ----

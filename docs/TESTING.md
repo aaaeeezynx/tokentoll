@@ -15,7 +15,7 @@
 | **B** | 網關拒絕會不會留痕 | Phase 1.5 修的**主要缺口**。修正前，「連線錯誤 400」是唯一不會出現在診斷頁的那一類 |
 | **C** | 原本的 400 / Codex 會話症狀有沒有改善 | 你的原始問題 |
 | **D** | Codex 舊會話的 provider 別名（B3，已修） | 修正前讀取失敗會**靜默變成「沒有別名」**，看起來一切正常 |
-| **E** | `wire_api` 是否跟著上游能力走（B4，已修） | 修正前不論上游是誰都寫死 `responses`，直連第三方會壞 |
+| **E** | `wire_api` 是否跟著上游能力走（B4，**已修但修正本身有缺陷，2026-09-28 再修**） | 最初「不論上游是誰都寫死 `responses`」；改成「宣告優先」後又**反過來**把指向網關的段寫成 `chat` —— 而 Codex 已不接受 `chat`，導致 **「Unable to log in」**。見 §0.6 |
 | **F** | DSH 用量為何不出現在 Token 趨勢 | **你回報的 bug**。已查明：**標籤是 bug，趨勢圖不是** —— DSH 目前設定直連 `opencode.ai`，根本沒經過網關 |
 | **G** | 本機工具標籤應顯示「DeepSeek Harness」 | **你回報的 bug**（已修）。前端寫成「DeepSeek」，與後端不一致 |
 
@@ -31,13 +31,14 @@
 > 逐字比對過所有中文訊息（15 → 15，零改字）。**若你看到非預期的行為變化，
 > 那是我拆壞了，請回報。**
 
-> **目前狀態（2026-09-28 18:0x 更新）**：測試 **A 已通過**（2026-09-27 22:07
-> 你提供的截圖，已與資料庫逐項核對）。**B、D 已於 2026-09-28 由我代跑並全部
-> 通過**；**E 在代跑時抓到一個真實故障**（接管會寫出 Codex 已不接受的
-> `wire_api = "chat"`，導致 Codex 報「Unable to log in」），**已修正**並補上
-> 回歸測試 —— 詳見 §6.6 與 §0.6。**C 仍然只能你自己在真實使用情境下測**（見 §6）。
-> 後端測試 **219 passed / 0 failed / 8 ignored**、clippy **0 警告**。
-> 最新的實機驗證與建置見 §0.5、§0.6 與 §9.5。
+> **目前狀態（2026-09-28 18:50 更新）**：測試 **A 已通過**（2026-09-27 22:07
+> 你提供的截圖，已與資料庫逐項核對）。**B、D 已由我代跑並全部通過**；
+> **E 在代跑時抓到一個真實故障**（接管會寫出 Codex 已不接受的
+> `wire_api = "chat"`，導致 Codex 報「Unable to log in」），**已修正並補上
+> 兩條回歸測試** —— 詳見 §6.6、§0.6。**C 仍然只能你自己在真實使用情境下測**
+> （見 §6），**這是唯一還沒跑過的測試**。
+> 後端測試 **220 passed / 0 failed / 8 ignored**、clippy **0 警告**。
+> 最新的實機驗證與建置見 §0.5、§0.6 與 §9.7。
 >
 > <small>（以下為歷史紀錄，數字是當時的基線，已被上面的現況取代）</small>
 
@@ -381,6 +382,28 @@ E 階段（`38c5bcd`）加了「**provider 宣告的 `api_format` 優先於 URL 
 | `gateway_section` 改用它 | 原本是 `auth.wire_api.unwrap_or_else(|| codex_wire_api(base_url))` |
 | 新增回歸測試 | `codex_apply_forces_responses_on_gateway_even_if_declared_chat` —— 用的正是生產路徑的參數組合（網關 URL ＋ `codex_wire_api_declared(Some("openai-chat"))`） |
 | 你目前的 `config.toml` | 8 個段的 `wire_api` 已全數由 `chat` 改為 `responses`（17:59:48） |
+
+### 0.6.5b 同一類錯誤的**第二處**：預覽也會騙人
+
+第一次修完之後，我回頭去找「同樣的運算式還寫在哪裡」，發現
+`switch.rs::plan_switch` 有一份**一模一樣的副本**：
+
+```rust
+// 修正前（switch.rs，產生畫面預覽用）
+let wire_api = codex_wire_api_declared(req.provider_format.as_deref())
+    .unwrap_or_else(|| codex_wire_api(&req.base_url));
+```
+
+而它正上方一行註解寫著「**預覽必須顯示實際會寫入的值，否則預覽會騙人**」。
+若只修 `gateway_section`，結果會是：**畫面預覽顯示 `chat`、實際寫入
+`responses`** —— 兩個都錯開，使用者無從判斷哪個是真的。
+
+已改為與寫入端呼叫**同一個函式** `codex_wire_api_for`，並新增測試
+`plan_preview_wire_api_is_responses_on_gateway` 把兩邊釘在一起
+（這條測試也順帶成為測試 E 準則 1 的自動化替代品）。
+
+> **教訓**：同一個決策運算式出現在兩個地方，就是會漂移。修一處時必須
+> 全域搜尋同型運算式；本次是靠「`codex_wire_api(` 的使用處」那個搜尋找到的。
 
 **測試**：`cargo test --offline` → **219 passed / 0 failed / 8 ignored**（exit 0）；
 `cargo clippy --offline --all-targets` → **exit 0、0 警告**。
@@ -870,7 +893,11 @@ py scripts\dump_traces.py --problems -n 100
   共 4 條成因（檔名寫死 `state_5.sqlite`、缺 `busy_timeout`、管理清單會縮小、
   `codex_doctor` 把失敗報成 ✅）加上第 5 條 `rows.flatten()` 靜默吞錯。
 - ~~**B4**：無差別強制 `wire_api = "responses"`。~~ **已修** —— 見測試 E。
+  ⚠️ **但這次修正本身有缺陷（2026-09-28 追查「Unable to log in」時發現）**：
+  「宣告優先」被用到指向網關的情況上，把每個段都寫成 Codex 已不接受的
+  `chat`。已再修（`codex_wire_api_for`），見 §0.6。
 - ~~**§5.3 第 2 層**：能力宣告。~~ **已實作**（協議選擇改為宣告優先）。
+  ⚠️ **同上**：宣告只在真正的第三方才該生效；指向網關時一律 `responses`。
 - ~~**§5.2 的 body 解析 400**：仍未定案。~~ **已定案（2026-09-28）** ——
   **不是網關的 bug**。把三筆證據的 body 與宣稱的 `bytes_len` 逐一對齊
   （69／107／132 全部相符，儀器沒有弄壞 body），再實際丟給 JSON 解析器：
@@ -1031,7 +1058,38 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.6 最新建置（2026-09-28 18:14，`wire_api` 修正輪）—— **你目前安裝的就是這一個**
+### 9.7 最新建置（2026-09-28 18:45，`wire_api` 預覽修正輪）—— **你目前安裝的就是這一個**
+
+**為什麼要再建一次**：§0.6.5b 發現 `plan_switch`（畫面預覽）有**第二份**
+同樣的運算式，會顯示 `chat` 而實際寫 `responses`。這處修正在 Rust 後端，
+所以要重新建置。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | **2026-09-28 18:38:30 起算 → 產物 18:45:28**（release 編譯約 7 分） |
+| 執行檔大小 | 9,010,176 bytes |
+| MSI 大小 | 7,344,128 bytes |
+| NSIS 大小 | 3,829,430 bytes |
+| **安裝後執行檔 SHA-256** | **`9AD41461C3293FDBD344B30FCBC9FE23748264729E5F31709F5E8EF2C85BF0EE`**（前一版 `758F03DF…`，已換掉） |
+| 後端測試 | **220 passed / 0 failed / 8 ignored**（實跑 `cargo test --offline`，exit 0） |
+| clippy | **0 個警告** |
+| 新增測試 | `plan_preview_wire_api_is_responses_on_gateway`（＋前一版的 `codex_apply_forces_responses_on_gateway_even_if_declared_chat`） |
+| 啟動後 | 15722 LISTEN ✓；`config.toml` **SHA-256 完全沒變**（開頁面不會觸發接管） |
+
+**這一輪改到的檔案**：
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/tools/codex/wire.rs` | 新增 `codex_wire_api_for()`；`gateway_section()` 改用它 |
+| `src-tauri/src/tools/switch.rs` | `plan_switch` 預覽改用**同一個函式**（第二份副本） |
+| `src-tauri/src/tools.rs` | 再匯出清單：`codex_wire_api` → `codex_wire_api_for`（前者已無模組外使用者） |
+| `src-tauri/src/tools/tests.rs` | 測試模組再匯出清單同步 |
+| `src-tauri/src/tools/tests/codex_wire_api.rs` | 兩條回歸測試 |
+| `docs/TESTING.md`、`docs/SIMPLIFICATION-PLAN.md`、`docs/evidence/…` | §0.6／§9.6／§9.7、§10.12 |
+
+---
+
+### 9.6 前一次建置（2026-09-28 18:14，`wire_api` 修正輪，已被 9.7 取代）
 
 **為什麼要重建**：§0.6 的 `wire_api` 修正動到 Rust 後端。**舊版執行檔仍會把
 `wire_api` 寫成 Codex 已不接受的 `chat`** —— 在裝上這一版之前，只要點
