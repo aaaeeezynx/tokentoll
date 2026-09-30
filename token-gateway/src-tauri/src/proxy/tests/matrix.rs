@@ -46,7 +46,8 @@
             // Responses 入站（Codex）
             (Responses, T::OpenAiChat, R2C),
             (Responses, T::OpenAiResponses, NONE),
-            (Responses, T::Mixed, R2C),
+            // mixed：兩邊都通 —— Responses 原樣直通（打上游 /responses），不翻成 chat。
+            (Responses, T::Mixed, NONE),
             (Responses, T::Anthropic, None),
             (Responses, T::Gemini, None),
             (Responses, T::Unknown, NONE),

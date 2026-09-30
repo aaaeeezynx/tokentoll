@@ -776,6 +776,38 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.15 讓 `mixed` 真的「Responses ＋ chat 兩邊都通」（2026-09-30）
+
+你問的：「mixed 同時支援 Responses+chat 是否可以做」——**可以做，而且兌現方式就是一行**。
+
+原因：`proxy/forward.rs` 的規則是「翻譯路徑固定打 `/chat/completions`；**直通保留原始路徑**」，
+所以 `TransKind::None` 就是「原樣打過去」。舊的矩陣把 `(Responses, Mixed)` 映射成
+`responses_to_chat` —— 明明是「兩邊都有架」的渠道，卻硬把 Codex 的 Responses 翻成 chat
+送到上游，於是 responses-only 的模型一律 `ModelProtocolUnsupported`。現在改成：
+
+```rust
+(Responses, T::OpenAiChat) => Ok(TransKind::ResponsesToChat),
+(Responses, T::Mixed)      => Ok(TransKind::None),   // 原樣打上游 /responses
+```
+
+- `T::Mixed` 的 doc 改寫成「兩種端點都原樣直通」，並註明**逐模型**的端點支援仍由上游決定。
+- 行為契約表（`proxy/tests/matrix.rs`，30 格全列舉）同步：`(Responses, T::Mixed, NONE)`。
+- 前端不必改：`providersTypes.ts::API_FORMATS` 本來就有 `mixed` 可選。
+
+**照實說的限制**：這是**渠道級**的「兩邊都通」，不是**模型級**的。oc-go 的模型是分裂的
+（grok-4.7／gpt-6-luna／muse-spark 只在 responses；mimo-v2.6-* 只在 chat；deepseek-* 兩邊都有）。
+所以把 oc-go 標成 `mixed` 之後：
+
+| 客戶端 | 走哪個端點 | 結果 |
+|---|---|---|
+| Codex（Responses） | `/responses` 直通 | grok-4.7／gpt-6-luna／muse-spark／deepseek 可用 ✅；**mimo-* 會 400** ❌ |
+| Claude Code（Anthropic） | 仍翻成 chat | deepseek／mimo 可用 ✅；grok／muse 仍然 400 ❌（Anthropic→Responses 沒有翻譯器） |
+
+要**逐模型**都對，還是得靠方案 3（上游回 `ModelProtocolUnsupported` 時用另一種協議自動重送
+並記住結果）。這一輪先把你問的 mixed 做掉。
+
+---
+
 ### 0.9.14 把來源模型的真實上下文視窗告訴 Claude Code（2026-09-30）
 
 你問「好繼續做」的那一項：Claude Code 對**它不認識的模型**只假設 200k（官方自己的警告：
@@ -1907,7 +1939,22 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.15 最新建置（2026-09-30 20:48，把來源模型視窗告訴 Claude Code）—— **你目前安裝的就是這一個**
+### 9.16 最新建置（2026-09-30 21:18，`mixed` 兩邊都通）—— **你目前安裝的就是這一個**
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-30 21:18:16 |
+| `target\release\token-gateway.exe` | 9,054,208 bytes、sha256 `7756FCB3C866FC0753BCCD6DA65E47B3F905E24C1C582F49A141E506ACC4DEBC` |
+| NSIS 安裝檔 | 3,846,873 bytes |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,054,208 bytes、sha256 `0FCF2EA58079FC01CD077E94F3AFB87AF9CB5C12F0D02495A682D0C09B6A083C` |
+| 安裝方式 | NSIS `/S`，installer exit 0；裝完先砍掉自動啟動的行程再手動啟動 |
+| 閘門 | `cargo test --offline` **243 passed / 0 failed / 8 ignored** ✅、`cargo clippy --offline --all-targets` 0 warning ✅、`pnpm exec tauri build`（含 `tsc`）0 error ✅ |
+
+> 這一輪的實機驗證靠**行為契約表**（`proxy/tests/matrix.rs` 的 30 格）與既有 e2e 直通測試；
+> 要看到真實效果需要把來源協議改成 `mixed`（上游來源 → opencode-go → 協議 → mixed），
+> 那一步會改到你既有來源的語意，所以**留給你決定**。
+
+### 9.15 前一次建置（2026-09-30 20:48，把來源模型視窗告訴 Claude Code，已被 9.16 取代）
 
 | 項目 | 值 |
 |---|---|
