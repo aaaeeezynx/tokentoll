@@ -27,6 +27,7 @@ mod translate;
 mod tray;
 mod usage;
 mod usage_query;
+mod window;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::Manager;
@@ -72,7 +73,7 @@ pub fn run() {
             app.manage(deeplink::DeeplinkState(std::sync::Mutex::new(startup_link)));
             deeplink::protocol::spawn_watcher(app.handle())?;
 
-            let show = MenuItem::with_id(app, "show", "顯示主視窗", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "開啟主視窗", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let sep = tauri::menu::PredefinedMenuItem::separator(app)?;
             // 啟動時先放一個最小選單；tray::spawn 會立刻用資料庫內容重建
@@ -81,6 +82,37 @@ pub fn run() {
             tray::spawn(app.handle(), menu)?;
             tray::rebuild(app.handle()).map_err(std::io::Error::other)?;
             Ok(())
+        })
+        // 關閉視窗時的行為（P4.7）：預設縮到系統匣，行程與網關繼續跑
+        // （這是本地網關，按個 X 就斷掉所有 CLI 工具的流量是很糟的體驗）。
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // 用 clone 出來的 AppHandle 取狀態：State 的借用掛在 manager 上，
+                // 直接寫 `window.state::<…>()` 的話借用活不夠久（E0597）。
+                let handle = window.app_handle().clone();
+                let action = {
+                    let db = handle.state::<db::DbState>();
+                    // 把 guard 綁成區域變數：直接寫在 match 的臨時值會在 db 之後才 drop
+                    let guard = db.conn.lock();
+                    match guard {
+                        Ok(conn) => window::close_action(&conn),
+                        Err(_) => window::CloseAction::Tray,
+                    }
+                };
+                match window::decide_close(action) {
+                    window::OnClose::Hide => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    window::OnClose::Allow => {
+                        // 光放行還不夠：**有托盤圖示時，關掉最後一個視窗不會結束行程**
+                        // （事件迴圈被托盤撐著）。實機驗證就是這樣卡住的 —— 設定成
+                        // 「直接結束」卻只變成「沒有視窗的托盤模式」。所以明講結束。
+                        api.prevent_close();
+                        handle.exit(0);
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::db_status,
@@ -226,7 +258,26 @@ pub fn run() {
             commands::appearance_state,
             commands::appearance_set_theme,
             commands::appearance_set_autostart,
+            // 視窗與托盤行為（P4.7）
+            commands::window_behavior,
+            commands::window_set_close_action,
+            commands::window_enter_lightweight,
+            commands::window_show_main,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // 托盤常駐（P4.7）：**沒有視窗也要活著**。
+            //
+            // Tauri 的預設是「所有視窗都沒了就結束行程」，所以進入輕量模式
+            // （銷毀視窗）會把整個 App 連網關一起關掉 —— 實機驗證就是這樣踩到的。
+            // 這裡把「因為沒有視窗而想結束」擋下來；真正的退出（托盤的「退出」、
+            // 或關閉行為設成 exit）走的是 `app.exit(0)`，那個 `code` 是 `Some(0)`，
+            // 所以放行 —— 用 `code` 區分「視窗關光」與「使用者真的要退出」。
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }

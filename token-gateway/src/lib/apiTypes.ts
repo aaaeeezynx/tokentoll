@@ -537,6 +537,16 @@ export interface AppearanceState {
   exe: string;
 }
 
+// ── P4.7：視窗與托盤行為（關閉縮到系統匣、輕量模式） ──
+
+export interface WindowBehavior {
+  /** tray（預設，縮到系統匣）| exit（直接結束） */
+  close_action: string;
+  /** 現在是不是處於輕量模式（沒有視窗） */
+  lightweight: boolean;
+  autostart: boolean;
+}
+
 export interface AppSettings {
   gateway_port: number;
   auto_start_proxy: boolean;

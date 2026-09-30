@@ -16,6 +16,7 @@ import {
 import { Icon } from "./icons";
 import { RangePicker, type CustomRange } from "./RangePicker";
 import { Toggle } from "./Toggle";
+import { PopSelect } from "./PopSelect";
 
 function copyText(t: string) {
   void navigator.clipboard?.writeText(t).catch(() => {});
@@ -83,6 +84,27 @@ export default function SettingsPage() {
     onError: (e) => setAutoMsg(String(e)),
   });
   const setAutoStartEnabled = (v: boolean) => autoMut.mutate(v);
+
+  // 視窗行為（P4.7）
+  const [winMsg, setWinMsg] = useState("");
+  const winBehavior = useQuery({
+    queryKey: ["window_behavior"],
+    queryFn: api.windowBehavior,
+  });
+  const setWinMut = useMutation({
+    mutationFn: (v: string) => api.windowSetCloseAction(v),
+    onSuccess: (s) =>
+      setWinMsg(
+        s.close_action === "exit"
+          ? "關閉視窗時會直接結束（網關也會停）"
+          : "關閉視窗時縮到系統匣，網關繼續運作",
+      ),
+    onError: (e) => setWinMsg(String(e)),
+  });
+  const winLight = useMutation({
+    mutationFn: api.windowEnterLightweight,
+    onError: (e) => setWinMsg(String(e)),
+  });
 
   // DB 是唯一真相：載入後用資料庫的值覆蓋快取
   useEffect(() => {
@@ -345,6 +367,46 @@ export default function SettingsPage() {
           </p>
         )}
         {autoMsg && <p className="pt-1 text-[11px] text-emerald-400/80">{autoMsg}</p>}
+
+        {/* 關閉視窗時的行為（P4.7）：cc-switch 預設縮到系統匣 */}
+        <div className="mac-frow">
+          <span className="mac-cap">關閉視窗時</span>
+          <div className="flex items-center gap-2">
+            <div className="w-56">
+              <PopSelect
+                value={winBehavior.data?.close_action ?? "tray"}
+                onChange={(v) => setWinMut.mutate(v)}
+                options={[
+                  { value: "tray", label: "縮到系統匣（建議）" },
+                  { value: "exit", label: "直接結束" },
+                ]}
+              />
+            </div>
+            <span className="text-[11px] text-fg/35">
+              這是本地網關 —— 縮到系統匣才不會斷掉工具的流量
+            </span>
+          </div>
+        </div>
+
+        {/* 輕量模式（P4.7）：銷毀視窗、只留托盤 */}
+        <div className="mac-frow">
+          <span className="mac-cap">輕量模式</span>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-ghost px-3 py-1.5 text-xs"
+              onClick={() => {
+                setWinMsg("已進入輕量模式（可從托盤「開啟主視窗」或點 Deep Link 回來）");
+                winLight.mutate();
+              }}
+            >
+              進入輕量模式
+            </button>
+            <span className="text-[11px] text-fg/35">
+              釋放視窗記憶體，托盤與網關照常運作
+            </span>
+          </div>
+        </div>
+        {winMsg && <p className="pt-1 text-[11px] text-emerald-400/80">{winMsg}</p>}
       </div>
 
       {/* ── 用量匯出 ── */}

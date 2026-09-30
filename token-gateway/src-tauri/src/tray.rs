@@ -122,12 +122,23 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         menu_model(&conn)?
     };
-    let show = MenuItem::with_id(app, "show", "顯示主視窗", true, None::<&str>)
+    let show = MenuItem::with_id(app, "show", "開啟主視窗", true, None::<&str>)
         .map_err(|e| e.to_string())?;
+    // 輕量模式（cc-switch 的 Lightweight Mode）：銷毀視窗、只留托盤。
+    // 已經在輕量模式時把它變灰，避免使用者以為點了沒反應。
+    let light = MenuItem::with_id(
+        app,
+        "lightweight",
+        "輕量模式（關閉視窗）",
+        !crate::window::is_lightweight(app),
+        None::<&str>,
+    )
+    .map_err(|e| e.to_string())?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let sep1 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+    let sep3 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
 
     // 每個工具一個子選單，裡面是它的可用來源。
     let mut subs: Vec<Submenu<tauri::Wry>> = Vec::new();
@@ -166,6 +177,8 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
         all.push(s);
     }
     all.push(&sep2);
+    all.push(&light);
+    all.push(&sep3);
     all.push(&quit);
     let menu = Menu::with_items(app, &all).map_err(|e| e.to_string())?;
     match app.tray_by_id(TRAY_ID) {
@@ -200,9 +213,15 @@ pub fn spawn(app: &AppHandle, menu: Menu<tauri::Wry>) -> tauri::Result<()> {
             }
             match id {
                 "show" => {
-                    if let Some(w) = app.get_webview_window("main") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
+                    if let Err(e) = crate::window::show_main(app) {
+                        eprintln!("tray: 開啟主視窗失敗: {e}");
+                    }
+                }
+                "lightweight" => {
+                    if let Err(e) = crate::window::enter_lightweight(app) {
+                        eprintln!("tray: 進入輕量模式失敗: {e}");
+                    } else if let Err(e) = rebuild(app) {
+                        eprintln!("tray: 重建選單失敗: {e}");
                     }
                 }
                 "quit" => app.exit(0),

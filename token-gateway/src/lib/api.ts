@@ -43,6 +43,7 @@ import type {
   QueueModel,
   QueueRow,
   QuotaView,
+  WindowBehavior,
   AppearanceState,
   DeeplinkApplied,
   DeeplinkPreview,
@@ -262,6 +263,15 @@ export const api = {
     invoke("appearance_set_theme", { value }),
   appearanceSetAutostart: (enabled: boolean): Promise<AppearanceState> =>
     invoke("appearance_set_autostart", { enabled }),
+
+  // ── P4.7 視窗與托盤行為 ──
+  windowBehavior: (): Promise<WindowBehavior> => invoke("window_behavior"),
+  windowSetCloseAction: (action: string): Promise<WindowBehavior> =>
+    invoke("window_set_close_action", { action }),
+  /** 進入輕量模式（銷毀視窗、網關繼續跑）。 */
+  windowEnterLightweight: (): Promise<void> =>
+    invoke("window_enter_lightweight"),
+  windowShowMain: (): Promise<void> => invoke("window_show_main"),
 
   // ── P4.1 Deep Link ──
   /** 啟動時帶進來的連結（取走後就沒有了）。 */

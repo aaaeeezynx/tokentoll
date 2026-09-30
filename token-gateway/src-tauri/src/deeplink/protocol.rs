@@ -33,6 +33,10 @@ pub fn another_instance_running() -> bool {
 /// 每秒看一次收件匣，有新連結就發 `deeplink` 事件給前端。
 ///
 /// 與托盤的重建執行緒同一套作法（輪詢、失敗不致命）。
+///
+/// **輕量模式**（視窗已銷毀）時：先把連結存成 pending 再重建視窗，
+/// 前端掛載時會用 `deeplink_take_pending` 取走 —— 這樣「從托盤進輕量模式後
+/// 又點了一個連結」也醒得過來（cc-switch 的 Lightweight Mode 也支援 Deep Link 喚醒）。
 pub fn spawn_watcher(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::{Emitter, Manager};
     let handle = app.clone();
@@ -41,9 +45,21 @@ pub fn spawn_watcher(app: &tauri::AppHandle) -> tauri::Result<()> {
         let Ok(dir) = handle.path().app_data_dir() else {
             continue;
         };
-        if let Some(url) = take_inbox(&dir) {
-            let _ = handle.emit("deeplink", url);
+        let Some(url) = take_inbox(&dir) else {
+            continue;
+        };
+        if crate::window::is_lightweight(&handle) {
+            if let Some(state) = handle.try_state::<super::DeeplinkState>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    *guard = Some(url);
+                }
+            }
+            let _ = crate::window::show_main(&handle);
+            continue;
         }
+        // 視窗被隱藏（縮到系統匣）時，點連結就把它叫回來 —— 不然使用者看不到確認框。
+        let _ = crate::window::show_main(&handle);
+        let _ = handle.emit("deeplink", url);
     });
     Ok(())
 }

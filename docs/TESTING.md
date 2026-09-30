@@ -776,6 +776,60 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.29 關閉行為與輕量模式（P4.7，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §1.5 抄）
+
+- **Minimize to tray on close 預設開啟**：按視窗的關閉鈕只是縮到系統匣，App 繼續跑；
+  關掉這個選項才會**完全結束**。
+- **Lightweight Mode**：托盤右鍵進入後**視窗被銷毀**（不只是隱藏），
+  從托盤「Open main window」或 **Deep Link** 叫回來；**狀態不持久**。
+
+#### 為什麼這個 App 特別需要它
+
+這是**本地網關**：Claude Code／Codex／OpenCode 的流量都經過它。原本沒有攔
+`CloseRequested`，所以按個 X 就結束行程 —— 使用者的工具會突然連不上上游。
+預設改成縮到系統匣，與 cc-switch 一致，也符合這個 App 的用途。
+
+| 部分 | 內容 |
+|---|---|
+| `window.rs` | `CloseAction`（tray／exit，預設 tray）、`show_main`（視窗不存在就**重建**）、`enter_lightweight`（銷毀視窗）、`decide_close` |
+| 關閉攔截 | `on_window_event` 的 `CloseRequested`：tray → `prevent_close` ＋ `hide`；exit → `prevent_close` ＋ `app.exit(0)` |
+| 托盤 | 新增「**開啟主視窗**」（會重建）與「**輕量模式（關閉視窗）**」（已在輕量模式時變灰） |
+| 輕量模式的判斷 | **不另存旗標**：`get_webview_window("main")` 回 `None` 就是輕量模式 —— 少一個會與事實不同步的狀態 |
+| 設定頁 | 視窗行為區：「關閉視窗時」＝縮到系統匣（建議）／直接結束；另有「進入輕量模式」按鈕 |
+| Deep Link 喚醒 | 收件匣 watcher 發現視窗不存在 → 先把連結存成 pending 再重建視窗（前端掛載時取走）；視窗只是被隱藏時也會 `show_main` 叫回來 |
+
+#### 實機驗證抓到的**三個**問題（都已修）
+
+1. **「直接結束」其實沒結束。** 有托盤圖示時，放行 `CloseRequested` 只會關掉視窗，
+   行程被托盤撐著（變成「沒有視窗的托盤模式」）。→ 明講 `app.exit(0)`。
+2. **進入輕量模式把整個 App 殺掉。** Tauri 的預設是「所有視窗都沒了就結束行程」，
+   所以銷毀視窗＝連網關一起關。→ 攔 `RunEvent::ExitRequested`，`code.is_none()`
+   （＝因為視窗關光）時 `prevent_exit()`；真正退出走 `app.exit(0)`（`code = Some(0)`）放行。
+3. **JS 的 `window.close()` 不等於按標題列的 X。** 前者會讓 WebView2 連 webview 一起收掉
+   （CDP 端點整個消失），後者才是使用者真正的操作。→ 驗證改用
+   `Process.CloseMainWindow()`（送出真正的 `WM_CLOSE`）。
+
+#### 測試（2 個新測試）
+
+- `window`（2）：`CloseAction` 的解析（空值與亂填都回安全的那一邊＝tray）、
+  `decide_close` 的兩種結果。
+
+#### 實機驗證（安裝後的真實 App）
+
+| 驗證項 | 結果 |
+|---|---|
+| 預設值 | ✅ 設定頁顯示「關閉視窗時：縮到系統匣（建議）」 |
+| **托盤模式下關閉視窗** | ✅ 送原生 `WM_CLOSE` 後：**行程 1 個、閘道埠仍可連線、CDP 仍回應**（webview 活著，可再叫回來） |
+| 隱藏時點 Deep Link | ✅ 視窗被叫回來並跳匯入確認框（「匯入技能「brand-guidelines」」） |
+| **輕量模式** | ✅ 按「進入輕量模式」→ 視窗銷毀（CDP 端點消失）但**行程 1 個、閘道仍可連**；托盤與網關照常 |
+| **從輕量模式被 Deep Link 喚醒** | ✅ 點連結 → 視窗被重建（CDP 恢復）＋確認框出現（「匯入技能「canvas-design」」）—— pending 轉交路徑有效 |
+| 「直接結束」分支 | ✅ 設成 exit 後按原生 X：**行程 0 個、閘道關閉**（真的結束） |
+| 還原 | ✅ 已把 `close_action` 設回預設 `tray` |
+
+---
+
 ### 0.9.28 主題與開機自啟（P4.3／P4.4，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §1.5 抄）
@@ -2747,7 +2801,51 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.28 最新建置（2026-10-01 05:38，P4.3 主題 ＋ P4.4 開機自啟）—— **你目前安裝的就是這一個**
+### 9.29 最新建置（2026-10-01 06:17，P4.7：關閉行為與輕量模式）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P4.7（設計與三個實機抓到的問題見 §0.9.29）。**沒有動 schema（仍 v13）**。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 06:17:20 |
+| `target\release\token-gateway.exe` | 10,122,240 bytes、sha256 `8497201D7AB94E9D40CF87114F4D1B7392B97CC3AA4EEE6D082D5FE7E0039BCB` |
+| NSIS 安裝檔 | 4,218,897 bytes、sha256 `617C272D52BDC2F698521AE853CDD7DE3594120639C4B64B4485C83BF1266326` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,122,240 bytes、sha256 `46AFE01BFA9310B3F93EA8A421A10FF993A7827E23B9A5BECFC2EF64AA6F1A05` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **427 passed / 0 failed / 11 ignored** ✅（+2：window） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍 **13** ✅ |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/window.rs` | **新增**：關閉行為、顯示／重建視窗、輕量模式、`decide_close` |
+| `src-tauri/src/lib.rs` | `on_window_event` 攔關閉；`RunEvent::ExitRequested` 的托盤常駐；註冊 4 個新命令 |
+| `src-tauri/src/tray.rs` | 托盤新增「開啟主視窗」「輕量模式（關閉視窗）」 |
+| `src-tauri/src/deeplink/protocol.rs` | 輕量模式時 pending ＋ 重建視窗；隱藏時也叫回視窗 |
+| `src-tauri/src/commands/window_cmd.rs` | **新增**：`window_behavior`／`window_set_close_action`／`window_enter_lightweight`／`window_show_main` |
+| `src/components/Settings.tsx`、`src/lib/{api,apiTypes}.ts` | 視窗行為區與 API |
+
+#### 實機驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| 托盤模式關閉 | ✅ `WM_CLOSE` 後行程 1、閘道仍連、CDP 仍回應 |
+| 輕量模式 | ✅ 視窗銷毀但行程與閘道都活著 |
+| Deep Link 喚醒 | ✅ 從輕量模式（與隱藏狀態）點連結都會重建／叫回視窗並跳確認框 |
+| 直接結束 | ✅ 設 exit 後行程 0、閘道關閉 |
+| 還原 | ✅ `close_action` 已回到預設 `tray` |
+
+> 附註：走訪提示詞頁時 App 依設計自動匯入了 Codex 的現有提示（`prompt_presets` 1 列、
+> 「現有內容」、1570 字元、啟用中）。**你的 `~/.codex/AGENTS.md` 沒有被改動**，
+> 那只是這個 App 第一次打開提示詞頁的正常行為（cc-switch 也一樣）。
+
+### 9.28 前一次建置（2026-10-01 05:38，P4.3 主題 ＋ P4.4 開機自啟，已被 9.29 取代）
 
 CC Switch 對齊計畫 P4.3／P4.4（設計見 §0.9.28）。**沒有動 schema（仍 v13）**。
 這輪改了 **66 個前端檔案**（機械式把 777 處硬編白色換成主題 token）。
