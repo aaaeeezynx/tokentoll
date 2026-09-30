@@ -23,6 +23,7 @@ export type IconName =
   | "play-fill"
   | "stop-fill"
   | "download"
+  | "upload"
   | "check"
   | "x"
   | "search"
@@ -191,6 +192,14 @@ function Paths({ name }: { name: IconName }) {
           <rect x="4" y="4" width="16" height="16" rx="3" />
           <path d="M12 8v7" />
           <path d="M9.2 12.5L12 15.3l2.8-2.8" />
+        </>
+      );
+    case "upload":
+      return (
+        <>
+          <rect x="4" y="4" width="16" height="16" rx="3" />
+          <path d="M12 16V9" />
+          <path d="M9.2 11.5L12 8.7l2.8 2.8" />
         </>
       );
     case "check":

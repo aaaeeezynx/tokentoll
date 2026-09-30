@@ -64,6 +64,9 @@ fn stripped_memory_persists_across_connections() {
     let path = dir.path().join("t.db");
     {
         let c = open_and_ensure(&path).unwrap();
+        // 記憶一定屬於一個**存在的**來源（開庫時會清掉指向已刪除來源的孤兒列）
+        seed_provider(&c, 7);
+        seed_provider(&c, 8);
         remember_stripped(&c, 7, "prompt_cache_key").unwrap();
         remember_stripped(&c, 7, "verbosity").unwrap();
     }
@@ -75,6 +78,17 @@ fn stripped_memory_persists_across_connections() {
     );
     // 別的渠道不受影響
     assert!(load_stripped(&c2, 8).is_empty());
+}
+
+/// 造一個指定 id 的來源（學習到的記憶都掛在真實來源上）。
+pub(crate) fn seed_provider(c: &rusqlite::Connection, id: i64) {
+    c.execute(
+        "INSERT OR IGNORE INTO providers (id, name, app_type, api_format, base_url, api_key,
+         auth_scheme, models_json, priority, enabled, created_at, updated_at)
+         VALUES (?1, ?2, 'codex', 'openai-chat', 'http://127.0.0.1:1', 'k', 'bearer', '[]', 0, 1, 0, 0)",
+        rusqlite::params![id, format!("p{id}")],
+    )
+    .unwrap();
 }
 
 #[test]

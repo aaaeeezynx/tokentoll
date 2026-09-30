@@ -258,7 +258,18 @@ mod tests {
     fn learned_protocol_survives_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("r.db");
-        crate::db::open_and_ensure(&p).unwrap();
+        let conn0 = crate::db::open_and_ensure(&p).unwrap();
+        // 學習結果一定屬於一個**存在的**來源：開庫時會清掉指向已刪除來源的孤兒列
+        // （`crate::db::tests` 的 `open_purges_orphans_but_keeps_local_keys`）。
+        conn0
+            .execute(
+                "INSERT OR IGNORE INTO providers (id, name, app_type, api_format, base_url,
+                 api_key, auth_scheme, models_json, priority, enabled, created_at, updated_at)
+                 VALUES (7,'p7','codex','openai-chat','http://127.0.0.1:1','k','bearer','[]',0,1,0,0)",
+                [],
+            )
+            .unwrap();
+        drop(conn0);
         let ps = p.as_path();
         learn_format(ps, 7, "grok-x", "openai-chat", "openai-responses");
         // 直接查表，確認是真的寫進 DB 而不是行程記憶體

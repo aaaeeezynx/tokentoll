@@ -295,3 +295,72 @@ use rusqlite::Connection;
             .unwrap();
         assert_eq!(idx, 2, "proxy_trace 索引未建立");
     }
+
+    /// 開庫時要清掉「指向已不存在來源」的孤兒列，但**不可以**動 `local_keys`。
+    ///
+    /// 由來（2026-10-01）：實機驗證來源匯出時發現使用者的 `provider_models` 有
+    /// 12 列指向 providers 裡已經不存在的 id —— 那是早期刪除來源時還沒有級聯清理
+    /// 留下的殘骸。它們讀不到（id 是 AUTOINCREMENT，不會重用），但會讓計數對不上。
+    #[test]
+    fn open_purges_orphans_but_keeps_local_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("orphan.db");
+        {
+            let c = open_and_ensure(&path).unwrap();
+            c.execute("DELETE FROM provider_models", []).unwrap();
+            c.execute("DELETE FROM providers", []).unwrap();
+            // 孤兒：來源已經不在了
+            c.execute(
+                "INSERT INTO provider_models (provider_id, display_name, actual_model, ord, enabled)
+                 VALUES (999,'ghost','ghost',0,1)",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO provider_pricing (provider_id, model_norm) VALUES (999,'ghost')",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO pricing_periods (provider_id, model_norm) VALUES (999,'ghost')",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO provider_model_protocol
+                 (provider_id, model, declared_format, actual_format, learned_at)
+                 VALUES (999,'ghost','openai-chat','openai-responses',1)",
+                [],
+            )
+            .unwrap();
+            // 金鑰刻意綁在一個不存在的來源上：這是保留的設計，不可以被清掉
+            c.execute(
+                "INSERT INTO local_keys (key_prefix, key_hash, key_plain, name, provider_id, created_at)
+                 VALUES ('sk-ghost','hash-ghost','','綁到幽靈來源',999,0)",
+                [],
+            )
+            .unwrap();
+        }
+        let c = open_and_ensure(&path).unwrap();
+        for t in [
+            "provider_models",
+            "provider_pricing",
+            "pricing_periods",
+            "provider_model_protocol",
+        ] {
+            let n: i64 = c
+                .query_row(&format!("SELECT COUNT(*) FROM {t} WHERE provider_id=999"), [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(n, 0, "{t} 的孤兒列應被清掉");
+        }
+        let keys: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM local_keys WHERE provider_id=999",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(keys, 1, "local_keys 不可被當成孤兒清掉（那是刻意的設計）");
+    }

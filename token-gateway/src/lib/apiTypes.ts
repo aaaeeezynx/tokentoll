@@ -42,6 +42,35 @@ export interface ProviderInput {
   enabled: boolean;
 }
 
+/**
+ * 來源預設（對齊 CC Switch 的 provider presets）。
+ *
+ * 只帶**連線資訊**，刻意不含模型清單：模型名變動快，一律用表單上的
+ * 「取得模型清單」對上游現場抓（`catalog_fetch`）。
+ */
+export interface Preset {
+  id: string;
+  name: string;
+  base_url: string;
+  api_format: string;
+  auth_scheme: string;
+  app_type: string;
+  /** 空字串＝沒有特別提醒 */
+  note: string;
+}
+
+/** 來源匯入的結果回報（skip 語意：已存在的 `(name, base_url)` 不覆蓋）。 */
+export interface ImportReport {
+  added: number;
+  skipped: number;
+  models: number;
+  pricing: number;
+  periods: number;
+  names: string[];
+  /** 匯入檔是否帶金鑰（要提醒使用者） */
+  includes_keys: boolean;
+}
+
 export interface ToolStatus {
   app: string;
   display: string;

@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-query";
 import {
   api,
+  type Preset,
   type Provider,
   type ProviderInput,
 } from "../../../lib/api";
@@ -30,6 +31,8 @@ import {
 
 export function ProviderForm(props: {
   initial: Provider | null;
+  /** 新建時可從預設開始（只填連線資訊，金鑰與模型仍由使用者處理）。 */
+  preset?: Preset | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -47,7 +50,16 @@ export function ProviderForm(props: {
           priority: props.initial.priority,
           enabled: props.initial.enabled,
         }
-      : EMPTY_INPUT,
+      : props.preset
+        ? {
+            ...EMPTY_INPUT,
+            name: props.preset.name,
+            app_type: props.preset.app_type || "universal",
+            api_format: props.preset.api_format,
+            base_url: props.preset.base_url,
+            auth_scheme: props.preset.auth_scheme || "bearer",
+          }
+        : EMPTY_INPUT,
   );
   const [err, setErr] = useState("");
   const [showKey, setShowKey] = useState(false);

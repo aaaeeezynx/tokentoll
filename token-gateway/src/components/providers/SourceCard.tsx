@@ -25,6 +25,7 @@ export function SourceCard(props: {
   suppressClick: RefObject<boolean>;
   onSelect: (id: number) => void;
   onEdit: (p: Provider) => void;
+  onDuplicate: (p: Provider) => void;
   onDelete: (p: Provider) => void;
 }) {
   const { p, i, selId, dragId, modelCount, gripDown, suppressClick } = props;
@@ -79,6 +80,16 @@ export function SourceCard(props: {
           }}
         >
           <Icon name="pencil" size={13} />
+        </button>
+        <button
+          className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+          title="複製來源（連模型、定價、訂閱時段一起，金鑰綁定不會複製）"
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onDuplicate(p);
+          }}
+        >
+          <Icon name="copy" size={13} />
         </button>
         <button
           className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-red-500/10 hover:text-red-400"

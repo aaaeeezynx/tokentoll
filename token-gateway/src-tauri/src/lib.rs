@@ -7,7 +7,9 @@ mod history;
 mod keys;
 mod models;
 mod price_extract;
+mod presets;
 mod providers;
+mod providers_io;
 mod quota;
 #[doc(hidden)]
 pub mod proxy;
@@ -117,6 +119,13 @@ pub fn run() {
             providers::provider_update,
             providers::provider_delete,
             providers::provider_reorder,
+            // 來源預設集與複製／匯入匯出（對齊 CC Switch）
+            presets::presets_list,
+            providers_io::provider_duplicate,
+            providers_io::providers_export,
+            providers_io::providers_export_file,
+            providers_io::providers_import,
+            providers_io::providers_import_file,
             commands::price_extract,
             commands::quota_query_all,
             // Phase 1：診斷中心（可觀測性，見 docs/REFACTORING-PLAN.md §5.3）

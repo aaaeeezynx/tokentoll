@@ -9,6 +9,7 @@ import type {
   HistoryScanTool,
   HistorySummary,
   HourlyBucket,
+  ImportReport,
   KeyCreated,
   KeyInput,
   LocalKey,
@@ -20,6 +21,7 @@ import type {
   PricingInput,
   PricingPeriod,
   PricingPeriodInput,
+  Preset,
   Provider,
   ProviderInput,
   ProviderPricing,
@@ -86,6 +88,21 @@ export const api = {
     invoke("provider_delete", { id }),
   providerReorder: (ids: number[]): Promise<void> =>
     invoke("provider_reorder", { ids }),
+  /** 複製來源（連模型、每模型價格、訂閱時段一起），回傳新來源的 id。 */
+  providerDuplicate: (id: number): Promise<number> =>
+    invoke("provider_duplicate", { id }),
+  presetsList: (): Promise<Preset[]> => invoke("presets_list"),
+  /** 匯出全部來源成 JSON 字串；預設不含金鑰。 */
+  providersExport: (includeKeys: boolean): Promise<string> =>
+    invoke("providers_export", { includeKeys }),
+  /** 匯出到檔案（後端寫檔），回傳實際寫入的完整路徑。 */
+  providersExportFile: (includeKeys: boolean): Promise<string> =>
+    invoke("providers_export_file", { includeKeys }),
+  providersImport: (json: string): Promise<ImportReport> =>
+    invoke("providers_import", { json }),
+  /** 從檔案路徑匯入（搭配匯出回傳的路徑）。 */
+  providersImportFile: (path: string): Promise<ImportReport> =>
+    invoke("providers_import_file", { path }),
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),
   toolVersions: (): Promise<ToolVersion[]> => invoke("tool_versions"),

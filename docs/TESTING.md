@@ -776,6 +776,101 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.20 來源預設集、複製、匯入／匯出（P1：來源管理對齊 CC Switch）（2026-09-30）
+
+使用者裁示「只要工具功能/體驗完全對齊 CC Switch 即可」，缺口清單在
+`docs/CC-SWITCH-PARITY.md`（36 項逐項以程式碼盤點）。這是 **P1 的第一批**：
+把「新增／複製／搬移來源」這條路補到跟 CC Switch 一樣順。
+
+#### ① 來源預設集（38 個，全部實測過）
+
+`src-tauri/src/presets.rs`。**每一筆的 `base_url` 都在 2026-09-30 實測**：對
+`{base_url}/models` 送一次不帶金鑰的 GET，任何 HTTP 狀態（200／401／403／404）
+代表主機與路徑存在。當時**淘汰了 6 個**：`api.sambanova.ai`、`llm.chutes.ai`、
+`api.kluster.ai`、`api.lambdalabs.com`（連不上）、`ark.cn-beijing.volces.com`
+（逾時）、`api.lingyiwanwu.com`（410 已下線）。
+
+覆蓋：官方（OpenAI／Anthropic／Gemini／xAI）、聚合與推理服務（DeepSeek／OpenRouter／
+SiliconFlow／Moonshot／智譜／Z.ai／MiniMax×2／Groq／Mistral／Together／Fireworks／
+Cerebras／DeepInfra／Hyperbolic／Nebius／Novita／NVIDIA NIM／Perplexity）、
+中國大陸雲（千帆／百鍊／混元／階躍／百川／ModelScope／PPIO）、中轉（Requesty／
+AiHubMix／302.AI／GPTSAPI／OpenCode Go）、本機（Ollama／LM Studio）。
+
+**兩個刻意的取捨**：
+
+1. **預設不含模型清單**。CC Switch 的預設會附幾個模型名；我們不填 —— 模型名變動快，
+   猜錯比不填更糟。表單上的「取得模型清單」會直接對上游抓 `/models`（`catalog_fetch`）。
+   所以預設只負責**連線資訊**（名稱／地址／協議／鑑權）。
+2. **兩個本機服務標明未實測**（此機沒安裝 Ollama／LM Studio），備註欄如實寫出來。
+
+數量上我們是 38 個、CC Switch 是 90+：**差距如實留在 §1 的 A2**，不假裝對齊。
+要增加就得先實測（`tests` 會擋住格式錯誤，但擋不住「位址寫錯」，那個只能靠實測）。
+
+#### ② 複製來源
+
+`src-tauri/src/providers_io.rs::duplicate_provider`。複製「來源的全部內容」：
+連線資訊、已登記模型（含 `context_window` 與 `reasoning`）、每模型價格
+（`provider_pricing`）、訂閱時段（`pricing_periods`）。
+
+**刻意不複製**三類，理由寫在模組開頭：`local_keys`（金鑰綁哪個來源是使用者的明確
+選擇）、`provider_stripped_fields`／`provider_model_protocol`（那是**學到的行為**，
+而且協議記憶的鍵含 `declared_format`，複製品改協議後本來就不適用）、
+`model_catalogs`（只是上游 `/models` 快取）。
+
+複製品插在**原本那筆的後面**（後面的 priority 全部 +1），不是丟到列表尾端 ——
+複製的用途就是「同一組設定改一個欄位試試看」，兩筆相鄰才好比較。
+
+#### ③ 匯入／匯出
+
+同一個模組。格式 `{"kind":"token-gateway/providers","version":1,…}`，一個來源帶
+models／pricing／periods 三張子表。
+
+| 決定 | 內容 | 理由 |
+|---|---|---|
+| 預設**不含金鑰** | `includes_keys:false` 時 `api_key` 一律空字串 | 匯出檔常常會離開這台機器 |
+| 含金鑰要明示 | UI 有開關（開了按鈕就寫「匯出到檔案（含金鑰）」），檔頭 `includes_keys:true`，匯入時再提醒一次 | 不讓「檔案裡有明碼金鑰」變成靜默的事 |
+| **匯出由 Rust 寫檔，不靠瀏覽器下載** | `providers_export_file` 寫進系統下載資料夾（`dirs::download_dir()`，沒有就退到 App 資料目錄），回傳完整路徑並顯示在畫面上；同一秒連匯兩次自動加 `-2` | **實機驗證抓到的 bug**：靠 Blob 下載時第一次可以，**第二次** WebView2 會跳原生的「想要下載多個檔案」權限對話框，那個對話框不在 DOM 裡（CDP 點不到）而且蓋住整個 UI —— 使用者會以為 App 壞了。改成後端寫檔：路徑明確、可連續匯出 |
+| 另備「複製 JSON」 | 不想產生檔案的人可以直接把 JSON 複製到剪貼簿 | 下載不再是唯一出口 |
+| 匯入有三條路 | 檔案路徑（搭配匯出的回傳路徑）、選檔（`<input type="file">` ＋ `FileReader`）、直接貼上 JSON | 這台 repo 只有 `tauri-plugin-opener`，建置走 `--offline`，不新增外掛；三條路都以純前端或既有命令完成 |
+| 匯入是 **skip** 語意 | 同 `(name, base_url)` 已存在就跳過，不覆蓋 | 匯入不該是最容易弄壞現有設定的操作 |
+| 名稱自動讓開 | 同名的新來源變成 `名字 2` | 兩張同名卡片分不出誰是誰 |
+| 匯入大小上限 | 8 MiB（`IMPORT_MAX_BYTES`） | 誤指到巨大檔案時給明確錯誤，而不是把記憶體吃光 |
+| 丟錯檔案要說人話 | `kind` 不符／`version` 太新／讀不到檔案都給明確錯誤 | 使用者貼錯檔要看得懂 |
+
+#### 測試（13 個新測試）
+
+- `presets`：id 唯一、每個預設格式正確（https／localhost、協議與鑑權在列舉內、結尾無斜線）、
+  命令輸出可序列化且包含使用者實際在用的 oc-go。
+- `providers_io`：複製帶走模型／價格／時段並插在原本後面（第二次複製自動加序號）、
+  複製**不**帶走金鑰與學到的狀態、匯出預設不含金鑰而要求時才含、
+  匯入跳過已存在的 `(name, base_url)`、同名不同網址會讓開、
+  匯入到空庫完整還原、roundtrip（匯出→清空→匯入）內容一致、
+  丟錯檔案／版本太新要報錯、最小 JSON（只有 name＋base_url）也能匯入、
+  **匯出檔真的寫到磁碟且同一秒連匯不覆蓋（`-2`）並能被讀回**、
+  **匯出目錄不存在時自己建出來**。
+
+#### ④ 順手修掉：開庫時清掉孤兒列（實機驗證時發現）
+
+驗證匯出檔時發現**匯出只有 26 個模型、`provider_models` 卻有 38 列**。查下去是
+**12 列孤兒**：`provider_id` 指向 `providers` 裡已經不存在的 id（1／2／3／4／7／10／12）——
+那是早期刪除來源時還沒有級聯清理留下的殘骸。它們永遠讀不到
+（`providers.id` 是 AUTOINCREMENT，id 不會被重用），但會讓「這個庫裡到底有幾個模型」
+這類計數對不上，匯出的檔案看起來也像漏了東西。
+
+`db/open.rs` 新增 `purge_orphans`，在 `open_and_ensure` 最後清掉六張子表的孤兒列
+（`provider_models`／`provider_pricing`／`pricing_periods`／`provider_stripped_fields`／
+`provider_model_protocol`／`model_catalogs`）。
+
+**刻意不動 `local_keys`**：金鑰綁到已刪除的來源是保留的設計（請求會回明確的
+500「綁定的上游渠道不存在」，比靜默失效好查）。
+
+這件事也**逼出兩個測試的問題**：`learned_protocol_survives_reopen` 與
+`stripped_memory_persists_across_connections` 原本用「不存在的 provider_id」當捷徑，
+加了清理之後就被正確地刪掉了。兩個測試改成先種一筆真實來源 —— 這才是實況：
+學到的記憶一定掛在一個存在的來源上。
+
+---
+
 ### 0.9.19 斷路器（cc-switch 的另一半）＋健康狀態與協議記憶上到診斷頁（2026-09-30）
 
 §0.9.16 抄了 cc-switch 的 **failover queue**（來源／協議候選佇列），但它的佇列旁邊
@@ -2131,7 +2226,67 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.19 最新建置（2026-09-30 22:25，來源斷路器 ＋ 診斷頁看得到健康與協議）—— **你目前安裝的就是這一個**
+### 9.20 最新建置（2026-10-01 00:54，P1：來源預設集／複製／匯入匯出 ＋ 孤兒列清理）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫（`docs/CC-SWITCH-PARITY.md`）的 P1 第一批。設計與取捨見 §0.9.20。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 00:54:35 |
+| `target\release\token-gateway.exe` | 9,217,536 bytes、sha256 `70FA95126FCE948BAF5207B6569B0522FADC473EC36AEF632B3A897E984F8337` |
+| NSIS 安裝檔 | 3,912,781 bytes、sha256 `DDDA24D5EB47C776E2FD5B7DFBF99FBF4530D06EC3D7944AC4A5E1A7602A3D6C` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,217,536 bytes、sha256 `4C619943D9CA866DB413D43807FF62D72551F1514E1F85ED4C4B8258F777F01E` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **274 passed / 0 failed / 8 ignored** ✅（+14：3 個 `presets`、10 個 `providers_io`、1 個孤兒清理） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | **仍是 9**（沒有動 schema；孤兒清理是資料維護，不是遷移）✅ |
+
+**這一批改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/presets.rs` | **新增**：38 個實測過的來源預設＋命令 `presets_list` |
+| `src-tauri/src/providers_io.rs`（＋`providers_io/tests.rs`） | **新增**：`provider_duplicate`、`providers_export`／`providers_export_file`、`providers_import`／`providers_import_file` |
+| `src-tauri/src/db/open.rs` | **新增** `purge_orphans`（開庫時清掉指向已刪除來源的六張子表孤兒列；`local_keys` 刻意不動） |
+| `src-tauri/src/proxy/failover.rs`、`trace/tests.rs` | 兩個測試改成先種真實來源（原本用不存在的 provider_id 當捷徑，加了清理就被正確刪掉） |
+| `src/components/providers/PresetPicker.tsx` | **新增**：新增來源時的預設清單（可搜尋、可自訂） |
+| `src/components/providers/ProvidersIO.tsx` | **新增**：匯入／匯出面板（含「包含金鑰」開關、路徑顯示、三種匯入方式） |
+| `src/components/providers/SourceCard.tsx` | 新增「複製」按鈕 |
+| `src/components/providers/providerform/{ProviderSheet,ProviderForm}.tsx` | 新建流程先給預設、選了之後把連線資訊填進表單並顯示「重選」 |
+| `src/components/{icons.tsx,Providers.tsx}`、`src/lib/{api.ts,apiTypes.ts}` | 圖示、工具列按鈕、型別與 API 綁定 |
+
+#### 實機驗證（安裝後的真實 App，全程用 CDP 讀畫面）
+
+| 驗證項 | 結果 |
+|---|---|
+| 新增來源先給預設 | ✅ 清單實際渲染 **38 個**預設，含 `OpenAI 官方 openai-chat https://api.openai.com/v1` 等 |
+| 預設搜尋 | ✅ 輸入 `opencode` 後只剩 `OpenCode Go（Zen）` |
+| 選預設會填表單 | ✅ 名稱＝`OpenCode Go（Zen）`、上游地址＝`https://opencode.ai/zen/go/v1`，並顯示「預設…已填入連線資訊，可再改」＋「重選」 |
+| 取消不留痕 | ✅（驗證過程按取消，未寫入任何來源） |
+| **複製來源** | ✅ 按 `opencode-go` 的複製 → 清單變成 8 張卡，新的 `opencode-go 複製` **緊跟在原本那筆後面**；再刪掉它 → 回到 7 張 |
+| **匯出（連續兩次）** | ✅ 第一次與第二次都成功、**沒有出現權限對話框**，兩個檔各自寫出：`…-004153.json`、`…-004156.json`（各 8,367 bytes） |
+| 匯出檔內容 | ✅ `kind=token-gateway/providers`、`version=1`、`includes_keys=false`、7 個來源、**所有 `api_key` 皆為空**、26 個模型 |
+| 含金鑰開關 | ✅ 打開後按鈕變「匯出到檔案（含金鑰）」並出現明碼警告；關掉即復原 |
+| **從路徑匯入** | ✅ 貼回剛匯出的路徑 → `新增 0 個來源（模型 0、價格 0、時段 0）、跳過 7 個已存在` |
+| **貼上 JSON 匯入** | ✅ 貼一份已存在的來源 → `新增 0、跳過 1` |
+| 匯入零殘骸 | ✅ 前後資料庫快照**完全相同**（providers 7／provider_models 38／local_keys 2／request_logs 5505） |
+| **孤兒列清理** | ✅ 開庫後 `provider_models` 38 → **26**、孤兒 **12 → 0**（那 12 列指向已刪除的來源 id） |
+| 學到的記憶沒有被誤刪 | ✅ 清理後仍有 4 筆（`pid=22`），協議不符的追蹤仍是 4 筆、最大 trace id 仍是 112 |
+| `codex exec -m grok-4.7` | ✅ `P1-OK`（11,099 tokens） |
+| **要求二：本機工具篩選** | ✅ 8 個選項齊全（Claude Code／Codex／OpenCode／Hermes Agent／DeepSeek Harness／Cursor／Antigravity） |
+
+> **這一批最有價值的收穫是一個實機 bug**：原本匯出走瀏覽器 Blob 下載，**第一次可以、
+> 第二次會被 WebView2 的原生「想要下載多個檔案」對話框擋住**，那個對話框不在 DOM 裡
+> （CDP 點不到）而且蓋住整個 UI —— 使用者會以為 App 壞了。改成由 Rust 寫檔
+> （`providers_export_file` 寫進 Downloads 並回傳路徑）之後，連續匯出沒有問題，
+> 而且「從路徑匯入」可以沿用同一條路徑。這是單元測試抓不到、只有真的按下去才會遇到的。
+
+### 9.19 前一次建置（2026-09-30 22:25，來源斷路器 ＋ 診斷頁看得到健康與協議，已被 9.20 取代）
 
 9.18 只讓「學到的協議」在 API 裡看得到；這一版把 cc-switch 的另一半（**circuit
 breaker**）補上，並把「網關記住了什麼」真的畫在診斷頁上。設計與取捨見 §0.9.19。

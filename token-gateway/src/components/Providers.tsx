@@ -11,6 +11,7 @@ import { Segmented } from "./Segmented";
 import { useConfirm } from "./Confirm";
 import GlobalPricingManager from "./Pricing";
 import { ProviderSheet, ToolVersions } from "./providers/ProviderForm";
+import { ProvidersIO } from "./providers/ProvidersIO";
 import { SourceCard } from "./providers/SourceCard";
 import { SourceDetail } from "./providers/SourceDetail";
 import { ToolList } from "./providers/ToolList";
@@ -52,7 +53,17 @@ export default function ProvidersPage() {
     mutationFn: (id: number) => api.providerDelete(id),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["providers"] }),
   });
+  /** 複製來源：連模型／定價／時段一起，複製完直接選中新的那一筆。 */
+  const dup = useMutation({
+    mutationFn: (id: number) => api.providerDuplicate(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["providers"] });
+      void qc.invalidateQueries({ queryKey: ["model_counts"] });
+    },
+  });
   const { dialog: confirmDialog, ask } = useConfirm();
+
+  const [listMsg, setListMsg] = useState("");
 
   const [doctorLines, setDoctorLines] = useState<string[] | null>(null);
   const [doctorBusy, setDoctorBusy] = useState(false);
@@ -129,6 +140,15 @@ export default function ProvidersPage() {
         setSelected(q.id);
         setEditing(q);
       }}
+      onDuplicate={(q) =>
+        dup.mutate(q.id, {
+          onSuccess: (newId) => {
+            setSelected(newId);
+            setListMsg(`已複製「${q.name}」`);
+          },
+          onError: (e) => setListMsg(`複製失敗：${String(e)}`),
+        })
+      }
       onDelete={(q) =>
         ask(`刪除來源 ${q.name}？`, () => del.mutate(q.id), {
           message: "該來源的使用模型與定價將一併移除，已分發的 Key 會失效。",
@@ -160,13 +180,19 @@ export default function ProvidersPage() {
         {view === "sources" && (
           <div className="grid items-start gap-4 lg:grid-cols-2">
             <div className="min-w-0">
-            <button
-              className="btn-primary mb-3 flex items-center gap-1.5 px-4 py-1.5 text-sm"
-              onClick={() => setEditing("new")}
-            >
-              <Icon name="plus" size={13} />
-              添加來源
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="btn-primary flex items-center gap-1.5 px-4 py-1.5 text-sm"
+                onClick={() => setEditing("new")}
+              >
+                <Icon name="plus" size={13} />
+                添加來源
+              </button>
+              <ProvidersIO count={providers.data?.length ?? 0} />
+            </div>
+            {listMsg && (
+              <p className="mb-2 text-xs text-emerald-400/80">{listMsg}</p>
+            )}
             {providers.isPending && (
               <p className="text-sm text-white/30">載入中…</p>
             )}

@@ -227,6 +227,11 @@ pub(crate) fn open_and_ensure(path: &Path) -> Result<Connection, String> {
         [],
     )
     .map_err(|e| e.to_string())?;
+    // 清掉指向已不存在來源的孤兒列（見 purge_orphans）。
+    let purged = purge_orphans(&conn).map_err(|e| e.to_string())?;
+    if purged > 0 {
+        eprintln!("gateway: 清掉 {purged} 列孤兒資料（來源已不存在）");
+    }
     // 版本號（逐版補寫，多行共存表示歷經版本）
     let ver: i64 = conn
         .query_row(
@@ -243,4 +248,33 @@ pub(crate) fn open_and_ensure(path: &Path) -> Result<Connection, String> {
         .map_err(|e| e.to_string())?;
     }
     Ok(conn)
+}
+
+/// 清掉「指向已不存在來源」的孤兒列，回傳清掉的總列數。
+///
+/// 由來（2026-10-01）：實機驗證來源匯出時發現使用者的 `provider_models` 有 12 列
+/// 指向 `providers` 裡已經不存在的 id（1/2/3/4/7/10/12）—— 那是早期刪除來源時
+/// 還沒有級聯清理留下的殘骸。它們永遠讀不到（`providers.id` 是 AUTOINCREMENT，
+/// id 不會被重用），但會讓「這個庫裡到底有幾個模型」這類計數對不上，
+/// 匯出的檔案看起來也像漏了東西。
+///
+/// **刻意不動 `local_keys`**：金鑰綁到已刪除的來源是保留的設計 ——
+/// 請求會回明確的 500「綁定的上游渠道不存在」，比靜默失效好查。
+/// 所以這裡只清「來源的子表」。
+fn purge_orphans(conn: &Connection) -> rusqlite::Result<usize> {
+    let mut total = 0;
+    for table in [
+        "provider_models",
+        "provider_pricing",
+        "pricing_periods",
+        "provider_stripped_fields",
+        "provider_model_protocol",
+        "model_catalogs",
+    ] {
+        total += conn.execute(
+            &format!("DELETE FROM {table} WHERE provider_id NOT IN (SELECT id FROM providers)"),
+            [],
+        )?;
+    }
+    Ok(total)
 }
