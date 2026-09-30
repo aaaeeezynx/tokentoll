@@ -16,6 +16,7 @@ mod providers_io;
 mod quota;
 #[doc(hidden)]
 pub mod proxy;
+mod skills;
 mod tools;
 mod trace;
 mod translate;
@@ -159,6 +160,21 @@ pub fn run() {
             commands::prompt_delete,
             commands::prompt_sync,
             commands::prompt_live,
+            // 技能管理（P3.3，見 skills/）
+            commands::skills_repos,
+            commands::skills_repo_add,
+            commands::skills_repo_delete,
+            commands::skills_discover,
+            commands::skills_install,
+            commands::skills_list,
+            commands::skills_set_binding,
+            commands::skills_update,
+            commands::skills_update_all,
+            commands::skills_uninstall,
+            commands::skills_backups,
+            commands::skills_restore,
+            commands::skills_backup_delete,
+            commands::skills_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

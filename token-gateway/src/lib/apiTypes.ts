@@ -384,6 +384,88 @@ export interface PromptBackfill {
   message: string;
 }
 
+// ── P3.3：技能管理（對標 cc-switch 的 Skills Management） ──
+
+export interface SkillRepo {
+  id: number;
+  owner: string;
+  name: string;
+  branch: string;
+  subdir: string;
+  label: string;
+  /** 內建（不可刪除） */
+  builtin: boolean;
+}
+
+export interface RemoteSkill {
+  name: string;
+  path: string;
+  repo_id: number;
+  repo_label: string;
+  installed: boolean;
+  update_available: boolean;
+}
+
+export interface SkillBinding {
+  app: string;
+  enabled: boolean;
+}
+
+export interface InstalledSkill {
+  id: number;
+  name: string;
+  description: string;
+  repo_id: number | null;
+  repo_label: string;
+  remote_path: string;
+  content_hash: string;
+  installed_at: number;
+  updated_at: number;
+  /** 母本目錄大小（bytes） */
+  size: number;
+  bindings: SkillBinding[];
+}
+
+export interface SkillSyncReport {
+  skill: string;
+  linked: string[];
+  removed: string[];
+  /** symlink 失敗、退回複製的目標（Windows 沒開開發者模式時很正常） */
+  copied_fallback: string[];
+  message: string;
+}
+
+export interface SkillInstallOutcome {
+  skill: string;
+  description: string;
+  files: number;
+  hash: string;
+  storage: string;
+  updated: boolean;
+  unchanged: boolean;
+  sync: SkillSyncReport;
+}
+
+export interface SkillDiscoverResult {
+  skills: RemoteSkill[];
+  /** 掃描失敗的儲存庫（名稱, 原因） */
+  errors: [string, string][];
+}
+
+export interface SkillBackup {
+  name: string;
+  skill: string;
+  at: string;
+  bytes: number;
+}
+
+export interface SkillSettings {
+  /** builtin | agents */
+  storage: string;
+  /** symlink | copy */
+  sync_mode: string;
+}
+
 export interface AppSettings {
   gateway_port: number;
   auto_start_proxy: boolean;

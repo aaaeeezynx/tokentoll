@@ -246,6 +246,9 @@ use rusqlite::Connection;
                 "mcp_servers",
                 "mcp_bindings",
                 "prompt_presets",
+                "skill_repos",
+                "skills",
+                "skill_bindings",
                 "proxy_trace",
             ] {
                 assert!(has_table(&c, t), "v{target} 升級後缺少表 {t}");

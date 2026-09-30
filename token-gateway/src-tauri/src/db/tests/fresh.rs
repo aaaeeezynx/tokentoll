@@ -32,6 +32,9 @@ use super::*;
             "mcp_servers",
             "mcp_bindings",
             "prompt_presets",
+            "skill_repos",
+            "skills",
+            "skill_bindings",
             "proxy_trace",
         ] {
             assert!(has_table(&c, t), "缺少表 {t}");

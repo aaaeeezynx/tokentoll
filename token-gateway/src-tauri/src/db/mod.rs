@@ -36,7 +36,8 @@ pub(crate) use settings::*;
 /// v11（2026-10-01）：新增 mcp_servers / mcp_bindings（P3.1 MCP 管理，
 /// 同樣是純新增表）。
 /// v12（2026-10-01）：新增 prompt_presets（P3.2 提示詞預設集，純新增表）。
-pub const SCHEMA_VERSION: i32 = 12;
+/// v13（2026-10-01）：新增 skill_repos / skills / skill_bindings（P3.3 技能管理）。
+pub const SCHEMA_VERSION: i32 = 13;
 
 /// 網關預設連接埠（C 方案：可在設定中修改；歷史預設 15721 與 cc-switch 衝突）。
 pub const DEFAULT_GATEWAY_PORT: u16 = 15722;

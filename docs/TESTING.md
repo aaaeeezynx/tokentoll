@@ -776,6 +776,69 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.25 技能管理（P3.3，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §3.3 抄）
+
+- 技能＝**一個資料夾**（含 `SKILL.md`）。
+- **兩層目錄**：母本放儲存目錄（預設 `~/.cc-switch/skills/`，可切 `~/.agents/skills`），
+  再同步到各工具的 skills 目錄（**symlink 優先、失敗則複製**）。
+- 各工具目錄：Claude `~/.claude/skills/`、Codex `~/.codex/skills/`、
+  OpenCode `~/.config/opencode/skills/`。
+- 來源是 **GitHub 儲存庫**（owner／name／branch／subdir，內建＋可自訂）與
+  skills.sh 公開登錄搜尋；**更新偵測用 SHA-256 內容雜湊**（不是時間戳），
+  支援單獨更新與全部更新。
+- 解除安裝前**自動備份**到 `skill-backups/`，可還原、可刪除備份。
+
+#### 我們做的（`skills/`，schema v13）
+
+| 部分 | 內容 |
+|---|---|
+| 資料表 | `skill_repos`／`skills`／`skill_bindings` |
+| 範圍 | 只服務可接管的三個工具（共用 `TAKEOVER_APPS`） |
+| 內建儲存庫 | **1 個，已實測**：`anthropics/skills` 的 `skills/`（實機掃到 19 個技能）。ComposioHQ 的版面不同（`.claude/`、`.agents/`），沒有把握就**不放** —— 寧缺勿猜 |
+| 掃描 | GitHub contents API（一次請求列出 `subdir` 下的資料夾） |
+| 安裝／更新 | **tarball**（`codeload.github.com/.../tar.gz/refs/heads/{branch}`）一次抓整個 repo，再挑出技能資料夾。**tar 解析自己寫**（`tar` crate 不在離線快取；`flate2` 有，所以 gunzip 用現成的）；支援 GNU longname |
+| 同步 | symlink 優先，失敗退回複製；**實測在 Windows 上一定會退回**（os error 1314「用戶端沒有這項特殊權限」，除非開了開發者模式） |
+| 更新 | 內容雜湊（SHA-256 over 排序後的「路徑 + NUL + 內容」）比對，雜湊相同就只重新同步 |
+| 備份 | 解除安裝前複製母本到 `skill-backups/{技能}-{時間戳}`；UI 可列出／還原／刪除 |
+| 設定 | 儲存位置（內建／`~/.agents/skills`）與同步方式（連結／複製），存在 `settings` 表 |
+
+**刻意不做的兩格**（寫在對齊矩陣）：
+- **skills.sh 搜尋**：第三方登錄，我們無法確認它的 API 與資料品質；要裝什麼直接加
+  GitHub 儲存庫即可（cc-switch 也是靠儲存庫座標在裝）。
+- **ZIP 安裝**：離線快取裡沒有 zip 解析套件，而 GitHub tarball 已涵蓋主要路徑。
+
+#### 又踩到同一顆石頭（第二次），這次直接結構化修掉
+
+實作時單元測試呼叫了會自己解析主目錄的同步函式，於是**寫進使用者真實的
+`~/.claude/skills` 與 `~/.codex/skills`**（P3.2 的提示詞事故是同一類）。
+這次的代價小（只多了一個測試用的 `demo`，而且在使用者既有的四個技能之外），
+但一樣是「測試不該碰真實檔案」的問題。
+
+修法：引入 **`SkillEnv`** —— 母本目錄、各工具目錄、同步方式**由呼叫端明講**；
+`SkillEnv::real()` 只在命令層使用，而且在**測試建置裡直接拒絕**
+（`if cfg!(test) { return Err(...) }`），測試一律用 `SkillEnv::for_test` 傳暫存目錄。
+驗證：跑完整套測試後比對使用者三個 skills 目錄，與基線完全相同。
+
+#### 測試（27 個新測試，其中 3 個需要網路）
+
+- `skills`（4）：技能名稱驗證（擋 `a/b`、`.hidden`、中文、空白）、
+  儲存庫座標驗證（去斜線、branch 預設 main、**擋 `../etc`**）、內建儲存庫合法、支援的工具。
+- `skills::tarball`（5）：解析嵌套檔案（去掉最外層 `repo-ref/`）、gzip 來回、
+  截斷要報錯、空 tar、八進位欄位壞掉要報錯。
+- `skills::github`（網路，`--ignored`）：**真的打 GitHub** 列出 `anthropics/skills`
+  （要看到 `claude-api`）、**真的下載 tarball** 並確認 `SKILL.md` 與子目錄都在、
+  不存在的儲存庫要回明確錯誤；另有 tarball 網址形狀的純函式測試。
+- `skills::store`（2）：內建儲存庫冪等與不可刪、技能 UPSERT＋綁定＋刪除不留孤兒。
+- `skills::sync`（5）：三個工具目錄對照表、儲存位置切換、**雜湊對順序不敏感但對內容敏感**、
+  描述從 front-matter 或第一行來、複製與移除的來回。
+- `skills::install`（4）：安裝寫母本＋同步到指定工具（**沒選的工具不會被碰**）、
+  沒有 `SKILL.md` 要拒絕、更新用雜湊判斷（相同＝unchanged）、
+  解除安裝備份＋還原＋刪備份、**真實環境在測試建置要被拒絕**。
+
+---
+
 ### 0.9.24 提示詞預設集（P3.2，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §3.2 抄）
@@ -2530,7 +2593,61 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.24 最新建置（2026-10-01 03:49，P3.2：提示詞預設集）—— **你目前安裝的就是這一個**
+### 9.25 最新建置（2026-10-01 04:18，P3.3：技能管理）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P3.3（設計與取捨見 §0.9.25）。**schema 12 → 13**
+（新增 `skill_repos`／`skills`／`skill_bindings`）。新增相依：`flate2`（離線快取已有）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 04:18:05 |
+| `target\release\token-gateway.exe` | 9,898,496 bytes、sha256 `45FCFCD09E5223940FC31E11DAE38984ECE19841C4360ABC2F9687150B94D24F` |
+| NSIS 安裝檔 | 4,148,134 bytes、sha256 `89A65E45A4F6FDB4F17BD0A0EC138F0FC86315B9CE5F671AF40D2BB2B181E026` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,898,496 bytes、sha256 `59DC0394D5EF205772B86C137C7960FE74417023513B33F9339BD37F7D55309E` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **384 passed / 0 failed / 11 ignored** ✅（+22；ignored 是網路／實機測試） |
+| 其中技能的三個網路測試（`--ignored`） | ✅ 全部通過：真的列出 `anthropics/skills`（19 個技能）、真的下載並解開 tarball |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | **13** ✅ |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/skills/{mod,tarball,github,store,sync,install}.rs` | **新增**：型別與驗證、手寫 tar 讀取器、GitHub 掃描與 tarball 下載、DB、同步（含 `SkillEnv` 安全界線）、安裝／更新／解除安裝／備份 |
+| `src-tauri/src/commands/skills_cmd.rs` | **新增**：repos／discover／install／list／set_binding／update／update_all／uninstall／backups／restore／backup_delete／settings；async 命令**鎖不跨 await** |
+| `src/components/Skills.tsx`、`src/components/skills/DiscoverPanel.tsx` | **新增**：技能頁（探索／儲存庫管理／已安裝／逐工具開關／更新／解除安裝／備份／設定） |
+| `src/App.tsx`、`src/lib/{api,apiTypes}.ts`、`Cargo.toml`、`db/{schema,mod}.rs`、`db/tests/*` | 導覽、型別、相依、新表與版本 12→13 |
+
+#### 實機驗證（安裝後的真實 App，CDP 讀畫面 ＋ 技能目錄基線比對）
+
+驗證前先對三個工具的 skills 目錄存基線（你原本：Codex 有 `.system`、`hatch-pet`、
+`hermes-agent`、`local-file-search`；Claude 與 OpenCode 是空的）。
+
+| 驗證項 | 結果 |
+|---|---|
+| 技能頁 | ✅ 導覽出現「技能」，首次進入顯示「還沒有安裝任何技能」 |
+| **掃描 GitHub** | ✅ 「**掃描完成：找到 19 個技能**」，清單出現 `brand-guidelines`、`claude-api`、`canvas-design`、`pdf`、`pptx`、`xlsx`… |
+| 安裝（只同步 Codex） | ✅ 「已安裝「brand-guidelines」（2 個檔案，同步到 1 個工具，**連結失敗改複製**）」；大小 13.3 KB |
+| 目錄影響範圍 | ✅ 基線比對：**只有 `brand-guidelines` 被加進 codex 與 claude**，你原本那四個技能一個都沒被動 |
+| **symlink → 複製的退回** | ✅ 實測真的發生：`os error 1314　用戶端沒有這項特殊權限` → 自動退回複製（與 cc-switch 的設計一致） |
+| 逐工具開關 | ✅ 打開 Claude → 「已同步（連結失敗改複製：…\\.claude\\skills\\brand-guidelines…）」 |
+| 解除安裝 | ✅ 「已解除安裝（備份：…\\skill-backups\\brand-guidelines-20261001-042034）」；備份列出現在 UI |
+| **目錄回到原狀** | ✅ 基線比對：**「與基線完全相同（沒有任何殘留）」** |
+| 刪除備份 | ✅「已刪除備份」，`skill-backups` 空 |
+| 資料庫狀態 | ✅ `skills: 0`、`bindings: 0`、`repos: 1`（內建那個）、`schema: 13` |
+
+> **這一輪又踩到一次「測試寫到真實目錄」**（與 P3.2 的提示詞事故同一類，但這次只多了一個
+> 測試用目錄，且在使用者既有技能之外）。已用 `SkillEnv` 結構化修掉：真實路徑只在命令層
+> 解析，測試建置直接拒絕解析真實主目錄；修正後跑完整套測試，使用者三個 skills 目錄
+> 與基線完全相同。
+
+### 9.24 前一次建置（2026-10-01 03:49，P3.2：提示詞預設集，已被 9.25 取代）
 
 CC Switch 對齊計畫 P3.2（設計、取捨與一次事故的修法見 §0.9.24）。**schema 11 → 12**
 （新增 `prompt_presets`）。

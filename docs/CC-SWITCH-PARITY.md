@@ -64,7 +64,7 @@
 |---|---|---|---|
 | C1 | **MCP 管理**（統一面板、範本、同步到各工具、匯入既有設定、Deep Link） | ✅ 面板／樣板／逐工具同步／匯入／整欄切換都做了（**只同步可接管的三個工具**；Deep Link 屬 P4） | `mcp/`、§0.9.23 |
 | C2 | **Prompts 管理**（Markdown 編輯器、寫進 CLAUDE.md／AGENTS.md、原內容回填） | ✅ 逐工具預設集／單一啟用／**智慧回填**／首次匯入／編輯器（預覽是簡易版，未引入 Markdown 引擎） | `prompt/`、§0.9.24 |
-| C3 | **Skills 管理**（搜 skills.sh／GitHub／ZIP 安裝、更新、symlink 同步） | ❌ | 無 |
+| C3 | **Skills 管理**（搜 skills.sh／GitHub／ZIP 安裝、更新、symlink 同步） | ⚠️ GitHub 儲存庫安裝／tarball 下載／內容雜湊更新／symlink-複製同步／備份還原都做了；**不做** skills.sh 搜尋與 ZIP 安裝（見 §0.9.25） | `skills/`、§0.9.25 |
 | C4 | **Session Manager**（瀏覽／搜尋各工具對話、複製續聊指令、刪除） | ❌ | 我們的 `history` 是**用量**回填，不是對話瀏覽 |
 | C5 | Workspace／Memory 編輯（OpenClaw／Hermes） | ❌ | 無 |
 
@@ -118,13 +118,13 @@ P1.6 的「用滑鼠點托盤圖示」這一步無法在這台機器自動化，
 四個新子系統，各自都是獨立的大工程（MCP 面板＋同步、Markdown prompt 庫＋回填、
 skills.sh／GitHub 安裝＋symlink、對話瀏覽＋續聊指令）。
 
-進度（2026-10-01）：**C1 MCP、C2 Prompts 完成**（§0.9.23、§0.9.24）；Skills／Sessions 待做。
+進度（2026-10-01）：**C1 MCP、C2 Prompts、C3 Skills 完成**（§0.9.23～§0.9.25）；Sessions 待做。
 
 | 項目 | 內容 | 狀態 |
 |---|---|---|
 | P3.1 MCP 管理 | 統一面板、5 個樣板、逐工具同步（Claude／Codex／OpenCode）、匯入既有設定、整欄切換 | ✅ |
 | P3.2 Prompts 管理 | 逐工具預設集、單一啟用、智慧回填、首次匯入、編輯器 | ✅ |
-| P3.3 Skills 管理 | 搜尋 skills.sh／GitHub／ZIP 安裝、更新、symlink 同步 | ⬜ |
+| P3.3 Skills 管理 | GitHub 儲存庫掃描、tarball 安裝、內容雜湊更新、symlink／複製同步、解除安裝備份與還原 | ✅（skills.sh 與 ZIP 除外，見 §0.9.25） |
 | P3.4 Session Manager | 瀏覽／搜尋各工具對話、複製續聊指令、刪除 | ⬜ |
 
 ### P4 — 平台面

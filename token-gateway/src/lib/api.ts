@@ -43,6 +43,13 @@ import type {
   QueueModel,
   QueueRow,
   QuotaView,
+  SkillBackup,
+  SkillDiscoverResult,
+  SkillInstallOutcome,
+  SkillRepo,
+  SkillSettings,
+  SkillSyncReport,
+  InstalledSkill,
   SubscriptionFees,
   SubscriptionQuota,
   SourceHealth,
@@ -185,6 +192,62 @@ export const api = {
   /** 讀目前檔案內容（唯讀）。 */
   promptLive: (target: string): Promise<string> =>
     invoke("prompt_live", { target }),
+  // ── P3.3 技能管理 ──
+  skillsRepos: (): Promise<SkillRepo[]> => invoke("skills_repos"),
+  skillsRepoAdd: (
+    owner: string,
+    name: string,
+    branch?: string,
+    subdir?: string,
+    label?: string,
+  ): Promise<SkillRepo> =>
+    invoke("skills_repo_add", {
+      owner,
+      name,
+      branch: branch ?? null,
+      subdir: subdir ?? null,
+      label: label ?? null,
+    }),
+  skillsRepoDelete: (id: number): Promise<void> =>
+    invoke("skills_repo_delete", { id }),
+  /** 掃描所有儲存庫（會打 GitHub）。 */
+  skillsDiscover: (): Promise<SkillDiscoverResult> =>
+    invoke("skills_discover"),
+  skillsInstall: (args: {
+    repo_id: number;
+    remote_path: string;
+    name: string;
+    apps: string[];
+  }): Promise<SkillInstallOutcome> => invoke("skills_install", { args }),
+  skillsList: (): Promise<InstalledSkill[]> => invoke("skills_list"),
+  skillsSetBinding: (
+    id: number,
+    target: string,
+    enabled: boolean,
+  ): Promise<SkillSyncReport> =>
+    invoke("skills_set_binding", { id, target, enabled }),
+  skillsUpdate: (name: string): Promise<SkillInstallOutcome> =>
+    invoke("skills_update", { name }),
+  skillsUpdateAll: (): Promise<{ skill: string; ok: boolean; message: string }[]> =>
+    invoke("skills_update_all"),
+  skillsUninstall: (
+    name: string,
+  ): Promise<{ removed: string[]; backup: string }> =>
+    invoke("skills_uninstall", { name }),
+  skillsBackups: (): Promise<SkillBackup[]> => invoke("skills_backups"),
+  skillsRestore: (backup: string, apps: string[]): Promise<SkillInstallOutcome> =>
+    invoke("skills_restore", { backup, apps }),
+  skillsBackupDelete: (backup: string): Promise<void> =>
+    invoke("skills_backup_delete", { backup }),
+  skillsSettings: (): Promise<SkillSettings> => invoke("skills_settings"),
+  skillsSetSettings: (
+    storage?: string,
+    syncMode?: string,
+  ): Promise<SkillSettings> =>
+    invoke("skills_set_settings", {
+      storage: storage ?? null,
+      syncMode: syncMode ?? null,
+    }),
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),
   toolVersions: (): Promise<ToolVersion[]> => invoke("tool_versions"),

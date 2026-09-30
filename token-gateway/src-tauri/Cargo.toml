@@ -37,6 +37,9 @@ tokio-stream = "0.1"
 reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
 rand = "0.9"
 sha2 = "0.10"
+# Skills（P3.3）：GitHub 的 tarball 是 .tar.gz，需要 gunzip（tar 的解析自己寫，
+# 只需要讀 header，見 skills/tarball.rs；離線快取裡有 flate2）。
+flate2 = "1"
 
 [dev-dependencies]
 tempfile = "3"

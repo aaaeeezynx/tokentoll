@@ -4253,6 +4253,7 @@ dependencies = [
  "axum",
  "chrono",
  "dirs",
+ "flate2",
  "rand",
  "reqwest 0.12.28",
  "rusqlite",

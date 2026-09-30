@@ -263,6 +263,39 @@ CREATE TABLE IF NOT EXISTS prompt_presets (
     updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_app ON prompt_presets(app, id);
+
+-- 技能（P3.3，對標 cc-switch 的 Skills Management）。
+-- 技能＝一個資料夾（含 SKILL.md），母本放在儲存目錄，再同步到各工具的
+-- skills 目錄（symlink 優先、失敗則複製）。
+CREATE TABLE IF NOT EXISTS skill_repos (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner      TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    branch     TEXT NOT NULL DEFAULT 'main',
+    subdir     TEXT NOT NULL DEFAULT '',
+    label      TEXT NOT NULL DEFAULT '',
+    builtin    INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(owner, name, branch, subdir)
+);
+
+CREATE TABLE IF NOT EXISTS skills (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL UNIQUE,           -- 技能目錄名（也是各工具底下的目錄名）
+    description   TEXT NOT NULL DEFAULT '',
+    repo_id       INTEGER,                        -- 來源（NULL = 手動放入）
+    remote_path   TEXT NOT NULL DEFAULT '',       -- 在來源裡的相對路徑
+    content_hash  TEXT NOT NULL DEFAULT '',       -- 安裝當下的內容雜湊（更新偵測用）
+    installed_at  INTEGER NOT NULL DEFAULT 0,
+    updated_at    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS skill_bindings (
+    skill_id INTEGER NOT NULL,
+    app      TEXT NOT NULL,                       -- claude | codex | opencode
+    enabled  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (skill_id, app)
+);
 "#;
 
 /// 內置種子定價（美元/百萬 token，source='seed'；未知模型費用記 0，M4 做定價管理）。
