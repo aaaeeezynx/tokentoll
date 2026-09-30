@@ -31,7 +31,9 @@ pub(crate) use settings::*;
 /// 走 SCHEMA 的 CREATE TABLE IF NOT EXISTS，無需 ALTER）。
 /// v9（2026-09-30）：新增 provider_model_protocol（學到的上游協議記憶；
 /// 同樣是純新增表，無需 ALTER）。
-pub const SCHEMA_VERSION: i32 = 9;
+/// v10（2026-10-01）：新增 provider_usage_query（每來源的用量查詢設定；
+/// P2.1 對標 cc-switch 的 Usage Query，同樣是純新增表）。
+pub const SCHEMA_VERSION: i32 = 10;
 
 /// 網關預設連接埠（C 方案：可在設定中修改；歷史預設 15721 與 cc-switch 衝突）。
 pub const DEFAULT_GATEWAY_PORT: u16 = 15722;

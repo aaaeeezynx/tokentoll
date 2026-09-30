@@ -203,6 +203,26 @@ CREATE TABLE IF NOT EXISTS proxy_trace (
 );
 CREATE INDEX IF NOT EXISTS idx_proxy_trace_ts ON proxy_trace(ts);
 CREATE INDEX IF NOT EXISTS idx_proxy_trace_status ON proxy_trace(upstream_status, ts);
+
+-- 用量查詢設定（P2.1，對標 cc-switch 的 Usage Query）。
+-- 每個來源一列：要不要查、用哪個樣板、查哪個網址、怎麼從回應裡取出數字。
+-- 金鑰與 token 只留在本機（跟 providers.api_key 一樣是明碼，M3 加固項）。
+CREATE TABLE IF NOT EXISTS provider_usage_query (
+    provider_id       INTEGER PRIMARY KEY,
+    enabled           INTEGER NOT NULL DEFAULT 0,
+    template          TEXT NOT NULL DEFAULT 'custom',
+    base_url          TEXT NOT NULL DEFAULT '',
+    api_key           TEXT NOT NULL DEFAULT '',
+    access_token      TEXT NOT NULL DEFAULT '',
+    user_id           TEXT NOT NULL DEFAULT '',
+    url_template      TEXT NOT NULL DEFAULT '',
+    method            TEXT NOT NULL DEFAULT 'GET',
+    headers_json      TEXT NOT NULL DEFAULT '[]',
+    extractor_json    TEXT NOT NULL DEFAULT '{}',
+    timeout_secs      INTEGER NOT NULL DEFAULT 10,
+    auto_interval_min INTEGER NOT NULL DEFAULT 0,
+    updated_at        INTEGER NOT NULL DEFAULT 0
+);
 "#;
 
 /// 內置種子定價（美元/百萬 token，source='seed'；未知模型費用記 0，M4 做定價管理）。

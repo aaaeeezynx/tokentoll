@@ -32,6 +32,7 @@ import type {
   ProxyStatus,
   QueueModel,
   QueueRow,
+  QuotaView,
   SubscriptionFees,
   SubscriptionQuota,
   SourceHealth,
@@ -46,7 +47,9 @@ import type {
   TrendAppRow,
   TrendBucket,
   UsageRange,
+  UsageQueryConfig,
   UsageSummary,
+  UsageTemplate,
   UsableModel,
   UsableModelInput,
 } from "./apiTypes";
@@ -114,6 +117,25 @@ export const api = {
   /** 故障轉移佇列：某個模型的候選來源順序（與請求路徑同一個查詢）。 */
   failoverQueue: (model: string): Promise<QueueRow[]> =>
     invoke("failover_queue", { model }),
+  // ── P2.1 用量查詢 ──
+  usageQueryGet: (providerId: number): Promise<UsageQueryConfig> =>
+    invoke("usage_query_get", { providerId }),
+  usageQuerySet: (config: UsageQueryConfig): Promise<UsageQueryConfig> =>
+    invoke("usage_query_set", { config }),
+  usageQueryClear: (providerId: number): Promise<void> =>
+    invoke("usage_query_clear", { providerId }),
+  usageQueryTemplates: (): Promise<UsageTemplate[]> =>
+    invoke("usage_query_templates"),
+  usageQueryApplyTemplate: (
+    providerId: number,
+    template: string,
+  ): Promise<UsageQueryConfig> =>
+    invoke("usage_query_apply_template", { providerId, template }),
+  /** 真的打一次查詢（面板的「測試」與卡片的「重新查詢」共用）。 */
+  usageQueryRun: (providerId: number): Promise<QuotaView> =>
+    invoke("usage_query_run", { providerId }),
+  /** 所有已啟用設定的來源各查一次（來源頁載入時）。 */
+  usageQueryRunAll: (): Promise<QuotaView[]> => invoke("usage_query_run_all"),
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),
   toolVersions: (): Promise<ToolVersion[]> => invoke("tool_versions"),

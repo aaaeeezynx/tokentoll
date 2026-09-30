@@ -13,6 +13,8 @@ import GlobalPricingManager from "./Pricing";
 import { ProviderSheet, ToolVersions } from "./providers/ProviderForm";
 import { FailoverQueue } from "./providers/FailoverQueue";
 import { ProvidersIO } from "./providers/ProvidersIO";
+import { QuotaFooter } from "./providers/QuotaFooter";
+import { UsageQueryPanel } from "./providers/UsageQueryPanel";
 import { SourceCard } from "./providers/SourceCard";
 import { SourceDetail } from "./providers/SourceDetail";
 import { ToolList } from "./providers/ToolList";
@@ -125,6 +127,35 @@ export default function ProvidersPage() {
 
   const activeTools = (tools.data || []).filter((t) => t.gateway_active).length;
 
+  // ---- P2.1／P2.2：用量查詢（設定面板 ＋ 卡片底部顯示） ----
+  const [uqFor, setUqFor] = useState<Provider | null>(null);
+  const quotaAll = useQuery({
+    queryKey: ["usage_quota_all"],
+    queryFn: api.usageQueryRunAll,
+    // 只在來源頁真的需要時才查；staleTime 避免切頁就重打上游
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const quotaMap = useMemo(
+    () => new Map((quotaAll.data || []).map((q) => [q.provider_id, q] as const)),
+    [quotaAll.data],
+  );
+  /** 只對「選中的來源」按它自己的間隔自動重查（cc-switch 也是只查使用中的那個，
+   *  理由是查詢會消耗上游額度）。間隔 0 ＝ 不自動查。 */
+  const selCfg = useQuery({
+    queryKey: ["usage_query", selId],
+    queryFn: () => api.usageQueryGet(selId as number),
+    enabled: selId != null,
+    staleTime: 30_000,
+  });
+  const autoMin = selCfg.data?.enabled ? selCfg.data.auto_interval_min : 0;
+  useQuery({
+    queryKey: ["usage_quota_auto", selId],
+    enabled: selId != null && autoMin > 0,
+    queryFn: () => api.usageQueryRun(selId as number),
+    refetchInterval: autoMin * 60_000,
+  });
+
   // ---- 來源卡片（呈現抽到 providers/SourceCard.tsx；拖拽邏輯在 useDragSort） ----
   const srcCard = (p: Provider, i: number) => (
     <SourceCard
@@ -154,6 +185,22 @@ export default function ProvidersPage() {
         ask(`刪除來源 ${q.name}？`, () => del.mutate(q.id), {
           message: "該來源的使用模型與定價將一併移除，已分發的 Key 會失效。",
         })
+      }
+      quotaSlot={
+        <QuotaFooter
+          q={quotaMap.get(p.id) ?? null}
+          loading={quotaAll.isFetching}
+          onRefresh={() => {
+            void api
+              .usageQueryRun(p.id)
+              .then(() => qc.invalidateQueries({ queryKey: ["usage_quota_all"] }))
+              .catch((e) => setListMsg(`用量查詢失敗：${String(e)}`));
+          }}
+          onConfigure={() => {
+            setSelected(p.id);
+            setUqFor(p);
+          }}
+        />
       }
     />
   );
@@ -300,6 +347,16 @@ export default function ProvidersPage() {
           </div>
         </div>
       </div>
+      {uqFor && (
+        <UsageQueryPanel
+          providerId={uqFor.id}
+          providerName={uqFor.name}
+          onClose={() => {
+            setUqFor(null);
+            void qc.invalidateQueries({ queryKey: ["usage_quota_all"] });
+          }}
+        />
+      )}
       {confirmDialog}
     </div>
   );

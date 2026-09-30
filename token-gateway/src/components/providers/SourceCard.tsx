@@ -1,4 +1,4 @@
-import type { PointerEvent as RPointerEvent, RefObject } from "react";
+import type { PointerEvent as RPointerEvent, ReactNode, RefObject } from "react";
 import type { Provider } from "../../lib/api";
 import { Icon } from "../icons";
 
@@ -27,6 +27,8 @@ export function SourceCard(props: {
   onEdit: (p: Provider) => void;
   onDuplicate: (p: Provider) => void;
   onDelete: (p: Provider) => void;
+  /** 卡片底部的用量／餘額顯示（P2.2；沒設定時是一個入口按鈕）。 */
+  quotaSlot?: ReactNode;
 }) {
   const { p, i, selId, dragId, modelCount, gripDown, suppressClick } = props;
   return (
@@ -114,6 +116,7 @@ export function SourceCard(props: {
           {p.auth_scheme === "goog-key" ? "Google Key" : "Bearer"}
         </span>
       </div>
+      {props.quotaSlot}
     </div>
   );
 }

@@ -776,6 +776,90 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.22 用量查詢：每來源可設定的餘額／額度查詢（P2.1）＋卡片顯示（P2.2）（2026-10-01）
+
+#### cc-switch 的實際行為（照它的使用者手冊 §2.5 抄）
+
+- 分兩類：**自動顯示**（OAuth 帳號型：Copilot／Codex OAuth／xAI OAuth）與
+  **手動開啟**（官方訂閱、Token Plan、第三方餘額、自訂）。
+- 手動類要在來源卡的「用量查詢」面板開啟，內建樣板涵蓋：官方訂閱（Claude／Codex／
+  Gemini／Grok）、Token Plan（Kimi／智譜／MiniMax／火山方舟）、第三方餘額
+  （DeepSeek／階躍／硅基流動／OpenRouter／Novita）。
+- 面板欄位：啟用開關、樣板、API Key／Base URL／Access Token／User ID、
+  逾時（預設 10 秒）、自動查詢間隔（0–1440 分，0＝關；**只在該來源「目前使用中」
+  才會自動查**）、**測試腳本**（送出並顯示結果或錯誤）。
+- 自訂那格是**使用者寫的 JavaScript**：`({request:{url,method,headers}, extractor:function(response){…}})`，
+  回傳 `{isValid, invalidMessage, remaining, unit, planName, total, used, extra}`；
+  佔位符 `{{apiKey}}`／`{{baseUrl}}`／`{{accessToken}}`／`{{userId}}`。
+- 卡片底部顯示：用量百分比 ＋ 重置倒數，**<70% 綠 / 70–89% 橘 / ≥90% 紅**；
+  多方案顯示方案數、可展開；卡片上有重新查詢圖示。
+- 它特別提醒：查詢會消耗少量上游額度、自動間隔要設合理值。
+
+#### 我們做的（`usage_query/`，schema v10）
+
+| 部分 | 內容 |
+|---|---|
+| 資料表 | `provider_usage_query`（一來源一列：開關、樣板、憑證、網址、標頭、抽取規格、逾時、自動間隔） |
+| 樣板 | 6 個：**New API 中轉**（照抄它手冊裡的原文範例，含 `New-Api-User` 標頭與 `/500000` 換算）、通用餘額、DeepSeek 餘額、OpenRouter 額度（用 `subtract` 算「總額−已用」）、硅基流動餘額、自訂 |
+| 佔位符 | `{{apiKey}}`／`{{baseUrl}}`／`{{accessToken}}`／`{{userId}}`，與它一致 |
+| 逾時／間隔 | 逾時預設 10 秒（1–120）；自動間隔 0–1440 分，**0＝不自動查** |
+| 測試 | 面板上的「測試」＝先存再打一次真的請求，顯示成敗、抽取到的數字，並可展開**原始回應** |
+| 卡片顯示 | 百分比徽章（三段式顏色）＋ 方案名 ＋ 餘額／總額 ＋ 多方案展開 ＋ 重新查詢 ＋ 設定入口 |
+| 自動查詢 | 只對**選取中的來源**按它自己的間隔重查（與它「只查使用中的來源」同一個精神：省上游額度） |
+
+**唯一刻意的差異：自訂查詢不是 JavaScript，而是宣告式抽取規格。** 三個理由：
+
+1. 不想為了這一格塞一個 JS 引擎（純 Rust 的引擎是好幾 MB 的相依，而這台機器的
+   建置走 `--offline`，本地快取裡也沒有任何 JS 引擎可用 —— 查過了）。
+2. cc-switch 文件裡的每個例子本質上都是「打一個網址、從 JSON 取幾個數字」
+   （它的 Generic 與 New API 範例就是 `url` ＋ `headers` ＋ `response.xxx`）。
+3. **可測試**：規格是資料，能逐條寫測試；使用者寫的 JS 只能靠執行才知道。
+
+規格長這樣（每個數字欄位可以是路徑字串，或帶運算的物件）：
+
+```json
+{
+  "remaining": "balance_infos.0.total_balance",
+  "used": { "path": "used_quota", "divide": 500000 },
+  "total": { "path": "quota", "divide": 500000 },
+  "unit": "USD",
+  "planName": "data.group",
+  "validPath": "is_available",
+  "invalidMessagePath": "message",
+  "plans": { "path": "data.plans", "name": "name", "remaining": "remaining", "total": "total" }
+}
+```
+
+路徑用點分隔、數字段是陣列索引；`subtract`／`divide`／`multiply` 支援
+OpenRouter 的「總額−已用」與 New API 的 `/500000`。**取不到就是 `None`，不補 0** ——
+「查不到」與「餘額是 0」是不同的事（這一條有測試）。
+
+#### 兩個實作時踩到、順手修掉的坑
+
+1. **套了樣板卻沒啟用＝什麼都不顯示。** 第一版把「套樣板」與「啟用」分成兩步，
+   實機驗證時就發生了：測試成功、儲存成功，卡片卻還是空的（因為 `enabled=0`）。
+   現在**套樣板會順手把開關打開**（開關就在畫面上，可以再關掉），
+   而且測試成功但未啟用時，訊息會直接說「卡片不會顯示」。
+2. **孤兒列**：`provider_usage_query` 也要進 `purge_orphans` 的清單，
+   來源刪除時也要一起清（與其他來源子表一致）。
+
+#### 測試（20 個新測試）
+
+- `usage_query::extract`（4）：路徑（物件／陣列索引／字串型數字）、規格解析（兩種形狀）、
+  運算（除以 0 回 `None`、減項缺資料回 `None`）、找不到就是 `None`。
+- `usage_query`（7）：佔位符展開（含不認識的佔位符原樣保留）、
+  **New API 形狀**抽得出方案名與餘額（含 `/500000`）、帳號無效時用上游訊息、
+  多方案陣列展開、**規格對不上時說「規格沒對上」而不是假裝成功**、
+  非 JSON 回應、只有 remaining 時百分比用 `(total-remaining)/total`。
+- `usage_query::store`（3）：UPSERT 來回、驗證（空網址／非法方法／逾時範圍／間隔範圍／
+  非法 provider_id 全部擋下且不落庫）、刪除。
+- `usage_query::templates`（3）：id 唯一且形狀正確、**照抄的 New API 樣板逐欄比對**、
+  套樣板保留憑證與 provider_id。
+- `usage_query::run`（3）：**真的打一個本機伺服器**（驗證佔位符真的變成標頭、
+  抽取結果正確）、非 2xx 回報狀態碼、連不上／逾時給人話、空網址與相對網址被擋。
+
+---
+
 ### 0.9.21 連線檢查、故障轉移佇列、系統匣切換（P1.4–P1.6，2026-10-01）
 
 CC Switch 對齊計畫的 P1 後半。三個功能各自的關鍵決定如下。
@@ -2317,7 +2401,65 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.21 最新建置（2026-10-01 01:57，P1.4–P1.6：連線檢查／故障轉移佇列／系統匣切換）—— **你目前安裝的就是這一個**
+### 9.22 最新建置（2026-10-01 02:31，P2：每來源用量查詢 ＋ 卡片顯示）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P2（設計與取捨見 §0.9.22）。**schema 從 9 升到 10**（新增
+`provider_usage_query`，純新增表，舊庫開啟時自動補上）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 02:31:11 |
+| `target\release\token-gateway.exe` | 9,388,032 bytes、sha256 `7FFFB6F29EB7696E10072BDAC3762F4DF2EDD53724AD75319EE93B4E6B35F2AF` |
+| NSIS 安裝檔 | 3,969,337 bytes、sha256 `DBDECCB17080B7B998C278B99109E6A6214D0B5274878921B547C3AEE8380227` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,388,032 bytes、sha256 `3EAD657A9CBADD48E342186AABCF0563CDA7C887CB068D60898BEBABB05EB4BE` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **310 passed / 0 failed / 8 ignored** ✅（+20：4 extract、7 usage_query、3 store、3 templates、3 run） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅（第一次因 `cfg` 可能為 null 的 TS 錯誤失敗，修好後過） |
+| 資料庫 schema | **10** ✅（`provider_usage_query` 已建；孤兒清理與來源刪除都會一併處理） |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/usage_query/{mod,extract,templates,store,run}.rs` | **新增**：設定型別、抽取引擎、6 個樣板、DB 存取、實際查詢 |
+| `src-tauri/src/commands/usage_query_cmd.rs` | **新增**：`usage_query_get／set／clear／templates／apply_template／run／run_all` |
+| `src-tauri/src/db/{schema,mod,open}.rs` | 新表、`SCHEMA_VERSION` 9→10、孤兒清理納入新表 |
+| `src-tauri/src/providers.rs` | 刪來源時一併清用量查詢設定 |
+| `src/components/providers/UsageQueryPanel.tsx` | **新增**：設定面板（開關／樣板／憑證／標頭／抽取規格／逾時／間隔／測試） |
+| `src/components/providers/QuotaFooter.tsx` | **新增**：卡片底部顯示（百分比徽章＋三段式顏色＋餘額＋多方案展開＋重查） |
+| `src/components/providers/SourceCard.tsx`、`src/components/Providers.tsx`、`src/lib/{api,apiTypes}.ts` | 接線、型別與自動查詢（只對選取中的來源） |
+
+#### 實機驗證（安裝後的真實 App，CDP 讀畫面）
+
+驗證對象選 **OpenRouter**（使用者自己的來源 #17，有填 key），因為它的
+`/api/v1/credits` 是公開文件寫明的餘額端點 —— 能拿到**真實數字**而不是假資料。
+
+| 驗證項 | 結果 |
+|---|---|
+| 卡片上有用量查詢入口 | ✅ `or` 卡片底部顯示「用量查詢」（尚未設定任何來源時的樣子） |
+| 面板開啟 | ✅ 標題「用量查詢 · or」，欄位齊全（樣板／網址／方法／Base URL／API Key／Access Token／User ID／標頭／抽取規格／逾時／自動間隔） |
+| 套用樣板 | ✅ 選「OpenRouter 額度」後，觸發鈕變成該樣板名，並顯示它的說明（「/credits 回 {data:{total_credits,total_usage}}…」） |
+| **測試（真的打上游）** | ✅ **成功**；抽取結果「餘額 0.00 USD / 0.00 USD」；展開的回應是 OpenRouter 的真實回覆 `{"data":{"total_credits":0,"total_usage":0}}` |
+| 儲存後卡片顯示 | ✅ 卡片底部變成「餘額 0.00 USD / 0.00 USD」，並有重新查詢與設定兩個圖示 |
+| 資料庫落地 | ✅ `schema version: 10`、`usage_query` 1 列（provider 17、enabled、template=openrouter-credits、auto=0 分、金鑰長度 73） |
+| 不影響既有功能 | ✅ `codex exec -m grok-4.7` → `P2-OK`；網關 15722 LISTEN；工具仍 3/4 接管中 |
+
+> **這一輪留下的狀態（使用者請看這裡）**：我把 **OpenRouter 那個來源的用量查詢設好了並啟用**
+> （用內建樣板、自動查詢間隔 0＝不自動查）。所以那張卡片現在會顯示餘額。
+> 不想要就在卡片上按齒輪圖示 → 「清除設定」。你的 OpenRouter 餘額目前是 0。
+
+> **百分比與三段式顏色沒能在實機上驗到顏色**：OpenRouter 這個帳號的
+> `total_credits` 是 0，`0/0` 算不出百分比（後端刻意回 `null`，不是 0%），
+> 所以畫面上看不到彩色徽章。百分比本身的計算是後端測試（50%、75%、20% 三個案例），
+> 顏色對應（<70 綠／70–89 橘／≥90 紅）是照 cc-switch 規則寫的純函式，
+> 要等到某個來源真的回得出總額才會在畫面上出現。
+
+### 9.21 前一次建置（2026-10-01 01:57，P1.4–P1.6：連線檢查／故障轉移佇列／系統匣切換，已被 9.22 取代）
 
 CC Switch 對齊計畫 P1 的後半（設計與取捨見 §0.9.21）。P1 到此完成。
 

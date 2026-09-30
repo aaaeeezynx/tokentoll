@@ -269,6 +269,7 @@ fn purge_orphans(conn: &Connection) -> rusqlite::Result<usize> {
         "pricing_periods",
         "provider_stripped_fields",
         "provider_model_protocol",
+        "provider_usage_query",
         "model_catalogs",
     ] {
         total += conn.execute(

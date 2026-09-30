@@ -28,6 +28,7 @@ use super::*;
             "provider_models",
             "provider_stripped_fields",
             "provider_model_protocol",
+            "provider_usage_query",
             "proxy_trace",
         ] {
             assert!(has_table(&c, t), "缺少表 {t}");

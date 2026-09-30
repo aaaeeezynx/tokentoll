@@ -242,6 +242,7 @@ use rusqlite::Connection;
                 "provider_models",
                 "provider_stripped_fields",
                 "provider_model_protocol",
+                "provider_usage_query",
                 "proxy_trace",
             ] {
                 assert!(has_table(&c, t), "v{target} 升級後缺少表 {t}");
@@ -347,6 +348,7 @@ use rusqlite::Connection;
             "provider_pricing",
             "pricing_periods",
             "provider_model_protocol",
+            "provider_usage_query",
         ] {
             let n: i64 = c
                 .query_row(&format!("SELECT COUNT(*) FROM {t} WHERE provider_id=999"), [], |r| {

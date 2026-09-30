@@ -16,6 +16,7 @@
 //! - `apps`：各本機工具的接管／還原
 //! - `models_cmds`：模型目錄與價格識別
 //! - `quota_cmd`：訂閱額度
+//! - `usage_query_cmd`：每來源的用量查詢設定與查詢（P2.1）
 //! - `diagnostics`：診斷中心
 //! - `tests`：純函式單測（僅測試組建）
 
@@ -29,6 +30,7 @@ mod quota_cmd;
 mod settings;
 mod status;
 mod usage_cmds;
+mod usage_query_cmd;
 
 #[cfg(test)]
 mod tests;
@@ -43,3 +45,4 @@ pub use quota_cmd::*;
 pub use settings::*;
 pub use status::*;
 pub use usage_cmds::*;
+pub use usage_query_cmd::*;

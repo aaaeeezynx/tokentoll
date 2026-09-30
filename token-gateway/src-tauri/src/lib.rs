@@ -19,6 +19,7 @@ mod trace;
 mod translate;
 mod tray;
 mod usage;
+mod usage_query;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::Manager;
@@ -129,6 +130,14 @@ pub fn run() {
             commands::failover_queue,
             // 來源連線檢查（P1.5，見 provider_check.rs）
             provider_check::provider_check,
+            // 每來源的用量查詢（P2.1，見 usage_query/）
+            commands::usage_query_get,
+            commands::usage_query_set,
+            commands::usage_query_clear,
+            commands::usage_query_templates,
+            commands::usage_query_apply_template,
+            commands::usage_query_run,
+            commands::usage_query_run_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
