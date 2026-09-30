@@ -144,6 +144,76 @@ pub(super) fn parse_codex_file(text: &str, import_path: &str, bad: &mut i64) -> 
     rows
 }
 
+/// DeepSeek Harness：一會話一列，取自專案快取的用量投影
+/// `record.rows.tokenUsage.val.totals`（與 OpenCode 同口徑：按會話計）。
+///
+/// **口徑**：DSH 把 prompt 拆成 `uncachedInputTokens`（沒命中快取的部分）與
+/// `cacheReadTokens`（命中快取的部分），兩者互斥；所以總輸入是兩者相加 ——
+/// 這樣才與 Codex／Claude／網關的 `input_tokens`（含快取）同一個意思，
+/// `cache_read` 則是其中的子集。
+///
+/// **時間**：投影檔裡只有 `identity.createdAt`（會話開始）與 `seq`，沒有每次呼叫
+/// 的時間；所以用**檔案最後更新時間**（＝會話最後活動）當這一列的時間，與
+/// OpenCode 用 `time_updated` 的做法一致。呼叫端把 mtime 傳進來。
+///
+/// DSH 的完整逐次呼叫紀錄在 `~/.dsh/sessions/**/session.v3.jsonl.zstd`（zstd 多框架），
+/// 但這份投影檔是**純 JSON** 且已含會話總量，所以不必為了用量引入 zstd 相依。
+pub(super) fn parse_dsh_session(
+    text: &str,
+    import_path: &str,
+    ts_ms: i64,
+    bad: &mut i64,
+) -> Vec<ParsedRow> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
+        *bad += 1;
+        return Vec::new();
+    };
+    let Some(rows) = v.get("record").and_then(|r| r.get("rows")) else {
+        *bad += 1;
+        return Vec::new();
+    };
+    let Some(totals) = rows
+        .get("tokenUsage")
+        .and_then(|t| t.get("val"))
+        .and_then(|t| t.get("totals"))
+    else {
+        *bad += 1;
+        return Vec::new();
+    };
+    let cache_read = num(totals, "cacheReadTokens");
+    let in_tok = num(totals, "uncachedInputTokens") + cache_read;
+    let out_tok = num(totals, "outputTokens");
+    let cache_write = num(totals, "cacheWriteTokens");
+    if in_tok + out_tok + cache_write <= 0 {
+        return Vec::new(); // 空會話不記（也不佔一列）
+    }
+    // 使用者可以在 DSH 裡中途換模型；投影只留最後一次，取它最能代表這個會話。
+    let model_raw = rows
+        .get("modelSelection")
+        .and_then(|m| m.get("val"))
+        .and_then(|m| m.get("lastUsed"))
+        .and_then(|l| l.get("model"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    vec![ParsedRow {
+        app: "dsh",
+        model_raw: if model_raw.is_empty() {
+            "(DSH 未記錄模型)".to_string()
+        } else {
+            model_raw
+        },
+        provider_id: None,
+        in_tok,
+        out_tok,
+        cache_read,
+        cache_write,
+        ts_ms,
+        import_path: import_path.to_string(),
+    }]
+}
+
 /// OpenCode：session 表一行一會話；model 是 JSON（取 id）；providerID 回填渠道。
 pub(super) fn parse_opencode_db(
     conn: &Connection,

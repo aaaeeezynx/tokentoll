@@ -776,6 +776,99 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.12 讓 DeepSeek Harness 的用量出現在用量頁（歷史回填，2026-09-30）
+
+使用者問：「DSH 這工具是否可以直接檢測用量？」——**能力有**（App 的 M5 歷史回填
+早就會離線讀各工具自己的本機資料），**但 DSH 沒接進去**。使用者選擇走回填這條路
+（不必改 DSH 設定）。
+
+#### 為什麼不用碰 zstd
+
+DSH 的完整逐次呼叫紀錄在 `~/.dsh/sessions/**/session.v3.jsonl.zstd`（zstd 多框架，
+實測該檔 5797 個 frame、抽 60 個都能獨立解壓），但**不必**為此引入 zstd 相依 ——
+DSH 另外把用量投影成**純 JSON**：
+
+```
+~/.dsh/storages/session_projcache/sessions/<session-id>.json
+  record.rows.tokenUsage.val.totals = {
+    uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }
+```
+
+實測 48 個投影檔 **48/48** 都有這個區塊，全部加起來
+`uncached 10,480,397 / output 2,829,399 / cacheRead 527,193,600`。
+
+#### 口徑（與其他來源對齊）
+
+DSH 把 prompt 拆成 `uncachedInputTokens` 與 `cacheReadTokens` 兩塊**互斥**的數字，
+所以：
+
+- `in_tok = uncachedInputTokens + cacheReadTokens`（＝總輸入，含快取那一塊）
+- `cache_read = cacheReadTokens`（是 `in_tok` 的子集 —— 與 Codex 的
+  `input_tokens` / `cached_input_tokens`、網關的同一組欄位同義）
+- `out_tok = outputTokens`
+- `ts` = 投影檔的**最後更新時間**（＝會話最後活動），與 OpenCode 用
+  `time_updated` 一致（投影裡只有 `identity.createdAt`＝會話開始與 `seq`，沒有單次時間）
+- one session = one row（與 OpenCode 同口徑）；`model` 取
+  `rows.modelSelection.val.lastUsed.model`，中途換模型時代表最後一次；
+  真的沒有就記 `(DSH 未記錄模型)` —— **不靜默丟掉用量**
+
+#### 改動
+
+| 位置 | 改動 |
+|---|---|
+| `history/mod.rs` | `collect_files_with_ext` 抽出共用；新增 `collect_json_files`；模組說明加第四個來源 |
+| `history/parse.rs` | 新增 `parse_dsh_session`（檔頭有完整口徑說明） |
+| `history/scan.rs` | 掃描 `.dsh/storages/session_projcache/sessions/*.json`，一檔一會話 |
+| `history/import.rs` | 新增 `want("dsh")` 分支（檔案級 (mtime,size) 冪等，與 claude／codex 同機制） |
+| `components/usage/usageLogs.tsx` | 勾選框預設含 `dsh`；說明文字補上 DeepSeek Harness |
+
+**測試**：`dsh_parse_session_totals`（口徑：輸入含快取）、
+`dsh_parse_skips_empty_and_bad`（空會話不記／缺投影記 bad／缺 model 用佔位）、
+`dsh_scan_counts_projections`（只算 `.json`、一檔一會話）；並更新
+`scan_lists_tools` 為四個工具。
+
+**為什麼「投影檔一直被改寫」不是問題**：進行中的會話每次掃到都會重算那一列
+（先按 `import_path` 刪、再插），所以數字會跟著會話長大 —— 這是刻意的。
+
+#### 實機驗證（2026-09-30 15:30，安裝 §9.13 後）
+
+掃描對話框顯示 `DeepSeek Harness 48 文件 · 448.1 KB · 48 會話`，按「開始回填」後：
+
+```
+寫入 1093 筆（claude: 271 筆 / 288,143 tokens；codex: 716 筆 / 165,922,008 tokens；
+opencode: 82 筆 / 110,645,339 tokens；dsh: 24 筆 / 563,640,975 tokens）。
+去重跳過 1949，空行跳過 34。
+```
+
+**48 個檔案只寫進 24 列，不是漏記**：另外 24 個會話的四個計數器**全是 0**
+（開過會話但沒呼叫任何模型），被 `commit_rows` 依既有規則「總 token ≤ 0 就跳過」濾掉。
+抽驗原始 JSON 確認鍵名與非零檔完全一致、值確實是 0：
+
+```json
+"totals": {"uncachedInputTokens": 0, "outputTokens": 0,
+           "cacheReadTokens": 0, "cacheWriteTokens": 0}
+```
+
+用量頁驗證：
+
+| 檢查 | 結果 |
+|---|---|
+| 本機工具篩選器 | **7 個選項全在**：Claude Code／OpenAI Codex／OpenCode／Hermes Agent／**DeepSeek Harness**／Cursor／Antigravity（約束二：不因新增來源而少掉任何工具） |
+| 篩選 DeepSeek Harness（今日） | 9 筆 / 583,060,706 tokens / 快取命中率 49.6% |
+| 最近請求 | 出現 `DeepSeek Harness` 列，模型 `deepseek-v4.1-flash`、`deepseek-v4-flash` |
+| 趨勢圖資料（照抄 `trend_by_app` 的 SQL 驗算） | 15:00 桶 `dsh 1 筆 / 583,060,597 tokens`；今日各 app 序列以 dsh 583,060,706 最高 —— 圖上會有 DSH 的柱子 |
+
+#### 兩個誠實提醒（都不是這次改壞的）
+
+1. **Claude 回填列的 `in_tok` 全是 0**：不是解析錯。Claude Code 走非 Anthropic 後端時，
+   它自己的 jsonl 就寫 `input_tokens: 0`（抽驗兩檔、40／39 行全部如此）。所以那些列
+   只反映輸出 token。
+2. **少數列可能與網關列並存**：3 個歷史 gateway 200 列（in=8267／7488／9015）與對應會話
+   的 import 列同時存在。去重窗是 ±120 秒，而 import 的 `ts` 用**檔案 mtime**（會話最後
+   活動）、gateway 列用**請求發生時間**，兩者差了整個會話長度所以沒被視為重複。
+   量級約 0.004%，且是既有 M5 機制的行為。
+
+
 ### 0.9.11 其他工具（Claude Code／OpenCode）在兩個方向切換的實測（2026-09-30）
 
 使用者要求：「確保使用其他工具在官方來源與指定來源間切換，不會出現同樣錯誤」。
@@ -1700,7 +1793,32 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.12 最新建置（2026-09-30 14:25，切回官方前先講清楚憑證）—— **你目前安裝的就是這一個**
+### 9.13 最新建置（2026-09-30 15:27，DeepSeek Harness 歷史回填）—— **你目前安裝的就是這一個**
+
+使用者選了第二條路：**本機回填導入**（不改 DSH 任何設定），讓 DSH 的用量出現在用量頁。
+做法與驗證見 §0.9.12。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | NSIS 產物 15:27:41 |
+| 執行檔大小 | 9,052,672 bytes（比 9.12 多 512 bytes） |
+| **安裝後執行檔 SHA-256** | **`0D36FB69BA27B5A23C0FEA0DCA30C13C8FBAA3CC6268370289D09D238EFB4940`**（前一版 `8D4742D6…`） |
+| 後端測試 | **239 passed / 0 failed / 8 ignored**（+3 條：`dsh_parse_session_totals`、`dsh_parse_skips_empty_and_bad`、`dsh_scan_counts_projections`） |
+| clippy | **0 個警告** |
+| tsc | **exit 0** |
+| 檔案行數 | 全部 ≤ 400 行 |
+
+**這一輪修掉的最後一個 bug**：第一次按「開始回填」回 `回填失敗：未知工具：dsh` ——
+`commands/logs_history.rs` 裡的白名單是寫死的三個工具。改成單一來源
+`history::IMPORT_TOOLS`（`["claude","codex","opencode","dsh"]`），掃描順序也跟著它，
+並加一條測試把兩者綁在一起，避免以後又忘記。
+
+**這一輪改到的檔案**：`history/{mod,parse,scan,import,tests}.rs`、
+`commands/logs_history.rs`、`components/usage/usageLogs.tsx`、文件 §0.9.12／§9.13。
+
+---
+
+### 9.12 前一次建置（2026-09-30 14:25，切回官方前先講清楚憑證，已被 9.13 取代）
 
 使用者要求：「確保使用其他工具在官方來源與指定來源間切換，不會出現同樣錯誤」。
 實測發現 Claude Code 切回官方會直接回 `Not logged in · Please run /login`

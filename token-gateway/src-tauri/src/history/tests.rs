@@ -4,7 +4,7 @@ use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
 
 use super::commit::{commit_rows, gc_orphans, provider_name_map};
-use super::parse::{parse_claude_file, parse_codex_file, parse_opencode_db};
+use super::parse::{parse_claude_file, parse_codex_file, parse_dsh_session, parse_opencode_db};
 
     use super::*;
 
@@ -54,6 +54,82 @@ use super::parse::{parse_claude_file, parse_codex_file, parse_opencode_db};
         assert_eq!(rows[0].cache_read, 10);
         // 未知 turn 回退到文件首模型
         assert_eq!(rows[1].model_raw, "deepseek-v4-flash");
+    }
+
+    #[test]
+    fn dsh_parse_session_totals() {
+        // DSH 的用量投影：prompt 拆成「未命中快取」與「命中快取」兩塊（互斥），
+        // 所以總輸入要相加 —— 這樣才與 Codex／網關的 input_tokens（含快取）同口徑。
+        let text = r#"{
+          "version": 7,
+          "record": {
+            "identity": {"formatVersion": 3, "createdAt": 1790530758608, "cwd": "D:\\token counter"},
+            "rows": {
+              "tokenUsage": {"ver": 2, "seq": 9952, "val": {"totals": {
+                 "uncachedInputTokens": 4447555, "outputTokens": 1191447,
+                 "cacheReadTokens": 265470336, "cacheWriteTokens": 0}}},
+              "modelSelection": {"ver": 1, "seq": 9, "val": {
+                 "lastUsed": {"provider": "opencodego", "model": "deepseek-v4.1-flash"},
+                 "pending": null}}
+            }
+          }
+        }"#;
+        let mut bad = 0;
+        let rows = parse_dsh_session(text, "s.json", 1_790_750_000_000, &mut bad);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(bad, 0);
+        assert_eq!(rows[0].app, "dsh");
+        assert_eq!(rows[0].model_raw, "deepseek-v4.1-flash");
+        assert_eq!(rows[0].in_tok, 4447555 + 265470336, "輸入要含快取那一塊");
+        assert_eq!(rows[0].out_tok, 1191447);
+        assert_eq!(rows[0].cache_read, 265470336);
+        assert_eq!(rows[0].cache_write, 0);
+        assert_eq!(rows[0].ts_ms, 1_790_750_000_000, "時間由呼叫端（檔案 mtime）給");
+        assert_eq!(rows[0].import_path, "s.json");
+    }
+
+    #[test]
+    fn dsh_parse_skips_empty_and_bad() {
+        let mut bad = 0;
+        // 空會話（有投影但全是 0）不記。
+        let empty = r#"{"record":{"rows":{"tokenUsage":{"val":{"totals":
+            {"uncachedInputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheWriteTokens":0}}}}}}"#;
+        assert!(parse_dsh_session(empty, "e.json", 1, &mut bad).is_empty());
+        assert_eq!(bad, 0);
+        // 沒有 tokenUsage 投影 → 記 bad。
+        let none = r#"{"record":{"rows":{"title":{"val":"x"}}}}"#;
+        assert!(parse_dsh_session(none, "n.json", 1, &mut bad).is_empty());
+        assert_eq!(bad, 1);
+        // 不是 JSON → 記 bad。
+        assert!(parse_dsh_session("not json", "b.json", 1, &mut bad).is_empty());
+        assert_eq!(bad, 2);
+        // 有量但沒有 modelSelection → 仍要記，用明確的佔位字串（不可靜默丟掉用量）。
+        let nomodel = r#"{"record":{"rows":{"tokenUsage":{"val":{"totals":
+            {"uncachedInputTokens":5,"outputTokens":2,"cacheReadTokens":0,"cacheWriteTokens":0}}}}}}"#;
+        let rows = parse_dsh_session(nomodel, "x.json", 7, &mut bad);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].model_raw, "(DSH 未記錄模型)");
+        assert_eq!(rows[0].in_tok, 5);
+    }
+
+    #[test]
+    fn dsh_scan_counts_projections() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let sdir = home
+            .join(".dsh")
+            .join("storages")
+            .join("session_projcache")
+            .join("sessions");
+        std::fs::create_dir_all(&sdir).unwrap();
+        std::fs::write(sdir.join("a.json"), "{}").unwrap();
+        std::fs::write(sdir.join("b.json"), "{}").unwrap();
+        std::fs::write(sdir.join("ignore.txt"), "x").unwrap();
+        let got = scan_history(home);
+        let dsh = got.iter().find(|t| t.tool == "dsh").expect("要有 dsh");
+        assert_eq!(dsh.files, 2, "只算 .json");
+        assert_eq!(dsh.sessions, 2, "一個投影檔就是一場會話");
+        assert!(dsh.bytes > 0);
     }
 
     #[test]
@@ -265,9 +341,16 @@ use super::parse::{parse_claude_file, parse_codex_file, parse_opencode_db};
         )
         .unwrap();
         let tools = scan_history(home.path());
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
         assert_eq!(tools[0].tool, "claude");
         assert_eq!(tools[0].files, 1);
         assert_eq!(tools[2].tool, "opencode");
         assert_eq!(tools[2].files, 0);
+        // 順序固定：claude → codex → opencode → dsh（前端按這個順序列勾選框）。
+        assert_eq!(tools[3].tool, "dsh");
+        assert_eq!(tools[3].files, 0, "沒有投影目錄時回 0 而不是報錯");
+        // 掃描清單與命令層白名單必須一致 —— 新增來源時最容易只改一半
+        // （2026-09-30 的「未知工具：dsh」就是這樣發生的）。
+        let ids: Vec<&str> = tools.iter().map(|t| t.tool.as_str()).collect();
+        assert_eq!(ids, super::IMPORT_TOOLS.to_vec(), "白名單與掃描順序要一致");
     }

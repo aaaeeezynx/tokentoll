@@ -19,6 +19,7 @@ export function HistoryImportDialog(props: { onClose: () => void }) {
     claude: true,
     codex: true,
     opencode: true,
+    dsh: true,
   });
   const [result, setResult] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -86,7 +87,7 @@ export function HistoryImportDialog(props: { onClose: () => void }) {
       <div className={`w-full max-w-lg glass-panel p-5 ${closing ? "sheet-out" : "pop-in"}`}>
         <div className="mb-1 text-sm font-medium text-white/80">歷史回填</div>
         <p className="mb-3 text-xs text-white/30">
-          離線解析本機會話（Claude / Codex / OpenCode），寫入用量統計。
+          離線解析本機會話（Claude / Codex / OpenCode / DeepSeek Harness），寫入用量統計。
           已回填過的不重複；與網關日誌疑似重複的自動跳過；費用按當前定價快照計算。
         </p>
         {scan.isPending && (
@@ -106,7 +107,7 @@ export function HistoryImportDialog(props: { onClose: () => void }) {
               disabled={t.files === 0}
               onChange={() => toggle(t.tool)}
             />
-            <span className="w-20">{t.tool}</span>
+            <span className="w-32">{appLabel(t.tool)}</span>
             <span className="text-xs text-white/30">
               {t.files === 0
                 ? "無數據"

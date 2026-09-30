@@ -4,7 +4,7 @@ use rusqlite::OpenFlags;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-use super::collect_jsonl_files;
+use super::{collect_json_files, collect_jsonl_files};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanTool {
@@ -50,6 +50,18 @@ pub fn scan_history(home: &Path) -> Vec<ScanTool> {
         bytes,
         sessions,
     });
+    // DSH：專案快取裡的 per-session 用量投影，一個 `.json` 就是一場會話。
+    let mut dsh_files = Vec::new();
+    collect_json_files(
+        &home
+            .join(".dsh")
+            .join("storages")
+            .join("session_projcache")
+            .join("sessions"),
+        &mut dsh_files,
+    );
+    let dsh_sessions = dsh_files.len();
+    tools.push(summarize("dsh", dsh_files, dsh_sessions));
     tools
 }
 

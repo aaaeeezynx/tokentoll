@@ -33,7 +33,7 @@ pub async fn history_import(
     tools: Vec<String>,
 ) -> Result<history::ImportSummary, String> {
     for t in &tools {
-        if !["claude", "codex", "opencode"].contains(&t.as_str()) {
+        if !history::IMPORT_TOOLS.contains(&t.as_str()) {
             return Err(format!("未知工具：{t}"));
         }
     }

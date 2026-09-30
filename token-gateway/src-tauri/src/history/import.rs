@@ -5,8 +5,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 use super::commit::{commit_rows, gc_orphans, provider_name_map, state_fingerprint};
-use super::parse::{parse_claude_file, parse_codex_file, parse_opencode_db};
-use super::{collect_jsonl_files, file_fp};
+use super::parse::{parse_claude_file, parse_codex_file, parse_dsh_session, parse_opencode_db};
+use super::{collect_json_files, collect_jsonl_files, file_fp};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolImportStat {
@@ -41,7 +41,7 @@ pub struct ImportSummary {
 
 // ---------------------------------------------------------------- 入口 ---
 
-/// 回填主入口。`tools` 子集自 {"claude","codex","opencode"}；空 = 全不做。
+/// 回填主入口。`tools` 子集自 {"claude","codex","opencode","dsh"}；空 = 全不做。
 /// 文件類按 (mtime, size) 冪等；opencode 整庫單指紋（會話增改即全量重導，
 /// 量小無壓力）；每工具結束時清理來源已消失的孤兒行。
 pub fn import_history(conn: &Connection, tools: &[String]) -> Result<ImportSummary, String> {
@@ -173,6 +173,50 @@ pub fn import_history(conn: &Connection, tools: &[String]) -> Result<ImportSumma
             }
             gc_orphans(conn, "opencode", &keep)?;
         }
+        sum.per_tool.push(st);
+    }
+
+    if want("dsh") {
+        // DSH 的用量投影：一場會話一個 `.json`，按 (mtime, size) 冪等（與
+        // claude／codex 同一個檔案級機制）。投影檔會被 DSH 持續改寫，所以進行中的
+        // 會話每次掃到都會重算，這是刻意的：那一列的數字會跟著會話長大。
+        let mut files = Vec::new();
+        collect_json_files(
+            &home
+                .join(".dsh")
+                .join("storages")
+                .join("session_projcache")
+                .join("sessions"),
+            &mut files,
+        );
+        let mut st = ToolImportStat {
+            tool: "dsh".into(),
+            files: 0,
+            rows: 0,
+            tokens: 0,
+            cost_usd: 0.0,
+        };
+        let mut keep = std::collections::HashSet::new();
+        for f in &files {
+            sum.files_scanned += 1;
+            let path = f.to_string_lossy().to_string();
+            keep.insert(path.clone());
+            let fp = file_fp(f);
+            if state_fingerprint(conn, "dsh", &path) == Some(fp) {
+                sum.files_unchanged += 1;
+                continue;
+            }
+            let text = std::fs::read_to_string(f).map_err(|e| e.to_string())?;
+            let rows = parse_dsh_session(&text, &path, fp.0, &mut sum.bad_lines);
+            let del = vec![path.clone()];
+            acc!(
+                st,
+                commit_rows(conn, "dsh", &path, fp, &rows, &del, &mut unpriced)?
+            );
+            sum.files_imported += 1;
+            st.files += 1;
+        }
+        gc_orphans(conn, "dsh", &keep)?;
         sum.per_tool.push(st);
     }
 

@@ -1,8 +1,10 @@
 //! M5：歷史回填 — 離線解析本機會話並冪等寫入 `request_logs`。
 //!
-//! 來源有三：Claude Code（`~/.claude/projects/**/*.jsonl`，按 assistant 訊息計）、
+//! 來源有四：Claude Code（`~/.claude/projects/**/*.jsonl`，按 assistant 訊息計）、
 //! Codex（`~/.codex/sessions/**/*.jsonl`，按 `token_usage_record` 計）、
-//! OpenCode（`~/.local/share/opencode/opencode.db` 的 `session` 表，按會話計）。
+//! OpenCode（`~/.local/share/opencode/opencode.db` 的 `session` 表，按會話計）、
+//! DeepSeek Harness（`~/.dsh/storages/session_projcache/sessions/*.json` 的
+//! `record.rows.tokenUsage.val.totals`，按會話計 —— 與 OpenCode 同口徑）。
 //!
 //! 寫入列標 `source='import'`、`import_path=來源文件`；key/provider 未知記 NULL
 //! （OpenCode 會話按 `providerID` 名稱回填渠道，能對上才寫）。
@@ -40,6 +42,13 @@ pub use import::*;
 pub use scan::*;
 
 pub const IMPORT_SOURCE: &str = "import";
+
+/// 可回填的工具。**順序**即 `scan_history` 的回傳順序，也是前端勾選框的順序。
+///
+/// 只留這一份：命令層的白名單（`commands::logs_history`）與掃描／回填都引用它 ——
+/// 2026-09-30 就是只改一半才出事的：DSH 加進了掃描與回填，卻忘了加命令層白名單，
+/// 使用者按下「開始回填」得到「未知工具：dsh」。`scan_lists_tools` 會把兩者綁住。
+pub const IMPORT_TOOLS: [&str; 4] = ["claude", "codex", "opencode", "dsh"];
 /// 與網關日誌疑似重複的時間容差（毫秒）。
 const DUPE_WINDOW_MS: i64 = 120_000;
 
@@ -90,20 +99,27 @@ fn file_fp(path: &Path) -> (i64, i64) {
     (mtime, size)
 }
 
-/// 遞迴收集目錄下所有 `.jsonl`（大小寫不敏感）。
-fn collect_jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
+/// 遞迴收集目錄下指定副檔名的檔案（大小寫不敏感）。
+fn collect_files_with_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for e in entries.filter_map(|e| e.ok()) {
         let p = e.path();
         if p.is_dir() {
-            collect_jsonl_files(&p, out);
-        } else if p
-            .extension()
-            .is_some_and(|x| x.eq_ignore_ascii_case("jsonl"))
-        {
+            collect_files_with_ext(&p, ext, out);
+        } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case(ext)) {
             out.push(p);
         }
     }
+}
+
+/// 遞迴收集目錄下所有 `.jsonl`（大小寫不敏感）。
+fn collect_jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    collect_files_with_ext(dir, "jsonl", out);
+}
+
+/// 遞迴收集目錄下所有 `.json`（大小寫不敏感）——DSH 的會話用量投影用這種檔名。
+fn collect_json_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    collect_files_with_ext(dir, "json", out);
 }
