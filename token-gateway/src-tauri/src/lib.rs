@@ -9,6 +9,7 @@ mod mcp;
 mod models;
 mod price_extract;
 mod presets;
+mod prompt;
 mod provider_check;
 mod providers;
 mod providers_io;
@@ -148,6 +149,16 @@ pub fn run() {
             commands::mcp_set_app_all,
             commands::mcp_sync,
             commands::mcp_import,
+            // 提示詞預設集（P3.2，見 prompt/）
+            commands::prompt_apps,
+            commands::prompt_state,
+            commands::prompt_list,
+            commands::prompt_save,
+            commands::prompt_activate,
+            commands::prompt_deactivate,
+            commands::prompt_delete,
+            commands::prompt_sync,
+            commands::prompt_live,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

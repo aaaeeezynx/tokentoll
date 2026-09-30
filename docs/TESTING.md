@@ -776,6 +776,76 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.24 提示詞預設集（P3.2，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §3.2 抄）
+
+- **逐工具分開管理**（「Prompts are managed separately per app」），每個預設集＝
+  名稱 ＋ Markdown 內容。
+- **同時只能有一個啟用**：啟用新的會自動把舊的關掉。
+- 啟用後寫進該工具的檔案：Claude `~/.claude/CLAUDE.md`、
+  Codex `~/.codex/AGENTS.md`、OpenCode `~/.config/opencode/AGENTS.md`。
+- **智慧回填（smart backfill）**：切換預設集之前先讀現行檔案，若與資料庫裡那個
+  預設集不同（代表使用者手改過），**先把檔案內容存回舊的預設集**再切。
+  觸發時機：切換預設集、編輯現行預設集、首次啟動匯入現有檔案。
+  沒有啟用中的預設集時不回填。
+- **啟用中的預設集不能刪**，要先關掉。
+- 面板有 Markdown 編輯器（語法高亮＋即時預覽）。
+
+#### 我們做的（`prompt/`，schema v12）
+
+| 部分 | 內容 |
+|---|---|
+| 資料表 | `prompt_presets`（app／name／content／active） |
+| 範圍 | 只服務可接管的三個工具（共用 `TAKEOVER_APPS`），路徑照 cc-switch 的對照表 |
+| 單一啟用 | `activate` 用交易把同工具其他列關掉（有測試） |
+| 回填 | `activate_and_sync`：讀檔 → 回填舊的 → 切換 → 寫新的（順序見下） |
+| 首次匯入 | 該工具一列都沒有、檔案有內容 → 收成「現有內容」並啟用（面板載入時） |
+| 刪除保護 | 啟用中的預設集會被拒絕，訊息直說要先關掉 |
+| 編輯器 | 純 textarea ＋**簡易預覽**（標題／清單／程式碼／粗體，`miniMarkdown`）—— 沒有引入 Markdown 引擎，這是刻意的簡化 |
+| 安全 | 原子寫入 ＋ 改寫前備份到 `backups/<工具>-prompt/`（保留 5 份，`fsutil::backup_text` 與 MCP 共用） |
+
+#### 實作時被測試逼出來的三條順序規則（都已寫成測試）
+
+1. **切換時一定要先回填舊的、再寫新的。** 先 `activate` 再同步的話，回填會把
+   現行檔案存進**新**預設集，使用者剛切過去的內容立刻被舊檔案蓋掉。
+2. **存檔路徑不回填。** 編輯啟用中的預設集後，使用者的編輯就是意圖；
+   這時候回填會把它換成舊檔案內容。所以存檔走 `write_active`（只寫，不回填）。
+3. **檔案不存在時不回填。** 沒有檔案＝沒有手改要救；否則會把空內容回填進舊預設集，
+   把使用者的預設集清空。
+
+#### ⚠️ 一次真實事故與它的修法（必讀）
+
+**症狀**：單元測試把使用者真實的 `~/.codex/AGENTS.md`（4,139 bytes 的個人化提示）
+覆蓋成測試字串 `B 的內容`。原因是測試呼叫了**會自己解析主目錄**的
+`activate_and_sync`，而它寫的是真檔；那份備份又落在測試的暫存目錄裡，隨測試結束被刪掉。
+
+**復原**：Codex 會把 `AGENTS.md` 注入 session 的 `<user_instructions>`，
+所以從 `~/.codex/sessions/**/rollout-*.jsonl` 把原文撈回來 ——
+還原長度 **4,139 bytes，與原始檔完全相同**，內容與第一行都對得上
+（`.workbuddy/tmp/recover_agents.py`）。已還原並用 `codex exec` 確認可用。
+
+**結構性修法**：新增 `guard_not_real_path()` —— 所有「會解析主目錄」的入口
+（`sync_app`／`activate_and_sync`／`write_active`／`ensure_imported`）在**測試建置裡
+一律直接拒絕**，並要求測試走 `*_at` / `*_ex` 版本自己傳暫存路徑。
+跑完整套測試後再次確認使用者的檔案長度不變（4,139 bytes）。
+
+> 這條教訓的一般化版本：**「測試會寫檔」的模組，寫入入口必須要求呼叫端明講路徑**，
+> 便利包裝（自己解析路徑的那種）只能給正式命令用，而且要在測試建置裡上鎖。
+
+#### 測試（21 個新測試）
+
+- `prompt`（3）：三個工具都可用、其他工具被拒、名稱驗證（空／過長／去空白）、
+  內容大小上限。
+- `prompt::store`（5）：CRUD、**同工具只能有一個啟用**（且不影響別的工具）、
+  **啟用中的不能刪**、編輯內容不會動啟用狀態、`overwrite_content` 只動內容。
+- `prompt::sync`（13）：回填會把檔案內容存回舊預設集、沒有啟用中就不回填、
+  路徑對照表、**寫檔＋備份**、**切換時的回填順序**、**存檔不回填**、
+  首次匯入（含「內容相同就不重寫」「第二次不再匯入」「空檔案不匯入」）、
+  檔案不存在時會被建立、以及 `guard_not_real_path` 的行為。
+
+---
+
 ### 0.9.23 MCP 伺服器管理（P3.1，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §3.1 抄）
@@ -2460,7 +2530,61 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.23 最新建置（2026-10-01 03:22，P3.1：MCP 伺服器管理）—— **你目前安裝的就是這一個**
+### 9.24 最新建置（2026-10-01 03:49，P3.2：提示詞預設集）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P3.2（設計、取捨與一次事故的修法見 §0.9.24）。**schema 11 → 12**
+（新增 `prompt_presets`）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 03:49:17 |
+| `target\release\token-gateway.exe` | 9,621,504 bytes、sha256 `B887B201653F38400550125089242A40C3D70321EDF2282FFD298852A6BF8698` |
+| NSIS 安裝檔 | 4,037,619 bytes、sha256 `55935733472FE73590C6B414127A4DCF42FEE5A5A1096549F93B5F6CEBDE0801` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,621,504 bytes、sha256 `3BB4A99B296DF7EF72B751951F004855A9DD6EF1DE564E2C2D7F35C92BCCBF30` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **362 passed / 0 failed / 8 ignored** ✅（+18 淨增：prompt 模組 21 個測試，其中 3 個是改寫既有測試） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | **12** ✅ |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/prompt/{mod,store,sync}.rs` | **新增**：型別與驗證、DB 存取（單一啟用）、同步與智慧回填、**測試不得碰真實路徑的安全鎖** |
+| `src-tauri/src/commands/prompt_cmd.rs` | **新增**：`prompt_apps／state／list／save／activate／deactivate／delete／sync／live` |
+| `src-tauri/src/fsutil.rs` | 新增 `backup_text`（與 MCP 共用的備份＋輪換） |
+| `src-tauri/src/mcp/apply.rs` | 改用 `fsutil::backup_text`（移除重複的備份實作） |
+| `src-tauri/src/db/{schema,mod}.rs`、`db/tests/{fresh,migrate}.rs` | 新表、版本 11→12、核心表清單 |
+| `src/components/Prompts.tsx`、`src/components/prompts/PromptEditor.tsx` | **新增**：提示詞頁（逐工具頁籤／啟用／編輯／刪除／重新同步／看檔案）與編輯器（含簡易預覽） |
+| `src/App.tsx`、`src/lib/{api,apiTypes}.ts` | 導覽新增「提示詞」與型別／API |
+
+#### 實機驗證（安裝後的真實 App，CDP 讀畫面 ＋ 檔案雜湊比對）
+
+對象是使用者真實的 `~/.codex/AGENTS.md`（4,139 bytes 的個人化提示），
+驗證前先存基線複本與雜湊，驗證後逐項比對（`.workbuddy/tmp/prompt_baseline.py`）。
+
+| 驗證項 | 結果 |
+|---|---|
+| 提示詞頁與工具頁籤 | ✅ 導覽出現「提示詞」；切到 Codex 顯示 `AGENTS.md（4139 bytes）` |
+| **首次啟動匯入** | ✅ 清單出現「**現有內容**（啟用中，1571 字元）」—— 你原本的 AGENTS.md 被收成預設集 |
+| 新增預設集 | ✅ 「已儲存「測試預設」（尚未啟用）」；預覽切換正常 |
+| **啟用＝寫進檔案** | ✅ 「已啟用；已寫入檔案；已備份 …\\backups\\codex-prompt\\AGENTS.md.bak-20261001-035003」；檔案變成 37 bytes（新預設集的內容），**備份檔正好是 4,139 bytes** |
+| **智慧回填（核心）** | ✅ 模擬使用者手改（37 → 68 bytes）→ 按「重新同步」→「**已把檔案內容回填到「測試預設」**」；接著啟用「現有內容」→ 檔案寫回原內容 |
+| 回填後檔案逐位元還原 | ✅ 比對結果 **`same: true`（4,139 bytes，與驗證前完全相同）** |
+| 停用＋刪除 | ✅ 停用 → 刪掉兩個測試預設集 → 面板回到空狀態、資料庫 0 列 |
+| CLI 仍正常 | ✅ `codex exec -m grok-4.7` → `P32-OK`；你的 AGENTS.md 仍是 4,139 bytes（sha `B67E238D…`） |
+
+> **這一輪發生過一次真實事故並已完全修復**：單元測試誤把使用者的
+> `~/.codex/AGENTS.md` 覆蓋掉。內容從 Codex 自己的 session log 還原
+> （**4,139 bytes，與原始檔完全相同**），並加了結構性防護：
+> 所有會解析主目錄的寫入入口在測試建置裡一律拒絕（§0.9.24）。
+
+### 9.23 前一次建置（2026-10-01 03:22，P3.1：MCP 伺服器管理，已被 9.24 取代）
 
 CC Switch 對齊計畫 P3 的第一塊（設計與取捨見 §0.9.23）。**schema 從 10 升到 11**
 （新增 `mcp_servers`／`mcp_bindings`，純新增表）。

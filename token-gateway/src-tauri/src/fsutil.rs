@@ -32,8 +32,7 @@ pub fn backup_stamp() -> String {
 
 /// 備份輪換：保留 `dir` 下屬於該 stem 的最近 `keep` 個檔案。
 /// 檔名形如 `{stem}.bak-{stamp}`（同秒重複備份另有 `-{n}` 後綴，見 unique_backup_name）。
-pub fn rotate_backups(dir: &Path, stem: &str, keep: usize) -> std::io::Result<()> {
-    let prefix = format!("{stem}.bak");
+pub fn rotate_backups(dir: &Path, stem: &str, keep: usize) -> std::io::Result<()> {    let prefix = format!("{stem}.bak");
     let mut olds: Vec<PathBuf> = fs::read_dir(dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
@@ -65,4 +64,27 @@ pub fn unique_backup_name(dir: &Path, base: &str) -> PathBuf {
         }
         i += 1;
     }
+}
+
+/// 改寫某個檔案前，把原內容備份起來。
+///
+/// 備份放 `<app_data>/backups/<group>/`（`group` 例如 `codex-mcp`、`claude-prompt`），
+/// **刻意與接管的備份分開**：接管的輪換只留 1 份，混在一起會把「接管前」的基準備份擠掉。
+/// 回傳備份檔的完整路徑；建目錄或寫入失敗就回 `None`（備份失敗不該擋住主流程，
+/// 但要讓呼叫端有機會回報）。
+pub fn backup_text(
+    app_data: &Path,
+    group: &str,
+    file: &Path,
+    text: &str,
+    keep: usize,
+) -> Option<String> {
+    let dir = app_data.join("backups").join(group);
+    fs::create_dir_all(&dir).ok()?;
+    let stem = file.file_name()?.to_str()?;
+    let name = format!("{stem}.bak-{}", backup_stamp());
+    let dest = unique_backup_name(&dir, &name);
+    fs::write(&dest, text).ok()?;
+    let _ = rotate_backups(&dir, stem, keep);
+    Some(dest.to_string_lossy().to_string())
 }

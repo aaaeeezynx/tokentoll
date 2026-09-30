@@ -28,6 +28,11 @@ import type {
   PricingPeriod,
   PricingPeriodInput,
   Preset,
+  PromptApp,
+  PromptBackfill,
+  PromptInput,
+  PromptPanelState,
+  PromptPreset,
   Provider,
   ProviderInput,
   ProviderPricing,
@@ -160,6 +165,26 @@ export const api = {
     invoke("mcp_set_app_all", { target, enabled }),
   mcpSync: (): Promise<McpSyncOutcome[]> => invoke("mcp_sync"),
   mcpImport: (): Promise<McpImportReport> => invoke("mcp_import"),
+  // ── P3.2 提示詞預設集 ──
+  promptApps: (): Promise<PromptApp[]> => invoke("prompt_apps"),
+  /** 面板狀態（順便做首次啟動匯入）。 */
+  promptState: (app: string): Promise<PromptPanelState> =>
+    invoke("prompt_state", { app }),
+  promptList: (app: string): Promise<PromptPreset[]> =>
+    invoke("prompt_list", { app }),
+  promptSave: (input: PromptInput): Promise<PromptPreset> =>
+    invoke("prompt_save", { input }),
+  /** 啟用（切換前會先把檔案內容回填到舊的預設集）。 */
+  promptActivate: (id: number): Promise<PromptBackfill> =>
+    invoke("prompt_activate", { id }),
+  promptDeactivate: (target: string): Promise<void> =>
+    invoke("prompt_deactivate", { target }),
+  promptDelete: (id: number): Promise<void> => invoke("prompt_delete", { id }),
+  promptSync: (target: string): Promise<PromptBackfill> =>
+    invoke("prompt_sync", { target }),
+  /** 讀目前檔案內容（唯讀）。 */
+  promptLive: (target: string): Promise<string> =>
+    invoke("prompt_live", { target }),
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),
   toolVersions: (): Promise<ToolVersion[]> => invoke("tool_versions"),

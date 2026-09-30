@@ -249,6 +249,20 @@ CREATE TABLE IF NOT EXISTS mcp_bindings (
     enabled   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (server_id, app)
 );
+
+-- 提示詞預設集（P3.2，對標 cc-switch 的 Prompts Management）。
+-- 逐工具分開管理（cc-switch 也是這樣：「Prompts are managed separately per app」）；
+-- 每個工具**同時只能有一個啟用**（啟用新的會把舊的關掉）。
+CREATE TABLE IF NOT EXISTS prompt_presets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    app        TEXT NOT NULL,                  -- claude | codex | opencode
+    name       TEXT NOT NULL,
+    content    TEXT NOT NULL DEFAULT '',
+    active     INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_prompt_app ON prompt_presets(app, id);
 "#;
 
 /// 內置種子定價（美元/百萬 token，source='seed'；未知模型費用記 0，M4 做定價管理）。

@@ -31,6 +31,7 @@ use super::*;
             "provider_usage_query",
             "mcp_servers",
             "mcp_bindings",
+            "prompt_presets",
             "proxy_trace",
         ] {
             assert!(has_table(&c, t), "缺少表 {t}");

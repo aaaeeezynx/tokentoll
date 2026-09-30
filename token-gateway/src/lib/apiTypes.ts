@@ -332,6 +332,58 @@ export interface McpImportReport {
   imported: string[];
 }
 
+// ── P3.2：提示詞預設集（對標 cc-switch 的 Prompts Management） ──
+
+export interface PromptPreset {
+  id: number;
+  /** claude | codex | opencode */
+  app: string;
+  name: string;
+  content: string;
+  active: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PromptInput {
+  id?: number | null;
+  app: string;
+  name: string;
+  content: string;
+}
+
+export interface PromptApp {
+  app: string;
+  display: string;
+  path: string;
+  installed: boolean;
+}
+
+/** 面板狀態：檔案路徑、大小、啟用中的預設集、檔案是否被手改過。 */
+export interface PromptPanelState {
+  app: string;
+  path: string;
+  file_exists: boolean;
+  live_bytes: number;
+  active_id: number | null;
+  active_name: string;
+  /** 檔案內容與啟用中的預設集不同 → 切換時會先把它存回該預設集 */
+  dirty: boolean;
+}
+
+/** 一次同步（含回填）的結果。 */
+export interface PromptBackfill {
+  app: string;
+  path: string;
+  backfilled_into: string;
+  backfilled_bytes: number;
+  wrote_file: boolean;
+  backup: string | null;
+  /** 首次啟動自動匯入的預設集名稱（沒有就空） */
+  imported: string;
+  message: string;
+}
+
 export interface AppSettings {
   gateway_port: number;
   auto_start_proxy: boolean;

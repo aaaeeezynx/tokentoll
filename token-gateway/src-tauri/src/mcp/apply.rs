@@ -270,33 +270,9 @@ pub(crate) fn edit_codex_toml(
 }
 
 /// 寫入前備份（放 `<app_data>/backups/<app>-mcp/`，與接管的備份分開）。
+/// 共用 `fsutil::backup_text`（`prompt` 模組也用同一支，避免兩份輪換邏輯）。
 fn backup_file(app_data: &Path, app: &str, file: &Path, text: &str) -> Option<String> {
-    let dir = app_data.join("backups").join(format!("{app}-mcp"));
-    std::fs::create_dir_all(&dir).ok()?;
-    let stem = file.file_name()?.to_str()?;
-    let name = format!("{stem}.bak-{}", crate::fsutil::backup_stamp());
-    let dest = crate::fsutil::unique_backup_name(&dir, &name);
-    std::fs::write(&dest, text).ok()?;
-    prune_backups(&dir, MCP_BACKUP_KEEP);
-    Some(dest.to_string_lossy().to_string())
-}
-
-/// 只保留最近 N 份 MCP 備份（依檔名排序＝時間序，`backup_stamp` 可排序）。
-fn prune_backups(dir: &Path, keep: usize) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut files: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file())
-        .collect();
-    files.sort();
-    if files.len() <= keep {
-        return;
-    }
-    for p in &files[..files.len() - keep] {
-        let _ = std::fs::remove_file(p);
-    }
+    crate::fsutil::backup_text(app_data, &format!("{app}-mcp"), file, text, MCP_BACKUP_KEEP)
 }
 
 /// 讀設定檔目前的內容（不存在就 `None`）。
