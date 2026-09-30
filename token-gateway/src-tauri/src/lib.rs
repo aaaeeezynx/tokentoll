@@ -127,6 +127,8 @@ pub fn run() {
             commands::provider_stripped_list,
             commands::provider_stripped_all,
             commands::provider_stripped_clear,
+            // 來源健康狀態（斷路器，見 proxy/health.rs）
+            commands::source_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -230,3 +230,89 @@
         assert!(text.contains("from-backup-src"), "{text}");
         gw.abort();
     }
+
+    /// ③ 斷路器：同一個死來源連續失敗 3 次後就不再優先嘗試它。
+    ///
+    /// 觀測點是**這個測試自己的資料庫**：連接失敗會寫一筆 `upstream_status=502`
+    /// 的追蹤（`log_reject`），所以「502 的筆數有沒有再增加」就是「有沒有再去撞
+    /// 那個死來源」的直接證據。
+    #[tokio::test]
+    async fn e2e_circuit_breaker_stops_probing_dead_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("fo3.db");
+        let secret = {
+            let conn = crate::db::open_and_ensure(&db_path).unwrap();
+            let dead = insert_provider(&conn, "brk-dead", "openai-chat", "http://127.0.0.1:9");
+            add_model(&conn, dead, "brk-model");
+            make_key(&conn, dead, "fo3")
+        };
+        let fake = axum::Router::new().fallback(
+            |_uri: axum::http::Uri, body: axum::Json<serde_json::Value>| async move {
+                assert_eq!(body["model"], "brk-model");
+                axum::Json(serde_json::json!({
+                    "id": "chatcmpl-fo3",
+                    "model": "brk-model",
+                    "choices": [{"message": {"role": "assistant", "content": "from-backup"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 1}
+                }))
+                .into_response()
+            },
+        );
+        let fake_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let fake_port = fake_l.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(fake_l, fake).await.unwrap() });
+        {
+            let conn = crate::db::open_and_ensure(&db_path).unwrap();
+            let backup = insert_provider(
+                &conn,
+                "brk-backup",
+                "openai-chat",
+                &format!("http://127.0.0.1:{fake_port}"),
+            );
+            add_model(&conn, backup, "brk-model");
+        }
+        let gw_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gw_port = gw_l.local_addr().unwrap().port();
+        let gw = tokio::spawn(serve(db_path.clone(), gw_l));
+        let http = Client::new();
+        let call = || {
+            http.post(format!("http://127.0.0.1:{gw_port}/v1/chat/completions"))
+                .bearer_auth(&secret)
+                .json(&serde_json::json!({"model": "brk-model", "messages": [{"role": "user", "content": "hi"}]}))
+        };
+
+        // 502 追蹤筆數（= 撞了幾次死來源）
+        let count_502 = || -> i64 {
+            let conn = open_conn(&db_path).unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM proxy_trace WHERE upstream_status=502",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        // 前三次：死來源都排在前面被撞一次 → 502 逐次增加，但使用者一律拿到 200。
+        for i in 1..=3 {
+            let r = call().send().await.unwrap();
+            assert_eq!(r.status(), 200, "第 {i} 次應該換手成功");
+            let t = r.text().await.unwrap();
+            assert!(t.contains("from-backup"), "第 {i} 次：{t}");
+            assert_eq!(count_502(), i, "第 {i} 次應該撞到死來源一次");
+        }
+
+        // 第四次：死來源已達門檻（連續失敗 3 次）→ 排到最後，備援來源先被試到，
+        // 因此**不該再產生任何 502**。
+        let before = count_502();
+        let r = call().send().await.unwrap();
+        assert_eq!(r.status(), 200);
+        let t = r.text().await.unwrap();
+        assert!(t.contains("from-backup"), "{t}");
+        assert_eq!(
+            count_502(),
+            before,
+            "來源已跳開，不該再去撞它（原本 {before} 筆，現在 {} 筆）",
+            count_502()
+        );
+        gw.abort();
+    }

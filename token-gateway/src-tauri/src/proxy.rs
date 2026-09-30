@@ -55,6 +55,7 @@ mod finish;
 mod pipeline;
 mod reqctx;
 mod failover;
+mod health;
 
 // 子模組共用匯入：各子模組開頭的 `use super::*;` 會取得這裡的綁定，
 // 因此某個模組要用兄弟模組的項目時，只要在這裡補一行即可。
@@ -67,7 +68,8 @@ use {
         strip_for_upstream, translate_forward_body, BodyPrep, ForwardBody, ReroutedProvider,
         TransSpec,
     },
-    failover::{learn_format, learned_format, plan_attempts},
+    failover::{learn_format, learned_format, plan_attempts, Attempt},
+    health::{order_by_health, HealthRegistry},
     logging::{err_json, extract_usage, insert_log, log_reject, reject, SseAcc},
     pipeline::{
         prepare_request, prelude, request_meta, resolve_model, upstream_for, PrepareInput, Prepared,
@@ -93,6 +95,8 @@ use {
 // normalize_model）。拆檔後必須在這裡重新匯出，否則那些路徑會斷。
 pub(crate) use logging::{recent_logs, LogRow};
 pub(crate) use util::{check_port, normalize_model};
+// 診斷命令要讀「來源健康狀態」（`commands/diagnostics.rs` 的 `source_health`）。
+pub(crate) use health::for_db as health_registry;
 
 mod matrix;
 
@@ -112,6 +116,9 @@ pub(crate) struct ProxyCtx {
     pub db_path: PathBuf,
     pub client: Client,
     pub rate: RateLimiter,
+    /// 來源健康狀態（斷路器）：跨請求記住「哪個來源剛剛連續失敗」，
+    /// 冷卻中的來源在候選佇列裡會被排到最後。見 `proxy/health.rs`。
+    pub health: HealthRegistry,
 }
 
 #[derive(Clone, Default)]
@@ -207,6 +214,8 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         .as_deref(),
         &others,
     );
+    // 斷路器：連續失敗的來源排到最後（一個都不丟，見 `health.rs`）
+    let attempts = order_by_health(attempts, &ctx.health);
     let total = attempts.len();
     let mut last_reject: Option<Box<Response>> = None;
     let mut success: Option<(reqwest::Response, Prepared, bool)> = None;
@@ -261,29 +270,39 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         )
         .await;
         match outcome {
-            SendOutcome::Ok(r) if r.status().is_server_error() && i + 1 < total => {
-                trace::log_to(
-                    &ctx.db_path,
-                    &TraceRecord {
-                        app: app.clone(),
-                        model_raw: model_raw.clone(),
-                        in_fmt: prep.in_fmt.as_str().to_string(),
-                        target_fmt: prep.target_fmt.as_str().to_string(),
-                        trans_kind: prep.kind.as_str().to_string(),
-                        upstream_status: r.status().as_u16(),
-                        latency_ms: started.elapsed().as_millis() as i64,
-                        note: format!(
-                            "上游 {}：換下一個候選（來源 {}／協議 {}）重試",
-                            r.status().as_u16(),
-                            at.provider_id,
-                            at.api_format
-                        ),
-                        ..Default::default()
-                    }
-                    .warn(),
-                );
+            SendOutcome::Ok(r) if r.status().is_server_error() => {
+                // 上游 5xx = 來源不健康（但不代表不能用：照舊把回應交給收尾階段）
+                ctx.health
+                    .record_failure(at.provider_id, &format!("上游 {}", r.status().as_u16()));
+                if i + 1 < total {
+                    trace::log_to(
+                        &ctx.db_path,
+                        &TraceRecord {
+                            app: app.clone(),
+                            model_raw: model_raw.clone(),
+                            in_fmt: prep.in_fmt.as_str().to_string(),
+                            target_fmt: prep.target_fmt.as_str().to_string(),
+                            trans_kind: prep.kind.as_str().to_string(),
+                            upstream_status: r.status().as_u16(),
+                            latency_ms: started.elapsed().as_millis() as i64,
+                            note: format!(
+                                "上游 {}：換下一個候選（來源 {}／協議 {}）重試",
+                                r.status().as_u16(),
+                                at.provider_id,
+                                at.api_format
+                            ),
+                            ..Default::default()
+                        }
+                        .warn(),
+                    );
+                } else {
+                    success = Some((r, prep, translated));
+                    break;
+                }
             }
             SendOutcome::Ok(r) => {
+                // 來源活著（含上游自己的 4xx）：斷路器歸零。
+                ctx.health.record_success(at.provider_id);
                 // 記住「這個來源的這個模型用這個協議會通」，下次第一個就試它。
                 learn_format(
                     ctx.db_path.as_path(),
@@ -296,9 +315,14 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                 break;
             }
             SendOutcome::ProtocolMismatch => {
+                // 協議不支援**不算**來源不健康（來源活著、只是這個模型不在這個端點）
                 last_reject = None;
             }
             SendOutcome::Reject { resp, retryable } => {
+                // 只有「連不上」算來源不健康；矩陣／剝離造成的拒絕不算。
+                if resp.status() == StatusCode::BAD_GATEWAY {
+                    ctx.health.record_failure(at.provider_id, "上游連接失敗");
+                }
                 if retryable && i + 1 < total {
                     last_reject = Some(resp);
                 } else {
@@ -349,6 +373,8 @@ pub async fn serve(db_path: PathBuf, listener: TcpListener) -> Result<(), String
             eprintln!("gateway: 裁剪 proxy_trace 失敗: {e}");
         }
     }
+    // 健康狀態以資料庫為範圍（見 health.rs）：先取再進 struct，避免借用已搬移的值。
+    let health = health::for_db(&db_path);
     let ctx = ProxyCtx {
         db_path,
         client: Client::builder()
@@ -359,6 +385,7 @@ pub async fn serve(db_path: PathBuf, listener: TcpListener) -> Result<(), String
             .build()
             .map_err(|e| e.to_string())?,
         rate: RateLimiter::default(),
+        health,
     };
     let app = axum::Router::new()
         .fallback(proxy_handler)

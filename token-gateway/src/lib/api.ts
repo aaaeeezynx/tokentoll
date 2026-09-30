@@ -29,6 +29,7 @@ import type {
   ProxyStatus,
   SubscriptionFees,
   SubscriptionQuota,
+  SourceHealth,
   SwitchPlan,
   SwitchRequest,
   SwitchResult,
@@ -63,6 +64,7 @@ export const api = {
     invoke("provider_stripped_all"),
   providerStrippedClear: (providerId: number): Promise<number> =>
     invoke("provider_stripped_clear", { providerId }),
+  sourceHealth: (): Promise<SourceHealth[]> => invoke("source_health"),
   proxyStatus: (): Promise<ProxyStatus> => invoke("proxy_status"),
   proxyCheckPort: (port: number): Promise<void> =>
     invoke("proxy_check_port", { port }),

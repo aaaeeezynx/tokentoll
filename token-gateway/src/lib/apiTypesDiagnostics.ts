@@ -58,6 +58,34 @@ export interface StatusStat {
   count: number;
 }
 
+/** 網關學到的「這個來源的這個模型在哪種端點上架」。 */
+export interface LearnedProtocol {
+  provider_id: number;
+  /** 空字串表示來源已被刪除 */
+  provider_name: string;
+  model: string;
+  /** 來源設定宣告的協議 */
+  declared_format: string;
+  /** 實際上會通的協議（自動換手學到的） */
+  actual_format: string;
+}
+
+/** 某個來源目前的健康狀態（斷路器）。 */
+export interface SourceHealth {
+  provider_id: number;
+  /** 空字串表示來源已被刪除 */
+  provider_name: string;
+  api_format: string;
+  /** true = 冷卻中（連續失敗達門檻，暫時排到候選最後） */
+  open: boolean;
+  consecutive_failures: number;
+  /** 還要冷卻幾秒 */
+  cooldown_secs: number;
+  last_error: string;
+  secs_since_failure: number | null;
+  secs_since_success: number | null;
+}
+
 export interface TraceSummary {
   total: number;
   warn_count: number;
@@ -67,4 +95,6 @@ export interface TraceSummary {
   with_body_hex: number;
   stripped_fields: StrippedFieldStat[];
   top_status: StatusStat[];
+  /** 學到的上游協議（自動換手用，落庫、重啟仍有效） */
+  learned_protocols: LearnedProtocol[];
 }

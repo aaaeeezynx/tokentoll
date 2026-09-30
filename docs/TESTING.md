@@ -776,6 +776,68 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.19 斷路器（cc-switch 的另一半）＋健康狀態與協議記憶上到診斷頁（2026-09-30）
+
+§0.9.16 抄了 cc-switch 的 **failover queue**（來源／協議候選佇列），但它的佇列旁邊
+還有一個 **circuit breaker**：某個來源連續失敗就先「跳開」一段時間，不要每個請求都
+去撞同一面牆。這一輪補上，並且把「網關記住了什麼」真的畫到診斷頁上（§0.9.17 只做了 API）。
+
+#### 規則
+
+| 項目 | 值 | 為什麼 |
+|---|---|---|
+| 失敗門檻 | **連續 3 次** | 單次失敗（上游抖一下）不該讓來源被冷凍 |
+| 冷卻時間 | **60 秒** | 夠涵蓋上游重啟／網路瞬斷，又不會讓真正掛掉的來源被永久跳過 |
+| 冷卻期間的行為 | **排到候選最後，不是跳過** | 這是本機工具唯一的出口；全部候選都被跳過時使用者只會看到失敗。排最後＝有健康來源時省下必然失敗的等待，沒別的來源時行為與從前**完全一樣** |
+| 什麼算失敗 | **連不上**（→502）與**上游 5xx** | 這兩者才是「來源不健康」 |
+| 什麼**不**算 | **所有 4xx**（含 `400 ModelProtocolUnsupported`） | 4xx 代表來源活著、只是這個請求有問題。把協議不支援也算進去，會讓協議換手自己把自己絆倒（`grok-4.7` 第一次必定先吃一個 400 才知道要換協議，三次就把好來源冷凍了） |
+| 恢復 | 冷卻期滿自動放行**一次**（half-open）：成功即歸零，失敗立刻再跳開 | 不必等三次才知道它還是壞的 |
+| 儲存位置 | **記憶體**（`HashMap`，範圍＝資料庫） | 與「學到的協議」刻意相反：協議是上游的客觀事實，重啟不該忘；斷路器是短命的健康判斷，重啟代表重新開始 |
+
+範圍用**資料庫路徑**而不是行程全域：`provider_id` 只在單一資料庫內唯一，
+正式路徑只有一個庫（＝一個網關），而測試各起各的網關，因此互不干擾。
+
+#### 檔案
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/proxy/health.rs` | **新增**：`HealthRegistry`（`record_failure`／`record_success`／`is_open`／`snapshot`）、`order_by_health`（穩定分割：健康的在前）、`for_db`（依資料庫取表） |
+| `src-tauri/src/proxy.rs` | `ProxyCtx` 多了 `health`；候選排完先 `order_by_health`；迴圈裡按結果記成功／失敗（5xx 與連線失敗記失敗，其餘 4xx 記成功） |
+| `src-tauri/src/commands/diagnostics.rs` | **新增命令 `source_health`**：來源名稱／協議設定＋開關狀態／連續失敗次數／剩餘冷卻秒數／上次失敗與上次成功的相對時間 |
+| `src/components/diagnostics/SourceHealthList.tsx` | **新增**：診斷頁的「來源健康狀態」區塊 |
+| `src/components/diagnostics/ProtocolMemory.tsx` | **新增**：診斷頁的「協議記憶」區塊（宣告協議 → 實際協議） |
+| `src/components/diagnostics/DiagnosticsPage.tsx` | 掛上上面兩個區塊（含 10 秒自動更新與「重新整理」） |
+| `src/lib/apiTypesDiagnostics.ts` | 補 `LearnedProtocol`、`SourceHealth`，`TraceSummary` 補上原本缺的 `learned_protocols` |
+
+> **順手修掉的一個小 bug**：改寫嘗試迴圈前，`Ok(r) if r.status().is_server_error() && i + 1 < total`
+> 這條守衛讓「最後一個候選回 5xx」掉進下一條 `Ok(r)` 分支，於是**上游 5xx 也被拿去
+> `learn_format`**（把一個失敗的協議記成學到的協議）。現在 5xx 與成功分成兩個分支。
+
+#### 測試
+
+- 單元（`health.rs`，7 個）：達門檻才跳開、成功即歸零、冷卻期滿放行且再失敗立刻跳開
+  （用 60ms 冷卻實測，不是靠想像）、每個來源各自記帳、跳開者排最後但**沒有被丟掉**、
+  全部跳開時維持原順序、錯誤訊息截斷 120 字。
+- 端到端（`e2e_circuit_breaker_stops_probing_dead_source`）：一個死來源（`127.0.0.1:9`）
+  綁著 Key ＋ 一個活的備援來源登記同一個模型。前三次請求都**先撞死來源一次**
+  → 都拿到 200（換手成功），且每次各多一筆 `upstream_status=502` 的追蹤；
+  第四次因為已達門檻 → 不再產生任何 502（直接走備援）。**觀測點是這個測試自己的
+  資料庫**（不是行程內的狀態），所以這是「行為」的證據而不是「實作」的證據。
+
+#### 已知限制
+
+- 冷卻中的來源**沒有手動「立刻重試」按鈕**：60 秒後自動放行，重啟網關也會清空。
+- `source_health` 只列「有紀錄」的來源：沒被請求過的來源不會出現（沒有證據就不假裝健康）。
+- 佇列順序就是**來源清單的順序**（`providers` 的 `priority`／`id`，UI 可以拖曳重排），
+  但它是**全域**的：cc-switch 可以為**每一個工具**各排一條佇列，我們目前只有一條
+  （差異只在「同一個模型被多個工具用到時，排序無法分別調整」）。
+- 想要「同一個 `base_url`／Key 出現兩次」（例如一條宣告 chat、一條宣告 responses）
+  是**允許的** —— `providers.base_url` 沒有唯一性限制，兩條都會登記同一個模型而一起
+  進入候選。不過現在**不需要**這樣做：逐模型的協議自動回退（§0.9.16）已經處理掉
+  「同一端點、不同模型要吃不同協議」這件事。
+
+---
+
 ### 0.9.18 Claude Code 的「模型識別」策略：cc-switch 的別名法 vs 我們的真實名稱法（2026-09-30）
 
 objective 第 3 項要的取捨，寫清楚。
@@ -831,7 +893,7 @@ Claude 別名當 `display_name`（實際模型不變）即可走別名法；這�
 - 刪除來源時一併清掉（`providers.rs`），`provider_stripped_clear`（UI 的
   「重設上游能力記憶」）也一起清 —— 兩者都是「網關對這個渠道的上游能力記憶」。
 - **診斷頁看得見**：`trace_summary` 多了 `learned_protocols` 欄位
-  （來源／模型／宣告協議／實際協議），前端之後可直接渲染；現在先用 API 驗證。
+  （來源／模型／宣告協議／實際協議）；本輪先用 API 驗證，前端渲染見 §0.9.19。
 
 新增測試：`learned_protocol_persists_per_db_and_declared_format`、
 `learned_protocol_survives_reopen`（後者直接 `SELECT` 新表，證明是真的落庫而不是行程記憶），
@@ -2069,7 +2131,77 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.18 最新建置（2026-09-30 22:09，學到的協議落庫 schema v9）—— **你目前安裝的就是這一個**
+### 9.19 最新建置（2026-09-30 22:25，來源斷路器 ＋ 診斷頁看得到健康與協議）—— **你目前安裝的就是這一個**
+
+9.18 只讓「學到的協議」在 API 裡看得到；這一版把 cc-switch 的另一半（**circuit
+breaker**）補上，並把「網關記住了什麼」真的畫在診斷頁上。設計與取捨見 §0.9.19。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-30 22:25:49 |
+| `target\release\token-gateway.exe` | 9,104,896 bytes、sha256 `BFDC815182EFEC2690A150420E73F27374FE258DF939F9D207A80C06F0EF5073` |
+| NSIS 安裝檔 | 3,875,968 bytes、sha256 `2710D63B3A5AA24D188951774BDFB7A04D0AB2BA78D52A439A2E8F073305EAB7` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,104,896 bytes、sha256 `55988788270528ED72FBD04B34E014E95A0DD9D053CF0998613C616FB90FEF23` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **260 passed / 0 failed / 8 ignored** ✅（+8：7 個 `proxy::health` 單元測試、1 個斷路器 e2e） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 檔案行數 | 全部 ≤ 400 行 ✅（最大 `proxy.rs` 365、前端最大 `ChannelPricing.tsx` 368） |
+| 資料庫 schema | **仍是 9** —— 這一輪沒有動 schema，所以升級不涉及任何遷移 ✅ |
+
+#### 改到的檔案
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/proxy/health.rs` | **新增**：`HealthRegistry`（連續失敗 3 次 → 冷卻 60 秒）、`order_by_health`、`for_db` |
+| `src-tauri/src/proxy.rs` | `ProxyCtx.health`；候選先依健康狀態排序；成功／5xx／連線失敗分別記帳 |
+| `src-tauri/src/commands/diagnostics.rs` | **新增命令 `source_health`** |
+| `src/components/diagnostics/SourceHealthList.tsx`、`ProtocolMemory.tsx` | **新增**：診斷頁兩個區塊 |
+| `src/components/diagnostics/DiagnosticsPage.tsx`、`src/lib/apiTypesDiagnostics.ts`、`src/lib/api.ts` | 掛上區塊與型別 |
+| `src-tauri/src/proxy/tests/e2e_strict/failover.rs` | 新增 `e2e_circuit_breaker_stops_probing_dead_source` |
+| 文件 | 本檔 §0.9.19、§9.19 |
+
+#### 實機驗證（安裝後的真實 App ＋ 真實 CLI）
+
+| 驗證項 | 結果 |
+|---|---|
+| `codex exec -m grok-4.7 "say only: R3-OK"` | **`R3-OK`** ✅（11,199 tokens） |
+| `codex exec -m grok-4.7 "say only: H1"` | **`H1`** ✅（11,358 tokens） |
+| `codex exec -m gpt-6-luna "say only: LUNA-OK"` | **`LUNA-OK`** ✅（10,365 tokens） |
+| `codex exec -m muse-spark-1.3-contributor "say only: MUSE-OK"` | **`MUSE-OK`** ✅（11,313 tokens） |
+| 網關接聽 | `127.0.0.1:15722` LISTEN ✅ |
+| 診斷頁「協議記憶」 | ✅ 顯示真實資料：**`opencode-go #22 grok-4.7 openai-chat → openai-responses`** |
+| 診斷頁「來源健康狀態」 | ✅ 顯示真實資料：**`opencode-go #22 openai-chat 正常 上次失敗 — 上次成功 8 秒前`**（送一次請求後才出現，符合「沒紀錄就不顯示」的設計） |
+| **要求二：本機工具篩選** | ✅ 下拉實際渲染 **8 個選項**：全部本機工具、Claude Code、Codex、OpenCode、Hermes Agent、DeepSeek Harness、Cursor、Antigravity —— 缺 0 個 |
+| 協議記憶沒有退化 | ✅ DB `schema version: 9`；**協議不符的追蹤仍是 2 筆、最大 trace id 仍是 110**（那兩次 `grok-4.7` 呼叫完全沒有再探測） |
+| 學到的協議（跑完上面四個模型後） | ✅ **3 筆**：`pid=22` 的 `gpt-6-luna`／`grok-4.7`／`muse-spark-1.3-contributor`，全部 `openai-chat → openai-responses` |
+| 學習成本（探測次數） | ✅ 協議不符的追蹤 **2 → 4** 筆、最大 trace id **110 → 112**：`gpt-6-luna` 與 `muse-spark` 各**只花一次 400 就學會**，之後不再重試 |
+
+**objective 的目標模型全部實機可用**（同一個工具 Codex，走同一個來源）：
+
+| 模型 | 上游只在哪個端點 | 實機結果 |
+|---|---|---|
+| `grok-4.7` | responses | ✅ `R3-OK`／`H1` |
+| `gpt-6-luna` | responses | ✅ `LUNA-OK` |
+| `muse-spark-1.3-contributor` | responses | ✅ `MUSE-OK` |
+| `mimo-v2.6-pro` | chat | ✅ `MIMOOK`（§9.17） |
+| `deepseek-v4.1-flash` | 兩邊都有 | ✅ 既有日常使用 |
+
+最後一列是這一輪最值得看的一行：在裝了**另一個新版本**、又跑了兩次 `codex exec`、
+中間重啟過 App 之後，`grok-4.7` 仍然沒有再產生任何一次「此模型不支援本協議」的探測 ——
+代表它一開始就直接走 `/responses`，協議是從資料庫讀回來的（§9.18 的落庫在這一版繼續有效）。
+
+> **「冷卻中」那格是怎麼驗的**：不是靠把使用者正在用的來源弄壞（那會在用量裡留下
+> 假的失敗紀錄、也可能讓歷史用量歸屬變差），而是靠端到端測試
+> `e2e_circuit_breaker_stops_probing_dead_source`：真實的網關、真實的連不上的來源、
+> 真實的備援上游，並以**該測試自己的資料庫裡 `upstream_status=502` 的筆數**
+> 當證據（前三次每次 +1，第四次 +0）。畫面上的呈現則由上面那一列的真實資料驗證。
+
+### 9.18 前一次建置（2026-09-30 22:09，學到的協議落庫 schema v9，已被 9.19 取代）
 
 上一版（9.17）的換手邏輯只在**記憶體**裡記住「這個模型的真實協議」：同一個行程內有效，
 但**網關一重啟就忘光**，於是每次重開機／重啟 App 後的第一個 requests-only 模型，

@@ -191,6 +191,68 @@ pub fn provider_stripped_all(db: State<DbState>) -> Result<Vec<ProviderStripped>
     Ok(out)
 }
 
+/// 某個來源目前的健康狀態（診斷頁的來源健康區塊）。
+#[derive(Serialize)]
+pub struct SourceHealth {
+    pub provider_id: i64,
+    /// 空字串 = 該來源已被刪除（斷路器還有它的紀錄）
+    pub provider_name: String,
+    /// 該來源目前的協議設定（幫使用者對照「是不是這個來源本來就不通」）
+    pub api_format: String,
+    pub open: bool,
+    pub consecutive_failures: u32,
+    pub cooldown_secs: u64,
+    pub last_error: String,
+    pub secs_since_failure: Option<u64>,
+    pub secs_since_success: Option<u64>,
+}
+
+/// 各來源的健康狀態（斷路器）。
+///
+/// **只回「有紀錄」的來源**：完全沒被請求過的來源不會出現 —— 沒有紀錄就是沒有
+/// 證據，不該在畫面上假裝它是健康的。被刪掉的來源若還有紀錄也會列出（名稱空白），
+/// 與 `provider_stripped_all` 的處理一致：看得見，而不是靜默隱藏。
+#[tauri::command]
+pub fn source_health(db: State<DbState>) -> Result<Vec<SourceHealth>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, api_format FROM providers")
+        .map_err(|e| e.to_string())?;
+    let providers: std::collections::HashMap<i64, (String, String)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                (r.get::<_, String>(1)?, r.get::<_, String>(2)?),
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+
+    Ok(crate::proxy::health_registry(&db.path)
+        .snapshot()
+        .into_iter()
+        .map(|h| {
+            let (provider_name, api_format) = providers
+                .get(&h.provider_id)
+                .map(|(n, f)| (n.clone(), f.clone()))
+                .unwrap_or_default();
+            SourceHealth {
+                provider_id: h.provider_id,
+                provider_name,
+                api_format,
+                open: h.open,
+                consecutive_failures: h.consecutive_failures,
+                cooldown_secs: h.cooldown_secs,
+                last_error: h.last_error,
+                secs_since_failure: h.secs_since_failure,
+                secs_since_success: h.secs_since_success,
+            }
+        })
+        .collect())
+}
+
 /// 清除某渠道的拒收記憶：下次請求會重新探測上游能力。
 /// 用於「改了渠道設定後想重測」或「誤剝離導致功能缺失」時。
 ///

@@ -11,6 +11,8 @@ import { SectionHead } from "./SectionHead";
 import { Stat } from "./Stat";
 import { StatusBadge } from "./StatusBadge";
 import { TraceList } from "./TraceList";
+import { ProtocolMemory } from "./ProtocolMemory";
+import { SourceHealthList } from "./SourceHealthList";
 
 /**
  * 診斷中心（Phase 1 可觀測性）。
@@ -42,6 +44,11 @@ export default function DiagnosticsPage() {
   const stripped = useQuery({
     queryKey: ["provider_stripped_all"],
     queryFn: api.providerStrippedAll,
+    refetchInterval: 10000,
+  });
+  const health = useQuery({
+    queryKey: ["source_health"],
+    queryFn: api.sourceHealth,
     refetchInterval: 10000,
   });
 
@@ -88,6 +95,7 @@ export default function DiagnosticsPage() {
                 void qc.invalidateQueries({
                   queryKey: ["provider_stripped_all"],
                 });
+                void qc.invalidateQueries({ queryKey: ["source_health"] });
               }}
             >
               <Icon name="refresh" size={12} />
@@ -226,6 +234,47 @@ export default function DiagnosticsPage() {
         <p className="pt-3 text-[11px] leading-relaxed text-white/25">
           這份記憶持久化於 SQLite，網關重啟不會遺失 —— 原實作只存在進程記憶體，
           每次重啟都要為每個渠道重踩一次 400。
+        </p>
+      </div>
+
+      {/* ── 來源健康狀態（斷路器） ── */}
+      <div className="glass p-5">
+        <SectionHead
+          icon="bolt-fill"
+          tile="linear-gradient(160deg, #ff453a, #a01f18)"
+          title="來源健康狀態"
+          caption="連續失敗 3 次的來源冷卻 60 秒，冷卻期間排到候選最後（不是跳過）"
+        />
+        {health.isPending ? (
+          <p className="text-sm text-white/30">載入中…</p>
+        ) : health.isError ? (
+          <p className="text-sm text-white/50">
+            讀取失敗：{String(health.error)}
+          </p>
+        ) : (
+          <SourceHealthList list={health.data ?? []} />
+        )}
+        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+          只有「連不上」與「上游 5xx」算失敗；4xx（含協議不支援）代表來源活著，
+          不列入。所以協議自動換手不會把健康的來源誤標成壞掉。冷卻期滿會自動放行
+          一次探測（成功即恢復）。此狀態不落庫 —— 重啟代表重新開始。
+        </p>
+      </div>
+
+      {/* ── 協議記憶（自動換手學到的） ── */}
+      <div className="glass p-5">
+        <SectionHead
+          icon="sliders"
+          tile="linear-gradient(160deg, #30d158, #1a7f37)"
+          title="協議記憶"
+          caption="同一個來源的模型可能只在一種端點上架；學到之後下次第一個就試它"
+        />
+        <ProtocolMemory list={s?.learned_protocols ?? []} />
+        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+          Responses 入站（Codex）時，chat ↔ responses 兩種請求體都生得出來，所以能自動
+          換手；Anthropic 入站（Claude Code）只生得出 chat 請求體，因此只在
+          /responses 上架的模型仍然無解。按上方「上游能力記憶」的「重設」會一併清除
+          這裡的記憶，下次請求重新探測。
         </p>
       </div>
 
