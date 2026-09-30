@@ -132,6 +132,34 @@ fn claude_native_drops_gateway_and_foreign_models_only() {
 
 
 #[test]
+fn claude_native_drops_gateway_context_override() {
+    // 這個鍵是 `claude_apply` 為「網關上的來源模型」寫的；回到原生 Claude 就不能留，
+    // 否則官方模型的視窗會被寫成來源模型的數字。
+    let text = r#"{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:15722",
+  "CLAUDE_CODE_MAX_CONTEXT_TOKENS":"1000000","ANTHROPIC_DEFAULT_OPUS_MODEL_NAME":"claude-opus-5"}}"#;
+    let out = to_native("claude", text, 15722);
+    let v: serde_json::Value = serde_json::from_str(&out.text).expect("仍是合法 JSON");
+    let env = v["env"].as_object().expect("env 還在");
+    assert!(
+        !env.contains_key("CLAUDE_CODE_MAX_CONTEXT_TOKENS"),
+        "網關模型的視窗上限必須移除"
+    );
+    assert!(
+        out.changes
+            .iter()
+            .any(|c| c.contains("CLAUDE_CODE_MAX_CONTEXT_TOKENS")),
+        "要在訊息裡講清楚：{:?}",
+        out.changes
+    );
+    // 別的鍵不受影響。
+    assert_eq!(
+        env["ANTHROPIC_DEFAULT_OPUS_MODEL_NAME"].as_str(),
+        Some("claude-opus-5")
+    );
+}
+
+
+#[test]
 fn claude_native_strips_users_own_third_party_endpoint() {
     // 2026-09-28 使用者選定「連端點也推回 Anthropic 官方」：他自己原本的 router
     // 也一樣移除（代價是要先登入一次）。模型名稱本來就是 Claude，留著。

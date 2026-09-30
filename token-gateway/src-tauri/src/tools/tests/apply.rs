@@ -41,7 +41,7 @@ fn plan_claude_model_map_preview() {
 #[test]
 fn claude_merges_env_and_keeps_other_keys() {
     let old = r#"{"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:15721", "ANTHROPIC_DEFAULT_SONNET_MODEL": "x"}, "other": 1}"#;
-    let out = claude_apply(Some(old), "http://127.0.0.1:15722", "sk-test", None).unwrap();
+    let out = claude_apply(Some(old), "http://127.0.0.1:15722", "sk-test", None, None).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:15722");
     assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-test");
@@ -52,7 +52,7 @@ fn claude_merges_env_and_keeps_other_keys() {
 
 #[test]
 fn claude_creates_file_from_scratch() {
-    let out = claude_apply(None, "http://127.0.0.1:15721", "sk-a", None).unwrap();
+    let out = claude_apply(None, "http://127.0.0.1:15721", "sk-a", None, None).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-a");
 }
@@ -67,7 +67,7 @@ fn claude_model_map_writes_four_tiers() {
         opus: "muse-spark-1.3-contributor".into(),
         fable: "mimo-v2.6-flash".into(),
     };
-    let out = claude_apply(None, "http://127.0.0.1:15722", "sk-test", Some(&map)).unwrap();
+    let out = claude_apply(None, "http://127.0.0.1:15722", "sk-test", Some(&map), None).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["env"]["ANTHROPIC_MODEL"], "deepseek-v4-flash");
     assert_eq!(v["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "deepseek-v4-flash");
@@ -77,10 +77,42 @@ fn claude_model_map_writes_four_tiers() {
     // 空檔位不覆蓋現值
     let old = r#"{"env": {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "keep"}}"#;
     let empty = ClaudeModelMap::default();
-    let out2 = claude_apply(Some(old), "http://127.0.0.1:15722", "sk-test", Some(&empty)).unwrap();
+    let out2 = claude_apply(Some(old), "http://127.0.0.1:15722", "sk-test", Some(&empty), None).unwrap();
     let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
     assert_eq!(v2["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "keep");
     assert!(v2["env"].get("ANTHROPIC_MODEL").is_none());
+}
+
+
+#[test]
+fn claude_writes_context_override_only_when_known() {
+    // Claude Code 對它不認識的模型只假設 200k，所以知道真實視窗時要告訴它；
+    // 不知道就**不寫** —— 不編數字。
+    let map = ClaudeModelMap {
+        default: "deepseek-v4.1-flash".into(),
+        ..Default::default()
+    };
+    let known = claude_apply(
+        None,
+        "http://127.0.0.1:15722",
+        "sk-test",
+        Some(&map),
+        Some(1_000_000),
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&known).unwrap();
+    assert_eq!(v["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1000000");
+    assert_eq!(v["env"]["ANTHROPIC_MODEL"], "deepseek-v4.1-flash");
+
+    for unknown in [None, Some(0), Some(-1)] {
+        let out =
+            claude_apply(None, "http://127.0.0.1:15722", "sk-test", Some(&map), unknown).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v["env"].get("CLAUDE_CODE_MAX_CONTEXT_TOKENS").is_none(),
+            "{unknown:?} 不該寫入視窗上限"
+        );
+    }
 }
 
 

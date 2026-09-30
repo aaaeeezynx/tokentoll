@@ -24,11 +24,17 @@ pub fn config_path_for(app: &str) -> Result<PathBuf, String> {
 
 /// Claude settings.json：合併 env，保留其他所有鍵。
 /// map 非空檔位寫入 ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*（cc-switch 同款映射）。
+///
+/// `context_window` 已知時另寫 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`：Claude Code 對
+/// 它不認識的模型（我們寫進去的來源模型全都是）只**假設 200k**，於是 1M 級模型會提早
+/// 自動壓縮 —— 這是它自己在 stderr 講的（`[claude-code:unrecognized_model]`）。
+/// 不知道就**不寫**：寧可留給使用者，也不要編一個數字出來。
 pub fn claude_apply(
     existing: Option<&str>,
     base_url: &str,
     token: &str,
     map: Option<&ClaudeModelMap>,
+    context_window: Option<i64>,
 ) -> Result<String, String> {
     let mut v: serde_json::Value = match existing {
         Some(t) => serde_json::from_str(t).map_err(|e| format!("settings.json 解析失敗：{e}"))?,
@@ -61,6 +67,12 @@ pub fn claude_apply(
                 m.insert(k.to_string(), serde_json::Value::String(v.to_string()));
             }
         }
+    }
+    if let Some(cw) = context_window.filter(|n| *n > 0) {
+        m.insert(
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS".to_string(),
+            serde_json::Value::String(cw.to_string()),
+        );
     }
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }

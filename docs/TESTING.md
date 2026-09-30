@@ -776,6 +776,31 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.14 把來源模型的真實上下文視窗告訴 Claude Code（2026-09-30）
+
+你問「好繼續做」的那一項：Claude Code 對**它不認識的模型**只假設 200k（官方自己的警告：
+
+```
+"deepseek-v4.1-flash" isn't described by this version's model catalog; …
+auto-compact keeps this session within 200k tokens (the context window it assumes);
+if the model accepts more, append [1m] to the model name for 1M, or set
+CLAUDE_CODE_MAX_CONTEXT_TOKENS to its real window
+```
+
+），所以 1M 級的來源模型會被**提早自動壓縮**。
+
+改法（`tools/apply.rs::claude_apply` 多了 `context_window` 參數）：接管時若該模型在
+App 裡有填 `context_window`，就一起寫 `env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = <值>`；
+**不知道就不寫** —— 不編一個數字出來。切回原生時（`tools/native.rs`）連它一起移除：
+那是為「網關上的來源模型」寫的，回到官方 Claude 留著只會把官方模型的視窗寫成錯的。
+
+**誠實揭露：這個功能現在是「接好了但還沒通電」。** 這台機器 `provider_models` 共 38 筆，
+`context_window` **有值的 0 筆** —— 包含 oc-go 的 9 個模型（`deepseek-v4.1-flash` 等全是 NULL）。
+所以要真的生效，得先在 App 的模型編輯裡填上真實視窗（或在來源匯入時帶進來）。
+在那之前 Claude Code 仍然只假設 200k，行為與改動前一樣。
+
+---
+
 ### 0.9.13 「Model does not support this protocol」的真因 ＋ 接管時就指定模型（2026-09-30）
 
 你回報：Claude Code／OpenCode 走 opencode-go 時，除了 DeepSeek 系列以外的模型幾乎全掛，錯誤是
@@ -1882,7 +1907,30 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.14 最新建置（2026-09-30 17:34，接管時指定模型 ＋ 模型協議真因）—— **你目前安裝的就是這一個**
+### 9.15 最新建置（2026-09-30 20:48，把來源模型視窗告訴 Claude Code）—— **你目前安裝的就是這一個**
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-30 20:48:38 |
+| `target\release\token-gateway.exe` | 9,054,208 bytes、sha256 `225FB4D65259FB3ECCDD5186F1B82494F70D79800F9FB3EA31FFFDF79F94E70D` |
+| NSIS 安裝檔 | 3,846,614 bytes、sha256 `63D0EA9BDB748A76622729E2E4C2111FBEA6D727C7A313907721A925A072A7F2` |
+| 安裝方式 | NSIS `/S`，installer exit 0；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline` | **243 passed / 0 failed / 8 ignored** ✅（+2：`claude_writes_context_override_only_when_known`、`claude_native_drops_gateway_context_override`） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tauri build`（含 `tsc`） | 0 error ✅ |
+
+實機驗證（安裝後的正式版本）：
+
+| 步驟 | 觀察 |
+|---|---|
+| 啟動後看「上游來源 → 本機工具」 | `本機工具（3/4 接管中）`：Claude Code／Codex／OpenCode 都是「網關接管中」✅ |
+| Claude Code 的接管內容 | 五個檔位仍全是 `deepseek-v4.1-flash` ✅ |
+| `env.CLAUDE_CODE_MAX_CONTEXT_TOKENS` | **沒有寫入** ✅ —— 這正是預期行為：`deepseek-v4.1-flash` 的 `context_window` 在 DB 裡是 NULL，就不編數字 |
+
+### 9.14 前一次建置（2026-09-30 17:34，接管時指定模型 ＋ 模型協議真因，已被 9.15 取代）
 
 | 項目 | 值 |
 |---|---|

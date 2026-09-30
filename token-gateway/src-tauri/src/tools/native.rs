@@ -190,6 +190,14 @@ fn claude_native(text: &str, port: u16) -> NativeOutcome {
             out.changes
                 .push("移除 ANTHROPIC_AUTH_TOKEN（那是給被移除的端點用的）".into());
         }
+        // 上下文上限是為「網關那邊那個來源模型」寫的（`claude_apply` 的
+        // `CLAUDE_CODE_MAX_CONTEXT_TOKENS`）；回到原生 Claude，它自己有內建模型表，
+        // 留著只會把官方模型的視窗寫成錯的數字。
+        if env.remove("CLAUDE_CODE_MAX_CONTEXT_TOKENS").is_some() {
+            out.changes.push(
+                "移除 CLAUDE_CODE_MAX_CONTEXT_TOKENS（那是給網關上的來源模型用的）".into(),
+            );
+        }
     }
 
     // 非 Claude 家族的模型對映：留著只會讓 Claude Code 去要一個不存在的模型。

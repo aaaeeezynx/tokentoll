@@ -107,6 +107,11 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
                     }
                 }
             }
+            if let Some(cw) = req.context_window.filter(|n| *n > 0) {
+                plan.edits.push(format!(
+                    "env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = {cw}（Claude Code 對不認識的模型只假設 200k，會提早自動壓縮）"
+                ));
+            }
             plan.warnings.push(
                 "ANTHROPIC_AUTH_TOKEN 將明文寫入 settings.json：網關模式下請使用可吊銷的本地 sk key，不要放上游長效 key"
                     .to_string(),
@@ -315,7 +320,13 @@ pub fn apply_switch(
     let reasoning = req.reasoning.as_deref();
     let new_text = match req.app.as_str() {
         "claude" => {
-            claude_apply(existing.as_deref(), &req.base_url, &req.api_key, req.claude_map.as_ref())?
+            claude_apply(
+                existing.as_deref(),
+                &req.base_url,
+                &req.api_key,
+                req.claude_map.as_ref(),
+                req.context_window,
+            )?
         }
         "codex" => {
             // 歷史會話用過的 provider 名全寫為網關別名段（只讀 threads，不寫 DB）。
