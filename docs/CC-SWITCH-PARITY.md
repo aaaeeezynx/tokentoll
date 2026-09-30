@@ -73,7 +73,7 @@
 | # | CC Switch 的功能 | 我們的現況 | 證據 |
 |---|---|---|---|
 | D1 | 雲端同步（WebDAV／S3） | ❌ | 無 |
-| D2 | **Deep Link**（`ccswitch://` 一鍵匯入來源／MCP／prompt／skill 庫） | ❌ | 無 |
+| D2 | **Deep Link**（`ccswitch://` 一鍵匯入來源／MCP／prompt／skill 庫） | ✅ `tokengateway://`（參數照抄）：解析／預覽／確認後才寫入／HKCU 自動註冊／已有實例時轉交；`usage*` 參數刻意忽略 | `deeplink/`、§0.9.27 |
 | D3 | CLI 工具版本管理（看版本、安裝、升級、全部升級、重複安裝診斷、WSL） | ⚠️ 有版本查詢／更新（`tool_versions`、`tool_latest`、`tool_update`）；無 WSL、無一鍵全部升級 | `commands/tools*` |
 | D4 | 內建小工具（跳過首次確認、隱藏 AI 署名、VS Code 擴充跟隨切換） | ⚠️ 部分（Claude 分層設定），其餘 ❌ | `providerform/ClaudeTier.tsx` |
 | D5 | 主題（深／淺／系統） | ⚠️ 只有強調色（多組 accent），**固定深色** | `lib/theme.ts`、`Settings.tsx` |
@@ -131,6 +131,15 @@ skills.sh／GitHub 安裝＋symlink、對話瀏覽＋續聊指令）。
 
 i18n（zh-TW／en）、淺色主題、App 開機自啟、自動更新、雲端同步（WebDAV／S3）、
 Deep Link（`tokengateway://`）。
+
+| 項目 | 內容 | 狀態 |
+|---|---|---|
+| P4.1 Deep Link | `tokengateway://v1/import?…` 一鍵匯入來源／提示詞／MCP／技能；HKCU 自動註冊；已有實例時轉交 | ✅ |
+| P4.2 i18n | zh-TW／en 雙語 | ⬜ |
+| P4.3 淺色主題 | 深／淺色切換 | ⬜ |
+| P4.4 App 開機自啟 | 登入時自動啟動 | ⬜ |
+| P4.5 自動更新 | 檢查／下載新版本 | ⬜（需要更新伺服器與簽章金鑰 —— 目前沒有） |
+| P4.6 雲端同步 | WebDAV／S3 同步設定 | ⬜ |
 
 ## 3. 我們有而 CC Switch 沒有的（對齊時不得退化）
 

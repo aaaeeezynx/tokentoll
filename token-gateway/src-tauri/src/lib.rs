@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod error;
 mod db;
+mod deeplink;
 #[allow(dead_code)]
 mod fsutil;
 mod history;
@@ -28,6 +29,31 @@ mod usage_query;
 use tauri::menu::{Menu, MenuItem};
 use tauri::Manager;
 
+/// Deep Link 的啟動處理。
+///
+/// - 命令列有連結、而且**已經有實例在跑**（閘道埠被佔用）→ 把連結寫進收件匣、
+///   結束這個新行程（避免兩個行程搶同一個埠與資料庫）。
+/// - 否則：確保 `tokengateway://` 已註冊（HKCU，免管理員），並把連結回傳給前端。
+fn deeplink_startup(app: &tauri::AppHandle) -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    let link = deeplink::find_link(&args);
+    if let Some(url) = &link {
+        if deeplink::protocol::another_instance_running() {
+            let dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::env::temp_dir());
+            let _ = deeplink::protocol::write_inbox(&dir, url);
+            std::process::exit(0);
+        }
+    }
+    // 註冊協定（失敗不影響啟動 —— 例如被群組原則擋掉）
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = deeplink::protocol::ensure_registered(&exe);
+    }
+    link
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -37,6 +63,12 @@ pub fn run() {
             let state = db::init_db(app.handle()).expect("failed to init database");
             app.manage(state);
             app.manage(proxy::ProxyState::default());
+
+            // Deep Link（P4.1）：解析啟動參數 → 已經有實例在跑就轉交後結束；
+            // 否則留在 pending 讓前端掛載時取走，並註冊 tokengateway:// 協定。
+            let startup_link = deeplink_startup(app.handle());
+            app.manage(deeplink::DeeplinkState(std::sync::Mutex::new(startup_link)));
+            deeplink::protocol::spawn_watcher(app.handle())?;
 
             let show = MenuItem::with_id(app, "show", "顯示主視窗", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -181,6 +213,13 @@ pub fn run() {
             commands::sessions_scan,
             commands::sessions_read,
             commands::sessions_delete,
+            // Deep Link（P4.1，見 deeplink/）
+            commands::deeplink_take_pending,
+            commands::deeplink_preview,
+            commands::deeplink_apply,
+            commands::deeplink_protocol_state,
+            commands::deeplink_register,
+            commands::deeplink_unregister,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

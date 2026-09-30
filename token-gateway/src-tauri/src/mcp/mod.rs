@@ -67,7 +67,7 @@ pub struct HeaderPair {
 }
 
 /// 新增／編輯的輸入。
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct McpInput {
     /// 編輯時帶 id；新增時為 None
     pub id: Option<i64>,
@@ -143,6 +143,65 @@ pub(crate) fn validate_input(input: &McpInput) -> Result<McpInput, String> {
     out.command = out.command.trim().to_string();
     out.url = url.to_string();
     Ok(out)
+}
+
+/// 從 `mcpServers` 的一個條目（JSON）轉成我們的輸入格式。
+///
+/// 兩種形狀都接受（與 `apply.rs` 讀設定檔時的規則一致）：
+/// - stdio：`{command, args, env}`
+/// - 遠端：`{type:"http"|"sse", url, headers}`
+///
+/// 這是 Deep Link 匯入用的入口；`id` 來自 `mcpServers` 的鍵（cc-switch 的協定
+/// 就是這樣設計的：MCP 的 Server ID 由 config 裡的鍵決定）。
+pub fn input_from_json(id: &str, v: &serde_json::Value) -> Result<McpInput, String> {
+    let s = |k: &str| -> String {
+        v.get(k)
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let pairs = |k: &str| -> Vec<HeaderPair> {
+        v.get(k)
+            .and_then(|x| x.as_object())
+            .map(|m| {
+                m.iter()
+                    .map(|(name, val)| HeaderPair {
+                        name: name.clone(),
+                        value: val.as_str().unwrap_or_default().to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let ty = s("type");
+    let transport = if ty == "http" || ty == "sse" {
+        ty
+    } else {
+        "stdio".to_string()
+    };
+    let args: Vec<String> = v
+        .get("args")
+        .and_then(|a| a.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let input = McpInput {
+        id: None,
+        slug: id.to_string(),
+        name: id.to_string(),
+        description: String::new(),
+        transport,
+        command: s("command"),
+        args,
+        url: s("url"),
+        headers: pairs("headers"),
+        env: pairs("env"),
+    };
+    // 用同一套驗證（必填欄位、slug 合法性）過一次
+    validate_input(&input)
 }
 
 #[cfg(test)]

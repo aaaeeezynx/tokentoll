@@ -502,6 +502,31 @@ export interface SessionDeleteOutcome {
   note: string;
 }
 
+// ── P4.1：Deep Link 一鍵匯入（對標 cc-switch 的 ccswitch:// 協定） ──
+
+export interface DeeplinkPreview {
+  /** provider | prompt | mcp | skill */
+  kind: string;
+  title: string;
+  /** [欄位名, 值]（機密值已遮罩） */
+  fields: [string, string][];
+  warnings: string[];
+  effects: string[];
+}
+
+export interface DeeplinkApplied {
+  kind: string;
+  created: string[];
+  skipped: string[];
+  note: string;
+}
+
+export interface DeeplinkProtocolState {
+  scheme: string;
+  registered: boolean;
+  command: string;
+}
+
 export interface AppSettings {
   gateway_port: number;
   auto_start_proxy: boolean;

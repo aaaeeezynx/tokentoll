@@ -43,6 +43,9 @@ import type {
   QueueModel,
   QueueRow,
   QuotaView,
+  DeeplinkApplied,
+  DeeplinkPreview,
+  DeeplinkProtocolState,
   SessionApp,
   SessionDeleteOutcome,
   SessionMessage,
@@ -252,6 +255,21 @@ export const api = {
       storage: storage ?? null,
       syncMode: syncMode ?? null,
     }),
+  // ── P4.1 Deep Link ──
+  /** 啟動時帶進來的連結（取走後就沒有了）。 */
+  deeplinkTakePending: (): Promise<string | null> =>
+    invoke("deeplink_take_pending"),
+  deeplinkPreview: (url: string): Promise<DeeplinkPreview> =>
+    invoke("deeplink_preview", { url }),
+  deeplinkApply: (url: string): Promise<DeeplinkApplied> =>
+    invoke("deeplink_apply", { url }),
+  deeplinkProtocolState: (): Promise<DeeplinkProtocolState> =>
+    invoke("deeplink_protocol_state"),
+  deeplinkRegister: (): Promise<DeeplinkProtocolState> =>
+    invoke("deeplink_register"),
+  deeplinkUnregister: (): Promise<DeeplinkProtocolState> =>
+    invoke("deeplink_unregister"),
+
   // ── P3.4 會話管理 ──
   sessionsApps: (): Promise<SessionApp[]> => invoke("sessions_apps"),
   /** 掃描會話（apps 空＝全部）。 */

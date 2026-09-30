@@ -55,6 +55,29 @@ export default function SettingsPage() {
   const [csvMsg, setCsvMsg] = useState("");
   const [exporting, setExporting] = useState(false);
 
+  // Deep Link 協定（P4.1）
+  const proto = useQuery({
+    queryKey: ["deeplink_protocol"],
+    queryFn: api.deeplinkProtocolState,
+  });
+  const [protoMsg, setProtoMsg] = useState("");
+  const reg = useMutation({
+    mutationFn: api.deeplinkRegister,
+    onSuccess: (s) => {
+      setProtoMsg(s.registered ? "已註冊" : "註冊後仍未生效，請檢查權限");
+      void qc.invalidateQueries({ queryKey: ["deeplink_protocol"] });
+    },
+    onError: (e) => setProtoMsg(String(e)),
+  });
+  const unreg = useMutation({
+    mutationFn: api.deeplinkUnregister,
+    onSuccess: () => {
+      setProtoMsg("已取消註冊（之後點連結不會再打開這個 App）");
+      void qc.invalidateQueries({ queryKey: ["deeplink_protocol"] });
+    },
+    onError: (e) => setProtoMsg(String(e)),
+  });
+
   useEffect(() => {
     if (settings.data) {
       setPort(String(settings.data.gateway_port));
@@ -254,6 +277,55 @@ export default function SettingsPage() {
           </div>
         </div>
         {csvMsg && <p className="pt-1.5 text-xs text-white/50">{csvMsg}</p>}
+      </div>
+
+      {/* ── Deep Link 協定（P4.1） ── */}
+      <div className="glass p-5">
+        <SectionHead
+          icon="download"
+          tile="linear-gradient(160deg, #0A84FF, #0055cc)"
+          title="Deep Link 匯入"
+          caption="tokengateway:// 一鍵匯入來源／提示詞／MCP／技能"
+        />
+        <div className="mac-frow">
+          <span className="mac-cap">協定註冊</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] text-white/70">
+              {proto.isPending
+                ? "查詢中…"
+                : proto.data?.registered
+                  ? "已註冊（HKCU\\Software\\Classes\\tokengateway）"
+                  : "尚未註冊"}
+            </p>
+            {proto.data?.command && (
+              <p className="font-mono text-[10px] break-all text-white/25">
+                {proto.data.command}
+              </p>
+            )}
+          </div>
+          <button
+            className="btn-ghost shrink-0 px-3 py-1 text-xs disabled:opacity-40"
+            disabled={reg.isPending}
+            onClick={() => reg.mutate()}
+          >
+            重新註冊
+          </button>
+          {proto.data?.registered && (
+            <button
+              className="btn-ghost shrink-0 px-3 py-1 text-xs text-red-400/80 disabled:opacity-40"
+              disabled={unreg.isPending}
+              onClick={() => unreg.mutate()}
+            >
+              取消註冊
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] leading-relaxed text-white/30">
+          連結格式（與 cc-switch 的 <span className="font-mono">ccswitch://</span> 相同參數）：
+          <span className="font-mono"> tokengateway://v1/import?resource=provider&app=claude&name=…&endpoint=…</span>。
+          匯入前一定會先跳出預覽確認；帶有 API Key 的連結只顯示遮罩後的值。
+        </p>
+        {protoMsg && <p className="pt-1 text-[11px] text-emerald-400/80">{protoMsg}</p>}
       </div>
 
       {/* ── 關於 ── */}

@@ -83,7 +83,7 @@ pub async fn providers_list(app: AppHandle) -> Result<Vec<Provider>, String> {
     .map_err(|e| e.to_string())?
 }
 
-fn insert_provider(
+pub(crate) fn insert_provider(
     conn: &Connection,
     input: &ProviderInput,
     now: i64,

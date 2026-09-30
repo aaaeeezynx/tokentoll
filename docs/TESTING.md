@@ -776,6 +776,60 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.27 Deep Link 一鍵匯入（P4.1，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §5.3 抄）
+
+- 協定：`ccswitch://v1/import?resource={provider|mcp|prompt|skill}&…`
+  參數：provider（`app`／`name`／`endpoint`（可逗號分隔多個）／`apiKey`／`model`／`notes`／
+  `enabled`／`usage*`）、prompt（`app`／`name`／`content`（Base64）／`enabled`）、
+  mcp（`apps`（逗號分隔）／`config`（Base64 的 `{"mcpServers":{…}}`））、
+  skill（`repo`（`owner/name`）／`directory`／`branch`／`name`）。
+- 流程：點連結 → App 打開 → **顯示匯入確認對話框**（型別、內容預覽、確認／取消）→ 才寫入。
+- 安全：驗格式、顯示預覽、要求確認；`usageEnabled` 未明講 `true` 時匯入後**保持停用**。
+- 協定註冊：安裝時自動寫 `HKEY_CLASSES_ROOT\ccswitch`（Windows）。
+
+#### 我們做的（`deeplink/`，沒有新增資料表）
+
+| 部分 | 內容 |
+|---|---|
+| 協定 | `tokengateway://`（參數名稱與語意**照抄** cc-switch，既有的分享連結換 scheme 就能用） |
+| 解析 | `parse`：只解析＋驗證，產生預覽；**不做任何寫入** |
+| 預覽 | 型別標題、逐欄位摘要、**要提醒的事**、**這次會做什麼**；API Key 只顯示前 6 後 4（`mask`） |
+| 套用 | `apply`：使用者確認後才寫；四種資源各自沿用既有 store（`providers::insert_provider`、`prompt::save_preset`、`mcp::upsert_server`、`skills::add_repo`），**不另開寫入路徑** |
+| 重複處理 | 同名來源／同名預設集／同 slug 伺服器都跳過並回報（不覆蓋使用者的設定） |
+| 協定註冊 | 啟動時自己寫 **HKCU**（`HKCU\Software\Classes\tokengateway`）—— cc-switch 用安裝程式寫 HKCR 需要管理員，我們改成免管理員且 App 自己能修；設定頁有狀態＋重新／取消註冊 |
+| 「已經開著」時 | 沒有 single-instance 外掛：新行程用**閘道埠是否被佔用**判斷已有實例，把連結寫進 `<app_data>/deeplink-inbox.json` 就結束；在跑的行程每秒看一次收件匣並發 `deeplink` 事件（與托盤重建同一套輪詢） |
+| 前端 | 全域的 `DeeplinkDialog`：啟動 pending（`deeplink_take_pending`）與執行中事件都會跳確認框；確認後刷新四個清單的 query |
+
+**刻意不做**：`usage*` 參數（我們的用量查詢是宣告式規格，不是 cc-switch 的 JS 腳本，
+映射不直觀就先不假裝支援 —— 連結帶了也不會爆炸，只是忽略）。
+
+#### 實機驗證（真的用 `Start-Process tokengateway://…` 觸發）
+
+| 驗證項 | 結果 |
+|---|---|
+| **協定自動註冊** | ✅ 先 `reg delete` 掉整棵機碼（查詢確認「找不到」），啟動 App 後查 `HKCU\Software\Classes\tokengateway\shell\open\command` → `"…\token-gateway.exe" "%1"` —— **免管理員、自己補上** |
+| **端到端：點連結** | ✅ `Start-Process "tokengateway://v1/import?resource=skill&repo=anthropics/skills&directory=skills/brand-guidelines&branch=main"` → 對話框跳出、內容正確 |
+| **單一行程** | ✅ 點連結前後行程數都是 **1** —— 第二個行程轉交收件匣後就結束（不會兩個行程搶埠） |
+| skill 匯入 | ✅ 標題「匯入技能「brand-guidelines」」；欄位 儲存庫／分支／目錄 齊全；⚠ 會從 GitHub 下載；確認後「已新增儲存庫 anthropics/skills@main…｜新增：brand-guidelines（儲存庫 #5）」 |
+| prompt 匯入（Base64） | ✅ 標題「匯入提示詞「代碼審查」」；18 字元、**內容預覽正確解出**「# 角色 / 你是一個專業的代碼審查專家」；「啟用：否」＋說明；**取消後沒有寫入** |
+| 壞連結 | ✅ `app=gemini` → 對話框顯示「不支援的工具「gemini」（我們只管理 claude／codex／opencode）」 |
+| 清理 | ✅ 刪掉測試儲存庫後，資料庫只剩內建那個（`anthropics/skills`），提示詞 0 筆 |
+
+#### 測試（19 個新測試）
+
+- `deeplink`（2）：命令列參數挑連結（別的 scheme 不算）、scheme 與解析器一致。
+- `deeplink::parse`（10）：**cc-switch 手冊的 MCP 範例連結**（改 scheme 後要完全讀懂）、
+  provider（URL-encoded、多個 endpoint、遮罩不含完整金鑰）、prompt（Base64 中文、
+  預設不啟用）、skill（含從 directory 推名稱）、percent-decode 邊界（`%`／`%ZZ`）、
+  Base64 容忍（URL-safe／缺 padding）、各種壞連結的人話錯誤、MCP 兩種條目形狀、遮罩。
+- `deeplink::apply`（5）：來源建立（含模型登記到 `provider_models`）與重複跳過、
+  提示詞建立但不啟用、MCP 建立＋綁定＋重複跳過、技能存成儲存庫、缺 endpoint 要拒絕。
+- `deeplink::protocol`（2）：收件匣來回（讀過就清、空白視為沒有）、查詢不改變狀態。
+
+---
+
 ### 0.9.26 會話管理（P3.4，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §3.4 抄）
@@ -2644,7 +2698,48 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.26 最新建置（2026-10-01 04:48，P3.4：會話管理）—— **你目前安裝的就是這一個**
+### 9.27 最新建置（2026-10-01 05:08，P4.1：Deep Link 一鍵匯入）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P4.1（設計與取捨見 §0.9.27）。**沒有動 schema（仍 v13）**。
+新增相依：`base64`（離線快取已有）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 05:08:52 |
+| `target\release\token-gateway.exe` | 10,086,912 bytes、sha256 `F6808DC3930613638E88E82A0D6545B1FCFD47347346AC731AF91B13271965AC` |
+| NSIS 安裝檔 | 4,207,813 bytes、sha256 `0284591D1326D6AFEFA45D6A1D8FEB88685755A94D981B6FDABE3E875B1B54D1` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,086,912 bytes、sha256 `8186F5E15AF9882047AC8FE0D2B230F3A0BE8923475116661959BB4B76DC9FEB` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **421 passed / 0 failed / 11 ignored** ✅（+19：Deep Link） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍 **13** ✅ |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/deeplink/{mod,parse,apply,protocol}.rs`、`parse/tests.rs` | **新增**：協定解析與預覽、寫入、HKCU 註冊與收件匣轉交 |
+| `src-tauri/src/commands/deeplink_cmd.rs` | **新增**：preview／apply／take_pending／protocol_state／register／unregister |
+| `src-tauri/src/lib.rs` | 啟動處理：已有實例就轉交後結束、註冊協定、啟動 watcher、管理 pending 狀態 |
+| `src/components/DeeplinkDialog.tsx`、`src/components/Settings.tsx` | **新增**匯入確認框（全域）；設定頁新增「Deep Link 匯入」區塊（註冊狀態／重新註冊／取消註冊） |
+| `src-tauri/src/{providers.rs,mcp/mod.rs}` | `insert_provider` 開放給 crate 內；`McpInput` 加 `PartialEq` |
+
+#### 實機驗證（真的點連結，CDP 讀畫面）
+
+| 驗證項 | 結果 |
+|---|---|
+| 協定自動註冊 | ✅ 先刪掉 `HKCU\Software\Classes\tokengateway`，啟動後自動補回，指向安裝後的 exe |
+| 點 skill 連結 | ✅ 對話框「匯入技能「brand-guidelines」」；確認後「已新增儲存庫 anthropics/skills@main…｜新增：brand-guidelines（儲存庫 #5）」 |
+| 點 prompt 連結 | ✅ Base64 內容正確解出並預覽（18 字元、「# 角色 / 你是一個專業的代碼審查專家」）；取消後沒有寫入 |
+| 壞連結 | ✅ 「不支援的工具「gemini」（我們只管理 claude／codex／opencode）」 |
+| 不會開第二個行程 | ✅ 點連結前後行程數都是 1 |
+| 清理 | ✅ 刪掉測試儲存庫，資料庫只剩內建的 `anthropics/skills`；提示詞 0 筆 |
+
+### 9.26 前一次建置（2026-10-01 04:48，P3.4：會話管理，已被 9.27 取代）
 
 CC Switch 對齊計畫 P3.4（設計與取捨見 §0.9.26）。**P3 到此完成。沒有動 schema
 （會話是唯讀＋刪檔，不需要新表，仍是 v13）**。
