@@ -15,7 +15,7 @@ export function Stat(props: {
         : "var(--mac-label-2)";
   return (
     <div className="glass px-3.5 py-3">
-      <div className="text-[11px] text-white/40">{props.label}</div>
+      <div className="text-[11px] text-fg/40">{props.label}</div>
       <div
         className="pt-0.5 font-mono text-[19px] leading-tight font-semibold"
         style={{ color }}
@@ -23,7 +23,7 @@ export function Stat(props: {
         {props.value}
       </div>
       {props.hint && (
-        <div className="pt-1 text-[10px] leading-tight text-white/25">
+        <div className="pt-1 text-[10px] leading-tight text-fg/25">
           {props.hint}
         </div>
       )}

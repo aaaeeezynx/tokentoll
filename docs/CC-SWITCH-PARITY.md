@@ -76,13 +76,18 @@
 | D2 | **Deep Link**（`ccswitch://` 一鍵匯入來源／MCP／prompt／skill 庫） | ✅ `tokengateway://`（參數照抄）：解析／預覽／確認後才寫入／HKCU 自動註冊／已有實例時轉交；`usage*` 參數刻意忽略 | `deeplink/`、§0.9.27 |
 | D3 | CLI 工具版本管理（看版本、安裝、升級、全部升級、重複安裝診斷、WSL） | ⚠️ 有版本查詢／更新（`tool_versions`、`tool_latest`、`tool_update`）；無 WSL、無一鍵全部升級 | `commands/tools*` |
 | D4 | 內建小工具（跳過首次確認、隱藏 AI 署名、VS Code 擴充跟隨切換） | ⚠️ 部分（Claude 分層設定），其餘 ❌ | `providerform/ClaudeTier.tsx` |
-| D5 | 主題（深／淺／系統） | ⚠️ 只有強調色（多組 accent），**固定深色** | `lib/theme.ts`、`Settings.tsx` |
-| D6 | App 開機自啟 | ❌ 只有**網關**自啟（`auto_start_proxy`） | `Settings.tsx` |
-| D7 | 自動更新 | ❌ | `Cargo.toml` 只有 `tauri-plugin-opener` |
+| D5 | 主題（深／淺／系統） | ✅ System／Light／Dark；淺色是完整調色（表面色＋系統色＋光暈），跟隨系統即時切換；777 處硬編色改用 token | `index.css`、`lib/appearance.ts`、§0.9.28 |
+| D6 | App 開機自啟 | ✅ HKCU 的 Run 機碼（免管理員）；狀態以登錄檔為準（不另外存一份） | `autostart.rs`、§0.9.28 |
+| D7 | 自動更新 | ❌ 需要更新伺服器與簽章金鑰（Tauri updater），目前沒有發佈管道 | — |
 | D8 | 原子寫入／自動備份 | ✅ | `fsutil.rs`（原子寫入）、`tools/backup.rs`（baseline 備份） |
-| D9 | i18n（zh／zh-TW／en／ja） | ❌ 只有 zh-TW | 無任何 i18n 檔 |
+| D9 | i18n（zh／zh-TW／en／ja） | ❌ 只有 zh-TW（全站字串尚未抽出） | 無任何 i18n 檔 |
 | D10 | 系統匣常駐 | ✅（基本） | `lib.rs` 托盤 |
 | D11 | 全域快捷鍵／`--silent` 等啟動參數 | ❌ | 無 |
+| D12 | 備份管理面板（自動備份間隔／保留數、立即備份／還原／改名／刪除） | ⚠️ 我們有各功能的檔案備份（MCP／提示詞／技能，各保留 5 份），但沒有統一的資料庫備份面板與排程 | `fsutil::backup_text`、`skills/install.rs` |
+| D13 | 診斷日誌開關＋等級（error／warn／info／debug／trace） | ⚠️ 有追蹤與診斷中心，但沒有可調的日誌等級 | `trace.rs`、診斷頁 |
+| D14 | 關閉視窗時縮到系統匣（預設開） | ❌ 目前直接結束 | `tauri.conf.json` |
+| D15 | Lightweight Mode（托盤專用、視窗銷毀、需要時重建） | ❌ | 無 |
+| D16 | 各工具設定目錄可自訂（含 WSL 路徑） | ❌ 路徑寫死主目錄 | `tools/`、`prompt/sync.rs` 等 |
 
 ## 2. 分期計畫
 
@@ -136,10 +141,11 @@ Deep Link（`tokengateway://`）。
 |---|---|---|
 | P4.1 Deep Link | `tokengateway://v1/import?…` 一鍵匯入來源／提示詞／MCP／技能；HKCU 自動註冊；已有實例時轉交 | ✅ |
 | P4.2 i18n | zh-TW／en 雙語 | ⬜ |
-| P4.3 淺色主題 | 深／淺色切換 | ⬜ |
-| P4.4 App 開機自啟 | 登入時自動啟動 | ⬜ |
-| P4.5 自動更新 | 檢查／下載新版本 | ⬜（需要更新伺服器與簽章金鑰 —— 目前沒有） |
+| P4.3 淺色主題 | System／Light／Dark（跟隨系統即時切換） | ✅ §0.9.28 |
+| P4.4 App 開機自啟 | Windows 用 HKCU Run 機碼（免管理員） | ✅ §0.9.28 |
+| P4.5 自動更新 | 檢查／下載新版本 | ⬜（需要更新伺服器與簽章金鑰 —— 目前沒有發佈管道） |
 | P4.6 雲端同步 | WebDAV／S3 同步設定 | ⬜ |
+| P4.7 其餘平台面 | 縮到系統匣、Lightweight Mode、統一備份面板、日誌等級、自訂工具目錄 | ⬜ 見 §1 的 D12～D16 |
 
 ## 3. 我們有而 CC Switch 沒有的（對齊時不得退化）
 

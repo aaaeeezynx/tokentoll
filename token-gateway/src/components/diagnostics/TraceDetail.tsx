@@ -36,19 +36,19 @@ export function TraceDetail({ row }: { row: TraceRow }) {
     ],
   ];
   return (
-    <div className="border-t border-white/[0.06] px-3.5 py-3">
+    <div className="border-t border-fg/[0.06] px-3.5 py-3">
       <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
         {kv.map(([k, v]) => (
           <div key={k} className="flex gap-2 text-[12px]">
-            <dt className="w-24 shrink-0 text-white/35">{k}</dt>
-            <dd className="min-w-0 break-words text-white/70">{v}</dd>
+            <dt className="w-24 shrink-0 text-fg/35">{k}</dt>
+            <dd className="min-w-0 break-words text-fg/70">{v}</dd>
           </div>
         ))}
       </dl>
 
       {row.stripped_fields.length > 0 && (
         <div className="pt-2.5">
-          <div className="text-[11px] text-white/35">已剝離欄位</div>
+          <div className="text-[11px] text-fg/35">已剝離欄位</div>
           <div className="flex flex-wrap gap-1.5 pt-1">
             {row.stripped_fields.map((f) => (
               <span
@@ -69,7 +69,7 @@ export function TraceDetail({ row }: { row: TraceRow }) {
       {row.upstream_error && (
         <div className="pt-2.5">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-white/35">上游原文</span>
+            <span className="text-[11px] text-fg/35">上游原文</span>
             <button
               className="btn-ghost flex items-center gap-1 px-2 py-px text-[10px]"
               onClick={() => copyText(row.upstream_error)}
@@ -78,7 +78,7 @@ export function TraceDetail({ row }: { row: TraceRow }) {
               複製
             </button>
           </div>
-          <pre className="mt-1 max-h-56 overflow-auto rounded-md bg-black/30 p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-white/60">
+          <pre className="mt-1 max-h-56 overflow-auto rounded-md bg-black/30 p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-fg/60">
             {row.upstream_error}
           </pre>
         </div>
@@ -87,7 +87,7 @@ export function TraceDetail({ row }: { row: TraceRow }) {
       {row.body_hex && (
         <div className="pt-2.5">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-white/35">
+            <span className="text-[11px] text-fg/35">
               請求體原始 hex 前綴（body 解析失敗時的關鍵證據）
             </span>
             <button
@@ -98,10 +98,10 @@ export function TraceDetail({ row }: { row: TraceRow }) {
               複製
             </button>
           </div>
-          <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-black/30 p-2.5 font-mono text-[10px] leading-relaxed break-all whitespace-pre-wrap text-white/55">
+          <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-black/30 p-2.5 font-mono text-[10px] leading-relaxed break-all whitespace-pre-wrap text-fg/55">
             {row.body_hex}
           </pre>
-          <p className="pt-1 text-[10px] text-white/25">
+          <p className="pt-1 text-[10px] text-fg/25">
             前 {row.body_hex.length / 2} bytes。可由此判定請求體究竟是 XML/HTML
             錯誤頁、空 body，還是合法 JSON 被誤判。
           </p>
@@ -109,7 +109,7 @@ export function TraceDetail({ row }: { row: TraceRow }) {
       )}
 
       {row.note && (
-        <p className="pt-2.5 text-[11px] text-white/45">說明：{row.note}</p>
+        <p className="pt-2.5 text-[11px] text-fg/45">說明：{row.note}</p>
       )}
     </div>
   );

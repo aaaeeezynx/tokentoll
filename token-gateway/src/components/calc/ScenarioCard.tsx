@@ -15,7 +15,7 @@ export function ScenarioCard(props: {
   return (
     // ── 用量場景 ──
     <div className="glass p-5">
-      <div className="mb-3 text-sm font-semibold tracking-tight text-white/80">
+      <div className="mb-3 text-sm font-semibold tracking-tight text-fg/80">
         用量場景
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -49,7 +49,7 @@ export function ScenarioCard(props: {
             ["cw", "快取建 tokens"],
           ] as const
         ).map(([k, label]) => (
-          <label key={k} className="mb-1 block text-[11px] text-white/40">
+          <label key={k} className="mb-1 block text-[11px] text-fg/40">
             {label}
             <input
               className="field mt-1 w-full px-2.5 py-1.5 text-xs"

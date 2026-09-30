@@ -113,7 +113,7 @@ export function ModelPanel(props: { provider: Provider; rowsClassName?: string; 
           <Icon name="plus" size={12} />
           新增模型
         </button>
-        <span className="ml-auto text-[11px] text-white/25">
+        <span className="ml-auto text-[11px] text-fg/25">
           {catalog.data
             ? `共 ${catalog.data.models.length} 個 · 更新於 ${fmtCatalogTime(catalog.data.fetched_at)}`
             : "尚未抓取"}
@@ -138,14 +138,14 @@ export function ModelPanel(props: { provider: Provider; rowsClassName?: string; 
           />
         ))}
         {(rows.data || []).length === 0 && (
-          <div className="mac-row text-xs text-white/20">
+          <div className="mac-row text-xs text-fg/20">
             暫無使用模型，點「新增模型」建立（修改後需重啟對應 CLI 生效）。
           </div>
         )}
       </div>
       {adding && (
         <div className="mac-rows mt-2 p-3.5">
-          <div className="mb-1 text-[13px] font-semibold text-white/80">
+          <div className="mb-1 text-[13px] font-semibold text-fg/80">
             新增模型
           </div>
           <div className="mac-frow">
@@ -185,7 +185,7 @@ export function ModelPanel(props: { provider: Provider; rowsClassName?: string; 
             />
           </div>
           <div className="mac-frow">
-            <span className="mac-cap">思考等級<span className="ml-1 font-normal text-white/25">空 = 全部檔位</span></span>
+            <span className="mac-cap">思考等級<span className="ml-1 font-normal text-fg/25">空 = 全部檔位</span></span>
             <PopSelect
               multi
               value={reasoning}

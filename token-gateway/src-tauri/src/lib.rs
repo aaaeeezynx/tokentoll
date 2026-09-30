@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod error;
+mod autostart;
 mod db;
 mod deeplink;
 #[allow(dead_code)]
@@ -19,6 +20,7 @@ mod quota;
 #[doc(hidden)]
 pub mod proxy;
 mod skills;
+mod theme;
 mod tools;
 mod trace;
 mod translate;
@@ -220,6 +222,10 @@ pub fn run() {
             commands::deeplink_protocol_state,
             commands::deeplink_register,
             commands::deeplink_unregister,
+            // 外觀與啟動（P4.3／P4.4）
+            commands::appearance_state,
+            commands::appearance_set_theme,
+            commands::appearance_set_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

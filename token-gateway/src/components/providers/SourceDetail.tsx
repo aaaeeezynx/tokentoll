@@ -24,14 +24,14 @@ export function SourceDetail(props: {
   return (
     <div key={sel.id} className="glass anim-rise p-5">
       <div className="mb-4 flex flex-wrap items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
           <Icon name="server" size={18} />
         </span>
         <div className="min-w-0 flex-1 basis-40">
-          <div className="truncate text-[15px] font-semibold tracking-tight text-white">
+          <div className="truncate text-[15px] font-semibold tracking-tight text-fg">
             {sel.name}
           </div>
-          <div className="truncate font-mono text-[11px] text-white/30">
+          <div className="truncate font-mono text-[11px] text-fg/30">
             {sel.base_url}
           </div>
         </div>
@@ -48,7 +48,7 @@ export function SourceDetail(props: {
       </div>
       {props.detailTab === "models" ? (
         <>
-          <div className="mb-2 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+          <div className="mb-2 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
             <span>使用模型</span>
           </div>
           <ModelPanel key={sel.id} provider={sel} />

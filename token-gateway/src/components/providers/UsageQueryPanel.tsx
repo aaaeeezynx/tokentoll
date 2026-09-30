@@ -148,22 +148,22 @@ export function UsageQueryPanel(props: {
       }}
     >
       <div className="my-auto flex max-h-[min(90vh,780px)] w-full max-w-lg flex-col overflow-hidden glass-panel pop-in">
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] bg-[rgba(24,24,30,0.98)] px-5 py-4">
+        <div className="flex shrink-0 items-center gap-3 border-b border-fg/[0.06] bg-[var(--app-elevated-solid)] px-5 py-4">
           <button
-            className="rounded-full bg-white/[0.06] p-1.5 text-white/55 transition-colors hover:bg-white/[0.1] hover:text-white"
+            className="rounded-full bg-fg/[0.06] p-1.5 text-fg/55 transition-colors hover:bg-fg/[0.1] hover:text-fg"
             onClick={props.onClose}
             title="關閉"
           >
             <Icon name="x" size={14} />
           </button>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/65">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/65">
             <Icon name="chart-bar" size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold text-white">
+            <div className="truncate text-[15px] font-semibold text-fg">
               用量查詢 · {props.providerName}
             </div>
-            <div className="text-[11px] text-white/30">
+            <div className="text-[11px] text-fg/30">
               查餘額或方案額度；查詢會消耗少量上游額度，所以自動查詢預設關閉
             </div>
           </div>
@@ -171,9 +171,9 @@ export function UsageQueryPanel(props: {
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
           {cur.isPending ? (
-            <p className="text-sm text-white/30">載入中…</p>
+            <p className="text-sm text-fg/30">載入中…</p>
           ) : !cfg ? (
-            <p className="text-sm text-white/50">讀取設定失敗</p>
+            <p className="text-sm text-fg/50">讀取設定失敗</p>
           ) : (
             <>
               <div className="mac-frow">
@@ -185,7 +185,7 @@ export function UsageQueryPanel(props: {
               </div>
 
               <div className="form-section">
-                <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                   樣板
                 </div>
                 <PopSelect
@@ -208,7 +208,7 @@ export function UsageQueryPanel(props: {
               </div>
 
               <div className="form-section">
-                <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                   連線
                 </div>
                 <div className="mac-frow">
@@ -267,7 +267,7 @@ export function UsageQueryPanel(props: {
                     onChange={(e) => set("user_id", e.target.value)}
                   />
                 </div>
-                <p className="text-[11px] leading-relaxed text-white/25">
+                <p className="text-[11px] leading-relaxed text-fg/25">
                   網址與標頭可用 <span className="font-mono">{"{{baseUrl}}"}</span>、
                   <span className="font-mono">{"{{apiKey}}"}</span>、
                   <span className="font-mono">{"{{accessToken}}"}</span>、
@@ -276,7 +276,7 @@ export function UsageQueryPanel(props: {
               </div>
 
               <div className="form-section">
-                <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                   標頭（選填）
                 </div>
                 {cfg.headers.map((h, i) => (
@@ -327,7 +327,7 @@ export function UsageQueryPanel(props: {
               </div>
 
               <div className="form-section">
-                <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                   抽取規格（怎麼從回應裡取數字）
                 </div>
                 <textarea
@@ -336,7 +336,7 @@ export function UsageQueryPanel(props: {
                   onChange={(e) => setSpec(e.target.value)}
                 />
                 {specErr && <p className="text-[11px] text-red-400">{specErr}</p>}
-                <p className="text-[11px] leading-relaxed text-white/25">
+                <p className="text-[11px] leading-relaxed text-fg/25">
                   路徑用點分隔、數字段是陣列索引（例如
                   <span className="font-mono"> balance_infos.0.total_balance</span>）；
                   要換算就寫成物件（例如
@@ -346,7 +346,7 @@ export function UsageQueryPanel(props: {
               </div>
 
               <div className="form-section">
-                <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                   進階
                 </div>
                 <div className="mac-frow">
@@ -373,7 +373,7 @@ export function UsageQueryPanel(props: {
                     }
                   />
                 </div>
-                <p className="text-[11px] leading-relaxed text-white/25">
+                <p className="text-[11px] leading-relaxed text-fg/25">
                   自動查詢 <span className="font-mono">0</span> ＝ 不自動查（預設）。
                   cc-switch 只對「目前使用中」的來源自動查；我們也只在這個來源被選取時
                   才按間隔重查，避免打擾上游。
@@ -381,7 +381,7 @@ export function UsageQueryPanel(props: {
               </div>
 
               {test && (
-                <div className="rounded-lg bg-white/[0.04] px-3 py-2.5 text-[12px]">
+                <div className="rounded-lg bg-fg/[0.04] px-3 py-2.5 text-[12px]">
                   <div className="flex items-center gap-2">
                     <span
                       className="rounded px-1.5 py-px text-[11px]"
@@ -393,7 +393,7 @@ export function UsageQueryPanel(props: {
                     >
                       {test.ok ? "成功" : "失敗"}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-white/70">
+                    <span className="min-w-0 flex-1 truncate text-fg/70">
                       {test.ok
                         ? `${test.plan_name || "餘額"}：${test.remaining ?? "—"} ${test.unit}${
                             test.percent !== null ? `（用量 ${Math.round(test.percent)}%）` : ""
@@ -408,19 +408,19 @@ export function UsageQueryPanel(props: {
                     </button>
                   </div>
                   {showRaw && (
-                    <pre className="mt-1.5 max-h-40 overflow-auto font-mono text-[10px] break-all whitespace-pre-wrap text-white/45">
+                    <pre className="mt-1.5 max-h-40 overflow-auto font-mono text-[10px] break-all whitespace-pre-wrap text-fg/45">
                       {test.raw || "（空）"}
                     </pre>
                   )}
                 </div>
               )}
 
-              {msg && <p className="text-xs text-white/50">{msg}</p>}
+              {msg && <p className="text-xs text-fg/50">{msg}</p>}
             </>
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-fg/[0.06] px-5 py-3">
           <button
             className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
             disabled={clear.isPending}

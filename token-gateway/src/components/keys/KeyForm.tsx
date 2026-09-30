@@ -63,7 +63,7 @@ export function KeyForm(props: {
   return (
     <div className="space-y-4">
       <div className="form-section">
-        <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+        <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
           基本資訊
         </div>
         <div className="mac-frow">
@@ -93,7 +93,7 @@ export function KeyForm(props: {
       </div>
 
       <div className="form-section">
-        <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+        <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
           用量限制
         </div>
         <div className="mac-frow">
@@ -118,31 +118,31 @@ export function KeyForm(props: {
 
       <div className="form-section">
         <div className="mb-1 flex items-center gap-2">
-          <span className="text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+          <span className="text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
             模型白名單
           </span>
           {models.length > 0 && (
-            <span className="ml-auto rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] font-medium text-white/50">
+            <span className="ml-auto rounded-full bg-fg/[0.08] px-2 py-0.5 text-[10px] font-medium text-fg/50">
               {models.length}
             </span>
           )}
         </div>
-        <p className="text-[11px] text-white/30">空＝全部允許；選了的只有這些可被此 Key 存取。</p>
+        <p className="text-[11px] text-fg/30">空＝全部允許；選了的只有這些可被此 Key 存取。</p>
         <ModelWhitelist providerId={providerId} value={models} onChange={setModels} />
       </div>
 
       <div className="form-section">
         <div className="mb-1 flex items-center gap-2">
-          <span className="text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+          <span className="text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
             工具限制
           </span>
           {apps.length > 0 && (
-            <span className="ml-auto rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] font-medium text-white/50">
+            <span className="ml-auto rounded-full bg-fg/[0.08] px-2 py-0.5 text-[10px] font-medium text-fg/50">
               {apps.length}
             </span>
           )}
         </div>
-        <p className="text-[11px] text-white/30">全不選＝全部允許；選了的只允許這些工具使用。</p>
+        <p className="text-[11px] text-fg/30">全不選＝全部允許；選了的只允許這些工具使用。</p>
         <div className="tool-chips">
           {APP_META.map((m) => (
             <div key={m.id} className="tool-chip">
@@ -168,7 +168,7 @@ export function KeyForm(props: {
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-2.5 border-t border-white/[0.06] pt-3">
+      <div className="flex items-center justify-end gap-2.5 border-t border-fg/[0.06] pt-3">
         <button className="btn-ghost px-5 py-1.5 text-[13px]" onClick={props.onCancel}>
           取消
         </button>

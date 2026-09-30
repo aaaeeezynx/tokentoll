@@ -56,11 +56,11 @@ export function ToolVersions() {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="min-w-0 truncate text-xs text-white/30">
+        <p className="min-w-0 truncate text-xs text-fg/30">
           版本取自本機實際安裝；最新版查 registry；更新走官方通道，單次最長 10 分鐘
         </p>
         <button
-          className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 px-2.5 py-0.5 text-[11px] text-white/50 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
+          className="flex shrink-0 items-center gap-1 rounded-full border border-fg/10 px-2.5 py-0.5 text-[11px] text-fg/50 transition-colors hover:border-fg/20 hover:text-fg disabled:opacity-40"
           disabled={vers.isFetching || latestQ.isFetching}
           onClick={() => {
             void vers.refetch();
@@ -71,7 +71,7 @@ export function ToolVersions() {
           {vers.isFetching || latestQ.isFetching ? "刷新中…" : "刷新"}
         </button>
       </div>
-      {vers.isPending && <p className="text-sm text-white/30">讀取版本中…</p>}
+      {vers.isPending && <p className="text-sm text-fg/30">讀取版本中…</p>}
       {vers.isError && (
         <p className="text-sm text-red-400">讀取失敗：{String(vers.error)}</p>
       )}
@@ -85,14 +85,14 @@ export function ToolVersions() {
         return (
           <div
             key={v.app}
-            className="flex items-center gap-2 rounded-xl border border-white/[0.06] p-3 text-sm"
+            className="flex items-center gap-2 rounded-xl border border-fg/[0.06] p-3 text-sm"
           >
             <Logo name={v.app} size={17} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate font-semibold text-white/85">
+            <span className="min-w-0 flex-1 truncate font-semibold text-fg/85">
               {v.display}
             </span>
             {!v.installed ? (
-              <span className="shrink-0 text-xs text-white/20">未安裝</span>
+              <span className="shrink-0 text-xs text-fg/20">未安裝</span>
             ) : upToDate === true ? (
               <span className="flex shrink-0 items-center gap-1.5">
                 <span className="font-mono text-xs text-[#30d158]">
@@ -103,13 +103,13 @@ export function ToolVersions() {
                 </span>
               </span>
             ) : (
-              <span className="shrink-0 font-mono text-xs text-white/45">
+              <span className="shrink-0 font-mono text-xs text-fg/45">
                 {v.version ?? "未知版本"}
                 {upToDate === false && latest != null && (
                   <span className="text-amber-300/90"> → {latest}</span>
                 )}
                 {upToDate == null && (
-                  <span className="text-white/25">
+                  <span className="text-fg/25">
                     {latestQ.isPending || latestQ.isFetching ? "（檢查中…）" : "（未查到最新版）"}
                   </span>
                 )}
@@ -117,7 +117,7 @@ export function ToolVersions() {
             )}
             {showUpdate && (
               <button
-                className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 px-2.5 py-0.5 text-[11px] text-white/50 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
+                className="flex shrink-0 items-center gap-1 rounded-full border border-fg/10 px-2.5 py-0.5 text-[11px] text-fg/50 transition-colors hover:border-fg/20 hover:text-fg disabled:opacity-40"
                 title={v.update_label ?? "更新"}
                 disabled={updating === v.app}
                 onClick={() => void runUpdate(v.app)}
@@ -132,7 +132,7 @@ export function ToolVersions() {
       {updMsg && (
         <p
           className={`mt-1.5 text-xs break-all whitespace-pre-wrap ${
-            updMsg.ok ? "text-white/45" : "text-red-400"
+            updMsg.ok ? "text-fg/45" : "text-red-400"
           }`}
         >
           {updMsg.msg}

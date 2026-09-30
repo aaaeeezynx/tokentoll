@@ -110,7 +110,7 @@ export function PopSelect(props: {
   return (
     <div className={props.className ?? ""}>
       {props.label && (
-        <div className="mb-1 text-[11px] font-medium text-white/40">
+        <div className="mb-1 text-[11px] font-medium text-fg/40">
           {props.label}
         </div>
       )}
@@ -119,7 +119,7 @@ export function PopSelect(props: {
         type="button"
         title={props.title}
         onClick={toggle}
-        className="field flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[13px] text-white/80"
+        className="field flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[13px] text-fg/80"
       >
         {props.multi ? (
           <span className="min-w-0 flex-1 truncate text-left">
@@ -141,7 +141,7 @@ export function PopSelect(props: {
         <Icon
           name="chevron-down"
           size={12}
-          className={`shrink-0 text-white/30 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`shrink-0 text-fg/30 transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
       {open &&
@@ -163,7 +163,7 @@ export function PopSelect(props: {
                   <Icon
                     name="search"
                     size={12}
-                    className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-white/25"
+                    className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-fg/25"
                   />
                   <input
                     autoFocus
@@ -176,7 +176,7 @@ export function PopSelect(props: {
               </div>
             )}
             {shown.length === 0 && (
-              <p className="px-2 py-3 text-center text-xs text-white/25">
+              <p className="px-2 py-3 text-center text-xs text-fg/25">
                 無匹配
               </p>
             )}
@@ -203,7 +203,7 @@ export function PopSelect(props: {
                   className={`pop-opt flex w-full items-center gap-2 rounded-lg px-2 py-[7px] text-left text-[13px] transition-colors ${
                     active
                       ? ""
-                      : "text-white/70 hover:bg-white/[0.07] hover:text-white"
+                      : "text-fg/70 hover:bg-fg/[0.07] hover:text-fg"
                   }`}
                 >
                   {props.multi ? (
@@ -211,10 +211,10 @@ export function PopSelect(props: {
                       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
                         active
                           ? "border-(--mac-accent) bg-(--mac-accent)"
-                          : "border-white/20 bg-transparent"
+                          : "border-fg/20 bg-transparent"
                       }`}
                     >
-                      {active && <Icon name="check" size={11} className="text-white" />}
+                      {active && <Icon name="check" size={11} className="text-fg" />}
                     </span>
                   ) : (
                     <>
@@ -223,7 +223,7 @@ export function PopSelect(props: {
                   )}
                   <span className="min-w-0 flex-1 truncate">{o.label}</span>
                   {o.hint && (
-                    <span className="max-w-[45%] truncate text-[11px] text-white/25">
+                    <span className="max-w-[45%] truncate text-[11px] text-fg/25">
                       {o.hint}
                     </span>
                   )}

@@ -47,11 +47,11 @@ export function ConfirmDialog(props: {
             <Icon name="alert" size={18} />
           </span>
           <div className="min-w-0">
-            <div className="text-[15px] font-semibold tracking-tight text-white">
+            <div className="text-[15px] font-semibold tracking-tight text-fg">
               {props.title}
             </div>
             {props.message && (
-              <p className="mt-1 text-[13px] leading-relaxed break-words text-white/60">
+              <p className="mt-1 text-[13px] leading-relaxed break-words text-fg/60">
                 {props.message}
               </p>
             )}

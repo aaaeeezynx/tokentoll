@@ -98,14 +98,14 @@ export default function PromptsPage() {
       {dialog}
       <div className="glass p-5">
         <div className="mb-3 flex flex-wrap items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
             <Icon name="pencil" size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-semibold tracking-tight text-white">
+            <div className="text-[15px] font-semibold tracking-tight text-fg">
               提示詞預設集
             </div>
-            <div className="min-w-0 truncate font-mono text-[11px] text-white/30">
+            <div className="min-w-0 truncate font-mono text-[11px] text-fg/30">
               {st ? `${st.path}${st.file_exists ? `（${st.live_bytes} bytes）` : "（檔案不存在）"}` : ""}
             </div>
           </div>
@@ -143,8 +143,8 @@ export default function PromptsPage() {
               key={a.app}
               className={`rounded-lg px-3 py-1.5 text-[12px] transition-colors ${
                 a.app === app
-                  ? "bg-white/[0.14] text-white"
-                  : "bg-white/[0.05] text-white/55 hover:bg-white/[0.09]"
+                  ? "bg-fg/[0.14] text-fg"
+                  : "bg-fg/[0.05] text-fg/55 hover:bg-fg/[0.09]"
               }`}
               onClick={() => {
                 setApp(a.app);
@@ -170,15 +170,15 @@ export default function PromptsPage() {
         {err && <p className="pb-2 text-xs break-words text-red-400">{err}</p>}
 
         {showFile && (
-          <pre className="mb-3 max-h-56 overflow-auto rounded-lg bg-black/30 p-3 font-mono text-[11px] whitespace-pre-wrap text-white/60">
+          <pre className="mb-3 max-h-56 overflow-auto rounded-lg bg-black/30 p-3 font-mono text-[11px] whitespace-pre-wrap text-fg/60">
             {live.isPending ? "讀取中…" : live.data || "（檔案不存在或內容為空）"}
           </pre>
         )}
 
         {list.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : presets.length === 0 ? (
-          <p className="text-[13px] leading-relaxed text-white/35">
+          <p className="text-[13px] leading-relaxed text-fg/35">
             還沒有任何預設集。按「新增」建立一份；如果這個工具的檔案本來就有內容，
             第一次打開這一頁時會自動收成一個「現有內容」的預設集。
           </p>
@@ -187,10 +187,10 @@ export default function PromptsPage() {
             {presets.map((p) => (
               <div
                 key={p.id}
-                className="rounded-xl border border-white/[0.06] p-3.5 transition-colors hover:border-white/10"
+                className="rounded-xl border border-fg/[0.06] p-3.5 transition-colors hover:border-fg/10"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white/85">
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-fg/85">
                     {p.name}
                     {p.active && (
                       <span
@@ -201,14 +201,14 @@ export default function PromptsPage() {
                       </span>
                     )}
                   </span>
-                  <span className="shrink-0 text-[10px] text-white/25">
+                  <span className="shrink-0 text-[10px] text-fg/25">
                     {p.content.length} 字元
                   </span>
                   <button
                     className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] transition-colors ${
                       p.active
-                        ? "bg-white/[0.14] text-white"
-                        : "bg-white/[0.05] text-white/60 hover:bg-white/[0.1]"
+                        ? "bg-fg/[0.14] text-fg"
+                        : "bg-fg/[0.05] text-fg/60 hover:bg-fg/[0.1]"
                     }`}
                     disabled={p.active || activate.isPending}
                     onClick={() => activate.mutate(p.id)}
@@ -217,14 +217,14 @@ export default function PromptsPage() {
                     {p.active ? "使用中" : "啟用"}
                   </button>
                   <button
-                    className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+                    className="shrink-0 rounded-full p-1.5 text-fg/45 transition-colors hover:bg-fg/10 hover:text-fg"
                     title="編輯"
                     onClick={() => setEditing(p.id)}
                   >
                     <Icon name="pencil" size={13} />
                   </button>
                   <button
-                    className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                    className="shrink-0 rounded-full p-1.5 text-fg/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
                     title={p.active ? "啟用中不能刪除" : "刪除"}
                     onClick={() =>
                       ask(`刪除預設集「${p.name}」？`, () => del.mutate(p.id), {
@@ -235,7 +235,7 @@ export default function PromptsPage() {
                     <Icon name="trash" size={13} />
                   </button>
                 </div>
-                <p className="mt-1 truncate font-mono text-[11px] text-white/30">
+                <p className="mt-1 truncate font-mono text-[11px] text-fg/30">
                   {p.content.split("\n")[0] || "（空內容）"}
                 </p>
               </div>
@@ -252,7 +252,7 @@ export default function PromptsPage() {
           </div>
         )}
 
-        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+        <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
           Claude Code 寫 <span className="font-mono">~/.claude/CLAUDE.md</span>；
           Codex 寫 <span className="font-mono">~/.codex/AGENTS.md</span>；
           OpenCode 寫 <span className="font-mono">~/.config/opencode/AGENTS.md</span>。

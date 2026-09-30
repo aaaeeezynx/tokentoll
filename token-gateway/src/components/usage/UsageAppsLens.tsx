@@ -57,7 +57,7 @@ function HitBar(props: { rate: number }) {
   const pct = Math.max(0, Math.min(1, props.rate)) * 100;
   return (
     <div className="flex items-center justify-end gap-1.5">
-      <div className="h-1.5 w-10 overflow-hidden rounded-full bg-white/[0.05]">
+      <div className="h-1.5 w-10 overflow-hidden rounded-full bg-fg/[0.05]">
         <div
           className="h-full rounded-full bg-(--mac-accent)/45 bar-anim"
           style={{ width: `${pct}%` }}
@@ -109,7 +109,7 @@ export function AppsLens(props: {
       {/* 整體摘要：一律取自後端 summary，避免與各列平均產生矛盾 */}
       {s && (
         <div className="glass min-w-0 p-4">
-          <div className="mb-2.5 text-sm font-semibold tracking-tight text-white/80">
+          <div className="mb-2.5 text-sm font-semibold tracking-tight text-fg/80">
             全部工具合計
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -120,8 +120,8 @@ export function AppsLens(props: {
               ["費用 $", fmtCost(s.cost_usd)],
             ].map(([label, value]) => (
               <div key={label} className="min-w-0">
-                <div className="text-[10px] text-white/25">{label}</div>
-                <div className="mt-0.5 truncate text-base font-semibold text-white/85">
+                <div className="text-[10px] text-fg/25">{label}</div>
+                <div className="mt-0.5 truncate text-base font-semibold text-fg/85">
                   {value}
                 </div>
               </div>
@@ -138,38 +138,38 @@ export function AppsLens(props: {
             type="button"
             onClick={() => props.onPickApp(r.app)}
             title={`只看 ${appLabel(r.app)} 的用量`}
-            className="glass min-w-0 p-4 text-left transition-colors hover:bg-white/[0.055]"
+            className="glass min-w-0 p-4 text-left transition-colors hover:bg-fg/[0.055]"
           >
             <div className="flex min-w-0 items-center gap-2">
               <Logo name={r.app} size={18} className="shrink-0" />
-              <span className="min-w-0 truncate text-[13px] font-semibold text-white/85">
+              <span className="min-w-0 truncate text-[13px] font-semibold text-fg/85">
                 {appLabel(r.app)}
               </span>
-              <span className="ml-auto shrink-0 text-[10px] text-white/30">
+              <span className="ml-auto shrink-0 text-[10px] text-fg/30">
                 {fmtPct(r.tokens / grandTokens)}
               </span>
             </div>
             <div className="mt-2.5 space-y-1.5">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[10px] text-white/30">Token 用量</span>
-                <span className="truncate font-mono text-[13px] font-medium text-white/80">
+                <span className="text-[10px] text-fg/30">Token 用量</span>
+                <span className="truncate font-mono text-[13px] font-medium text-fg/80">
                   {fmtInt(r.tokens)}
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[10px] text-white/30">請求數</span>
-                <span className="font-mono text-[13px] font-medium text-white/80">
+                <span className="text-[10px] text-fg/30">請求數</span>
+                <span className="font-mono text-[13px] font-medium text-fg/80">
                   {fmtInt(r.requests)}
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[10px] text-white/30">快取命中率</span>
-                <span className="font-mono text-[13px] font-medium text-white/80">
+                <span className="text-[10px] text-fg/30">快取命中率</span>
+                <span className="font-mono text-[13px] font-medium text-fg/80">
                   {fmtPct(r.cache_hit_rate)}
                 </span>
               </div>
             </div>
-            <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-white/[0.05]">
+            <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-fg/[0.05]">
               <div
                 className="h-full rounded-full bar-anim"
                 style={{
@@ -182,29 +182,29 @@ export function AppsLens(props: {
           </button>
         ))}
         {data.length === 0 && (
-          <p className="text-xs text-white/20">此區間暫無數據</p>
+          <p className="text-xs text-fg/20">此區間暫無數據</p>
         )}
       </div>
 
       {/* 並排比較表 */}
       <div className="glass min-w-0 p-5">
-        <div className="mb-1 text-sm font-semibold tracking-tight text-white/80">
+        <div className="mb-1 text-sm font-semibold tracking-tight text-fg/80">
           分工具比較
         </div>
-        <div className="mb-3 text-[10px] text-white/25">
+        <div className="mb-3 text-[10px] text-fg/25">
           點欄位標題可排序；點任一列可只看該工具
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-left text-xs">
             <thead>
-              <tr className="text-white/55">
+              <tr className="text-fg/55">
                 <th className="py-1.5 pr-2">工具</th>
                 {COLUMNS.map((c) => (
                   <th
                     key={c.key}
                     title={c.hint}
                     onClick={() => onSort(c.key)}
-                    className="cursor-pointer py-1.5 pr-2 text-right whitespace-nowrap select-none hover:text-white/80"
+                    className="cursor-pointer py-1.5 pr-2 text-right whitespace-nowrap select-none hover:text-fg/80"
                   >
                     {c.label}
                     {sortKey === c.key ? (desc ? " ↓" : " ↑") : ""}
@@ -218,46 +218,46 @@ export function AppsLens(props: {
                   key={r.app}
                   onClick={() => props.onPickApp(r.app)}
                   title={`只看 ${appLabel(r.app)} 的用量`}
-                  className="cursor-pointer border-t border-white/[0.04] transition-colors hover:bg-white/[0.04]"
+                  className="cursor-pointer border-t border-fg/[0.04] transition-colors hover:bg-fg/[0.04]"
                 >
                   <td className="py-2 pr-2">
                     <div className="flex items-center gap-1.5">
                       <Logo name={r.app} size={14} className="shrink-0" />
-                      <span className="text-white/70">{appLabel(r.app)}</span>
+                      <span className="text-fg/70">{appLabel(r.app)}</span>
                     </div>
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/60">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/60">
                     {fmtInt(r.requests)}
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/60">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/60">
                     {fmtPct(r.success_rate)}
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/60">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/60">
                     {fmtInt(r.in_tok)}
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/60">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/60">
                     {fmtInt(r.out_tok)}
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/60">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/60">
                     {fmtInt(r.cache_read)}
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/60">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/60">
                     {fmtInt(r.cache_write)}
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/80">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/80">
                     {fmtInt(r.tokens)}
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/80">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/80">
                     <HitBar rate={r.cache_hit_rate} />
                   </td>
-                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-white/60">
+                  <td className="py-2 pr-2 text-right whitespace-nowrap tabular-nums text-fg/60">
                     {fmtCost(r.cost_usd)}
                   </td>
                 </tr>
               ))}
               {data.length === 0 && (
                 <tr>
-                  <td className="py-2 text-white/20" colSpan={COLUMNS.length + 1}>
+                  <td className="py-2 text-fg/20" colSpan={COLUMNS.length + 1}>
                     此區間暫無數據
                   </td>
                 </tr>

@@ -17,14 +17,14 @@ export function ResultBlock(props: {
       {saving && (
         <div className="glass flex items-center gap-2 border-[#30d158]/25 p-4">
           <Icon name="check" size={15} className="shrink-0 text-[#30d158]" />
-          <span className="text-sm text-white/80">
+          <span className="text-sm text-fg/80">
             {saving.cheap} 更便宜，省 ${saving.diff.toFixed(4)}（
             {saving.pct.toFixed(1)}%）
           </span>
         </div>
       )}
       {!saving && (
-        <div className="glass p-4 text-sm text-white/60">
+        <div className="glass p-4 text-sm text-fg/60">
           兩邊一樣貴（或都是 $0）。
         </div>
       )}

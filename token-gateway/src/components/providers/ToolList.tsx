@@ -35,7 +35,7 @@ export function ToolList(props: {
   } = props;
   return (
     <>
-      {isPending && <p className="text-sm text-white/30">檢測中…</p>}
+      {isPending && <p className="text-sm text-fg/30">檢測中…</p>}
       {props.error != null && (
         <p className="text-sm text-red-400">檢測失敗：{String(error)}</p>
       )}
@@ -49,11 +49,11 @@ export function ToolList(props: {
             className="glass-float hover-line anim-rise cursor-pointer rounded-xl border p-3.5 text-sm"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2 font-semibold text-white/85">
+              <span className="flex min-w-0 items-center gap-2 font-semibold text-fg/85">
                 <Logo name={t.app} size={17} className="shrink-0" />
                 <span className="truncate">{t.display}</span>
                 {!t.installed && (
-                  <span className="shrink-0 text-xs text-white/20">未安裝</span>
+                  <span className="shrink-0 text-xs text-fg/20">未安裝</span>
                 )}
                 {t.gateway_active && (
                   <span className="shrink-0 rounded-full bg-[#30d158]/10 px-2.5 py-0.5 text-[10px] font-medium text-[#30d158]">
@@ -77,10 +77,10 @@ export function ToolList(props: {
             </div>
             {t.gateway_active && (
               <>
-                <p className="mt-1.5 truncate font-mono text-xs text-white/30">
+                <p className="mt-1.5 truncate font-mono text-xs text-fg/30">
                   {t.current_base_url || "（未檢測到 base_url）"}
                 </p>
-                <p className="mt-0.5 truncate text-xs text-white/20">
+                <p className="mt-0.5 truncate text-xs text-fg/20">
                   模型：{t.current_model || "未知"}
                 </p>
               </>
@@ -89,12 +89,12 @@ export function ToolList(props: {
               <p className="mt-1.5 break-all text-xs text-red-400">{rowErr.msg}</p>
             )}
             {rowMsg?.app === t.app && (
-              <p className="mt-1.5 break-all text-xs text-white/45">{rowMsg.msg}</p>
+              <p className="mt-1.5 break-all text-xs text-fg/45">{rowMsg.msg}</p>
             )}
             {t.app === "codex" && (
               <div className="mt-1.5">
                 <button
-                  className="rounded-full border border-white/10 px-2.5 py-0.5 text-[11px] text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                  className="rounded-full border border-fg/10 px-2.5 py-0.5 text-[11px] text-fg/50 transition-colors hover:border-fg/20 hover:text-fg"
                   disabled={doctorBusy}
                   onClick={() => props.onRunDoctor()}
                 >
@@ -111,7 +111,7 @@ export function ToolList(props: {
                             : l.startsWith("⚠️")
                               ? "text-amber-300/90"
                               : l.startsWith("ℹ️")
-                                ? "text-white/50"
+                                ? "text-fg/50"
                                 : "text-[#30d158]/80"
                         }
                       >
@@ -125,7 +125,7 @@ export function ToolList(props: {
           </div>
         ))}
       </div>
-      <p className="mt-3 text-xs text-white/15">
+      <p className="mt-3 text-xs text-fg/15">
         DSH 僅檢測不寫入設定（endpoint 由 profile bundle 決定）；請手動把
         base_url 指向本網關，並在請求頭帶 x-tg-app 標識。
         Cursor／Antigravity／Hermes 不提供接管，只作為用量歸屬標籤出現在用量頁。

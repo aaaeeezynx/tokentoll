@@ -33,24 +33,24 @@ export function SecretAlert(props: {
             <Icon name={props.reason === "new" ? "key-fill" : "refresh"} size={20} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[16px] font-semibold tracking-tight text-white">
+            <div className="text-[16px] font-semibold tracking-tight text-fg">
               {props.reason === "new" ? "Key 已簽發" : "Key 已輪換"}
             </div>
-            <p className="mt-1 text-[13px] leading-relaxed text-white/55">
+            <p className="mt-1 text-[13px] leading-relaxed text-fg/55">
               此 Key 已存於本機，可隨時在列表點「查看」再次顯示與複製。
             </p>
           </div>
           <button
-            className="shrink-0 rounded-full bg-white/[0.055] p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className="shrink-0 rounded-full bg-fg/[0.055] p-1.5 text-fg/60 transition-colors hover:bg-fg/10 hover:text-fg"
             onClick={requestClose}
             title="關閉"
           >
             <Icon name="x" size={14} />
           </button>
         </div>
-        <div className="mt-4 rounded-xl border border-white/[0.08] bg-black/25 p-3">
-          <div className="mb-1.5 text-[11px] font-medium text-white/35">完整 Key</div>
-          <code className="block max-h-28 select-all overflow-y-auto break-all font-mono text-[13px] leading-relaxed text-white/90">
+        <div className="mt-4 rounded-xl border border-fg/[0.08] bg-black/25 p-3">
+          <div className="mb-1.5 text-[11px] font-medium text-fg/35">完整 Key</div>
+          <code className="block max-h-28 select-all overflow-y-auto break-all font-mono text-[13px] leading-relaxed text-fg/90">
             {props.secret}
           </code>
         </div>

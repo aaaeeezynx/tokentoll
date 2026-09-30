@@ -217,7 +217,7 @@ function Shell() {
       <aside className="mac-sidebar m-2 flex w-14 shrink-0 flex-col items-center px-1.5 py-3 md:w-52 md:items-stretch md:px-2.5">
         <div className="flex items-center gap-2 px-2 pb-3">
           <span
-            className="flex h-8 w-8 items-center justify-center rounded-[9px] text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-[9px] text-fg"
             style={{
               background: "linear-gradient(160deg, #3395ff, #0a64d8)",
               boxShadow: "0 2px 8px rgba(10,132,255,0.35)",
@@ -226,7 +226,7 @@ function Shell() {
             <Icon name="chart-bar-fill" size={17} />
           </span>
           <div className="hidden md:block">
-            <div className="text-[13px] font-semibold tracking-tight text-white">
+            <div className="text-[13px] font-semibold tracking-tight text-fg">
               Token Gateway
             </div>
             <div
@@ -268,13 +268,13 @@ function Shell() {
         <div className="mx-auto w-full max-w-6xl shrink-0 px-3 md:px-5">
           <header className="mac-floatbar">
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 md:gap-4 md:px-5">
-              <h1 className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-white">
+              <h1 className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-fg">
                 {active.label}
               </h1>
               <ProxyPill />
             </div>
             {tab === "usage" && (
-              <div className="border-t border-white/[0.06] px-4 py-2 md:px-5">
+              <div className="border-t border-fg/[0.06] px-4 py-2 md:px-5">
                 <UsageFilterBar
                   filter={uFilter}
                   onFilter={patchFilter}

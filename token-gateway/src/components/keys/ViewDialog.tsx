@@ -31,17 +31,17 @@ export function ViewDialog(props: { item: LocalKey; onClose: () => void; onEdit:
     >
       <div className="w-full max-w-md glass-panel pop-in p-5">
         <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
             <Icon name="key" size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold text-white">{k.name}</div>
-            <div className="truncate font-mono text-[11px] text-white/30">
+            <div className="truncate text-[15px] font-semibold text-fg">{k.name}</div>
+            <div className="truncate font-mono text-[11px] text-fg/30">
               {k.key_prefix} · {k.enabled ? "已啟用" : "已停用"}
             </div>
           </div>
           <button
-            className="rounded-full bg-white/[0.055] p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-full bg-fg/[0.055] p-1.5 text-fg/60 transition-colors hover:bg-fg/10 hover:text-fg"
             onClick={props.onClose}
             title="關閉"
           >
@@ -50,11 +50,11 @@ export function ViewDialog(props: { item: LocalKey; onClose: () => void; onEdit:
         </div>
 
         <div className="mt-4 space-y-3 text-[13px]">
-          <div className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
-            <div className="mb-1.5 text-[11px] font-medium text-white/40">完整 Key</div>
+          <div className="rounded-xl border border-fg/[0.07] bg-black/20 p-3">
+            <div className="mb-1.5 text-[11px] font-medium text-fg/40">完整 Key</div>
             {revealed ? (
               <>
-                <code className="block max-h-28 select-all overflow-y-auto break-all rounded-lg bg-black/30 p-2.5 font-mono text-white/90">
+                <code className="block max-h-28 select-all overflow-y-auto break-all rounded-lg bg-black/30 p-2.5 font-mono text-fg/90">
                   {revealed}
                 </code>
                 <div className="mt-2 flex gap-2">
@@ -75,7 +75,7 @@ export function ViewDialog(props: { item: LocalKey; onClose: () => void; onEdit:
               </>
             ) : (
               <>
-                <p className="mb-2 text-white/40">簽發後仍可隨時查看明文（本機存儲）。</p>
+                <p className="mb-2 text-fg/40">簽發後仍可隨時查看明文（本機存儲）。</p>
                 {err && <p className="mb-2 text-red-400">{err}</p>}
                 <button
                   className="btn-ghost flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-40"
@@ -91,29 +91,29 @@ export function ViewDialog(props: { item: LocalKey; onClose: () => void; onEdit:
 
           <div className="mac-frow !grid-cols-[88px_1fr]">
             <span className="mac-cap">來源</span>
-            <span className="text-white/75">{k.provider_name || "未綁定"}</span>
+            <span className="text-fg/75">{k.provider_name || "未綁定"}</span>
           </div>
           <div className="mac-frow !grid-cols-[88px_1fr]">
             <span className="mac-cap">用量</span>
-            <span className="text-white/75">
+            <span className="text-fg/75">
               {k.used_tokens.toLocaleString()} / {fmtTokens(k.quota_tokens)}
             </span>
           </div>
           <div className="mac-frow !grid-cols-[88px_1fr]">
             <span className="mac-cap">限流</span>
-            <span className="text-white/75">
+            <span className="text-fg/75">
               {k.rate_limit_qpm <= 0 ? "不限" : `${k.rate_limit_qpm}/分鐘`}
             </span>
           </div>
 
           {k.allowed_models.length > 0 && (
             <div>
-              <div className="mb-1.5 text-[11px] font-medium text-white/40">模型白名單</div>
+              <div className="mb-1.5 text-[11px] font-medium text-fg/40">模型白名單</div>
               <div className="flex flex-wrap gap-1">
                 {k.allowed_models.map((m) => (
                   <span
                     key={m}
-                    className="rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-[11px] text-white/60"
+                    className="rounded-full bg-fg/[0.06] px-2 py-0.5 font-mono text-[11px] text-fg/60"
                   >
                     {m}
                   </span>

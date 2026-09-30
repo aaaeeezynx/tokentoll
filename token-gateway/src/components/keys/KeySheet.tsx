@@ -26,18 +26,18 @@ export function KeySheet(props: {
       <div
         className={`my-auto flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden glass-panel ${closing ? "sheet-out" : "pop-in"}`}
       >
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] bg-[rgba(24,24,30,0.98)] px-5 py-4">
+        <div className="flex shrink-0 items-center gap-3 border-b border-fg/[0.06] bg-[var(--app-elevated-solid)] px-5 py-4">
           <button
-            className="rounded-full bg-white/[0.06] p-1.5 text-white/55 transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-full bg-fg/[0.06] p-1.5 text-fg/55 transition-colors hover:bg-fg/10 hover:text-fg"
             onClick={requestClose}
             title="關閉"
           >
             <Icon name="x" size={14} />
           </button>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/65">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/65">
             <Icon name="key" size={17} />
           </span>
-          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-white">
+          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-fg">
             {props.initial ? `編輯「${props.initial.name}」` : "簽發 Key"}
           </div>
         </div>

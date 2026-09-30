@@ -43,6 +43,7 @@ import type {
   QueueModel,
   QueueRow,
   QuotaView,
+  AppearanceState,
   DeeplinkApplied,
   DeeplinkPreview,
   DeeplinkProtocolState,
@@ -255,6 +256,13 @@ export const api = {
       storage: storage ?? null,
       syncMode: syncMode ?? null,
     }),
+  // ── P4.3／P4.4 外觀與啟動 ──
+  appearanceState: (): Promise<AppearanceState> => invoke("appearance_state"),
+  appearanceSetTheme: (value: string): Promise<string> =>
+    invoke("appearance_set_theme", { value }),
+  appearanceSetAutostart: (enabled: boolean): Promise<AppearanceState> =>
+    invoke("appearance_set_autostart", { enabled }),
+
   // ── P4.1 Deep Link ──
   /** 啟動時帶進來的連結（取走後就沒有了）。 */
   deeplinkTakePending: (): Promise<string | null> =>

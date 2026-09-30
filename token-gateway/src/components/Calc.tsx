@@ -185,7 +185,7 @@ export default function CalcPage() {
       <div className="grid gap-4 md:grid-cols-2">
         {/* ── A 側 ── */}
         <div className="glass p-5">
-          <div className="mb-3 text-sm font-semibold tracking-tight text-white/80">
+          <div className="mb-3 text-sm font-semibold tracking-tight text-fg/80">
             A · 已存來源
           </div>
           <div className="mac-frow">
@@ -228,7 +228,7 @@ export default function CalcPage() {
         {/* ── B 側 ── */}
         <div className="glass p-5">
           <div className="mb-3 flex items-center gap-2">
-            <div className="text-sm font-semibold tracking-tight text-white/80">
+            <div className="text-sm font-semibold tracking-tight text-fg/80">
               B · 對比方
             </div>
             <span className="flex-1" />
@@ -347,7 +347,7 @@ export default function CalcPage() {
         >
           {run.isPending ? "試算中…" : "開始比價"}
         </button>
-        <span className="text-[11px] text-white/25">
+        <span className="text-[11px] text-fg/25">
           訂閱超額按基礎價，剩餘額度按輸入→輸出→快取讀→快取建抵扣；峰谷按當下時段估算
         </span>
       </div>

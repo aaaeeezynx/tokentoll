@@ -45,14 +45,14 @@ export function OverviewLens(props: {
               className="glass-float float-hover anim-rise min-w-0 p-4"
               style={{ animationDelay: `${i * 50}ms` }}
             >
-              <div className="text-[11px] font-medium text-white/35 uppercase tracking-wider">{label}</div>
-              <div className="mt-1.5 truncate text-xl font-semibold text-white/90">{value}</div>
+              <div className="text-[11px] font-medium text-fg/35 uppercase tracking-wider">{label}</div>
+              <div className="mt-1.5 truncate text-xl font-semibold text-fg/90">{value}</div>
             </div>
           ))}
         </div>
       )}
       {summary.data && subTotal > 0 && (
-        <p className="-mt-2 text-[11px] text-white/25">
+        <p className="-mt-2 text-[11px] text-fg/25">
           合計＝請求費用（當前篩選）＋本月訂閱費（自然月）；超額部分已按基礎價計入請求費用
         </p>
       )}
@@ -66,10 +66,10 @@ export function OverviewLens(props: {
       />
 
       <div className="glass min-w-0 p-3 md:p-5">
-        <div className="mb-2 flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm font-semibold tracking-tight text-white/80">
+        <div className="mb-2 flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm font-semibold tracking-tight text-fg/80">
           <span className="shrink-0">Token 趨勢</span>
           {summary.data && (
-            <span className="min-w-0 text-xs font-normal break-words text-white/30">
+            <span className="min-w-0 text-xs font-normal break-words text-fg/30">
               輸入 {fmtInt(summary.data.in_tok)} · 輸出{" "}
               {fmtInt(summary.data.out_tok)} · 快取讀{" "}
               {fmtInt(summary.data.cache_read)} · 快取建{" "}
@@ -78,7 +78,7 @@ export function OverviewLens(props: {
           )}
         </div>
         {trendByApp.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : (
           <TrendChart
             key={chartKey}

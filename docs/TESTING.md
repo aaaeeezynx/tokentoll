@@ -776,6 +776,55 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.28 主題與開機自啟（P4.3／P4.4，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §1.5 抄）
+
+- **語言**：簡中／繁中／英文／日文，**即時生效不用重啟**。
+- **主題**：`System`／`Light`／`Dark`（System 跟隨系統深淺色）。
+- **Launch on Startup**：Windows 用**登錄檔**、macOS 用 LaunchAgent、Linux 用 XDG autostart。
+- **關閉行為**：預設「關閉時縮到系統匣」；另有 Lightweight Mode（只留托盤、視窗銷毀）。
+
+#### P4.3 主題：只靠一組 CSS 變數切換
+
+改動範圍是「66 個前端檔案的 777 處硬編色」，所以關鍵是**一次到位的機制**而不是逐處補丁：
+
+| 部分 | 內容 |
+|---|---|
+| 前景通道 | `--app-fg-rgb`（深色 `255 255 255`／淺色 `28 28 30`）。所有白色疊色改寫成 `rgb(var(--app-fg-rgb) / α)`，**淺色主題自動變成黑色疊色** |
+| Tailwind | `@theme { --color-fg: var(--app-fg) }` → 元件寫 `text-fg/60`、`bg-fg/[0.06]`、`border-fg/10`，透明度寫法照用 |
+| 表面色 | `--app-bg*`／`--app-window*`／`--app-elevated*`／`--app-pop*`／`--app-glass*`／`--app-shadow*`／`--app-orb-opacity`，`:root[data-theme="light"]` 覆蓋 |
+| 系統色 | 淺色底上把 accent／green／red 調深（macOS Light 的作法），維持對比 |
+| 切換 | `<html data-theme>`；`system` 由前端監聽 `prefers-color-scheme` 即時切換；偏好存 `settings.theme`（DB 是真相）＋ localStorage 首幀快取避免閃爍 |
+| 機械替換 | 777 處 `{text,bg,border,divide,ring,…}-white[/α]` → `-fg`，另把 7 個對話框標題的 `rgba(24,24,30,0.98)` 換成 `var(--app-elevated-solid)`、光暈加 `--app-orb-opacity` |
+
+#### P4.4 開機自啟：HKCU 的 Run 機碼
+
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 底下的 `TokenGateway` =
+`"<exe 路徑>"`（與 Deep Link 協定註冊同一條原則：**免管理員**）。
+**狀態以登錄檔為準**，不另外在資料庫存一份 —— 使用者可能用工作管理員或其他工具關掉它，
+我們不該顯示自己想像的狀態。
+
+#### 測試（4 個新測試）
+
+- `theme`（2）：三個選項的驗證（含大小寫與空白）、`resolve` 的語意
+  （明講淺／深就不管系統；`system` 才看系統；空值視為跟隨系統）。
+- `autostart`（2）：查詢是唯讀的（兩次結果相同、有值就一定指向 `.exe`）、
+  機碼路徑與值名稱就是 cc-switch 手冊寫的那個位置。
+
+#### 實機驗證（CDP 讀 **computed style**，不是看截圖）
+
+| 驗證項 | 結果 |
+|---|---|
+| 三個選項都在 | ✅ 設定頁「跟隨系統／淺色／深色」，並顯示「目前：淺色」 |
+| 切淺色 | ✅ `<html data-theme="light">`；body 文字 `rgba(28,28,30,0.95)`、底色 `rgb(236,236,240)`；`--app-fg-rgb: 28 28 30`；**玻璃邊框由 `rgba(255,255,255,0.09)` 反轉成 `rgba(28,28,30,0.09)`** |
+| 切深色 | ✅ 全部回到 `rgba(255,255,255,0.95)` / `rgb(11,11,15)` |
+| 跟隨系統 | ✅ 解析為 dark（本機系統為深色） |
+| **開機自啟開啟** | ✅ 設定頁開關 →「已開啟開機自啟」；`reg query …\Run /v TokenGateway` → `"C:\Users\luluna\AppData\Local\token-gateway\token-gateway.exe"` |
+| 開機自啟關閉 | ✅ 再切一次 →「已關閉開機自啟」；登錄檔查詢變成「找不到」——**使用者的機器回到原狀** |
+
+---
+
 ### 0.9.27 Deep Link 一鍵匯入（P4.1，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §5.3 抄）
@@ -2698,7 +2747,46 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.27 最新建置（2026-10-01 05:08，P4.1：Deep Link 一鍵匯入）—— **你目前安裝的就是這一個**
+### 9.28 最新建置（2026-10-01 05:38，P4.3 主題 ＋ P4.4 開機自啟）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P4.3／P4.4（設計見 §0.9.28）。**沒有動 schema（仍 v13）**。
+這輪改了 **66 個前端檔案**（機械式把 777 處硬編白色換成主題 token）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 05:38:37 |
+| `target\release\token-gateway.exe` | 10,101,760 bytes、sha256 `EF7CDAABE94CAEB794FF586A4DE5F91D2EB7E3CEC6D61CD65604455A8019E50B` |
+| NSIS 安裝檔 | 4,208,037 bytes、sha256 `9EACCA7C1A91AF3881D23DCD8E471E9D7518059D69AA0FCA85AA460F18931CE8` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,101,760 bytes、sha256 `4DACAED958B669D99046BB80253C9BE559BB7680AFC80FBA21CCB4868F379156` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **425 passed / 0 failed / 11 ignored** ✅（+4：theme／autostart） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍 **13** ✅ |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src/index.css` | 主題 token（`--app-*` ＋ `--color-fg` 的 `@theme`）、`:root[data-theme="light"]` 淺色覆蓋、光暈透明度 |
+| `src/lib/appearance.ts`、`src/main.tsx` | **新增**主題解析／套用／監聽系統；首幀先套用（避免閃爍） |
+| `src/components/Settings.tsx` | 外觀區新增「主題」三選項與「開機自啟」開關（顯示登錄檔實際命令） |
+| `src-tauri/src/theme.rs`、`src-tauri/src/autostart.rs`、`commands/appearance_cmd.rs` | **新增**：主題驗證與語意、Run 機碼存取、外觀狀態命令 |
+| 66 個 `src/**/*.tsx` | `{text,bg,border,…}-white[/α]` → `-fg`；7 個對話框標題改用 `var(--app-elevated-solid)` |
+
+#### 實機驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| 主題切換（computed style） | ✅ 淺色：body 文字 `rgba(28,28,30,0.95)`、底色 `rgb(236,236,240)`、玻璃邊框反轉；深色回到白字／`rgb(11,11,15)`；跟隨系統解析為 dark |
+| 淺色下逐頁走訪 | ✅ 九個頁面（用量／上游來源／MCP／提示詞／技能／會話／本地 Key／診斷／試算）都正常渲染、沒有錯誤；標題色 `rgb(28, 28, 30)` |
+| **要求二：本機工具選項** | ✅ 淺色模式下仍是 8 個選項（Claude Code／Codex／OpenCode／Hermes Agent／DeepSeek Harness／Cursor／Antigravity） |
+| **開機自啟** | ✅ 開啟 → `reg query …\Run /v TokenGateway` 出現 `"…\token-gateway.exe"`；關閉 → 查詢變成「找不到」（**已還原使用者的機器狀態**） |
+
+### 9.27 前一次建置（2026-10-01 05:08，P4.1：Deep Link，已被 9.28 取代）
 
 CC Switch 對齊計畫 P4.1（設計與取捨見 §0.9.27）。**沒有動 schema（仍 v13）**。
 新增相依：`base64`（離線快取已有）。

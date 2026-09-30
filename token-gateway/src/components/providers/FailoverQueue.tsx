@@ -34,14 +34,14 @@ export function FailoverQueue() {
   return (
     <div className="glass p-5">
       <div className="mb-3 flex flex-wrap items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
           <Icon name="switch" size={17} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[15px] font-semibold tracking-tight text-white">
+          <div className="text-[15px] font-semibold tracking-tight text-fg">
             故障轉移佇列
           </div>
-          <div className="text-[11px] text-white/30">
+          <div className="text-[11px] text-fg/30">
             某個模型打不通時，網關會照這個順序往下換來源（順序＝來源清單順序，可拖曳調整）
           </div>
         </div>
@@ -61,21 +61,21 @@ export function FailoverQueue() {
       </div>
 
       {models.isPending ? (
-        <p className="text-sm text-white/30">載入中…</p>
+        <p className="text-sm text-fg/30">載入中…</p>
       ) : list.length === 0 ? (
-        <p className="text-[13px] text-white/35">
+        <p className="text-[13px] text-fg/35">
           目前沒有可排隊的模型 —— 先在來源裡登記模型（來源 → 模型 → 取得模型清單）。
         </p>
       ) : !model ? (
-        <p className="text-[13px] text-white/35">
+        <p className="text-[13px] text-fg/35">
           選一個模型，看它在哪些來源上架、換手順序如何。
         </p>
       ) : rows.isPending ? (
-        <p className="text-sm text-white/30">載入中…</p>
+        <p className="text-sm text-fg/30">載入中…</p>
       ) : rows.isError ? (
-        <p className="text-sm text-white/50">讀取失敗：{String(rows.error)}</p>
+        <p className="text-sm text-fg/50">讀取失敗：{String(rows.error)}</p>
       ) : (rows.data?.length ?? 0) === 0 ? (
-        <p className="text-[13px] text-white/35">
+        <p className="text-[13px] text-fg/35">
           這個模型目前沒有可用的來源（來源或模型被停用了）。
         </p>
       ) : (
@@ -84,17 +84,17 @@ export function FailoverQueue() {
             {rows.data?.map((r, i) => (
               <div
                 key={`${r.provider_id}-${r.api_format}`}
-                className="flex flex-wrap items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2"
+                className="flex flex-wrap items-center gap-2 rounded-md bg-fg/[0.04] px-3 py-2"
               >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/[0.08] text-[10px] font-semibold text-white/60">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-fg/[0.08] text-[10px] font-semibold text-fg/60">
                   {i + 1}
                 </span>
-                <span className="min-w-0 truncate text-[13px] text-white/85">
+                <span className="min-w-0 truncate text-[13px] text-fg/85">
                   {r.provider_name || (
-                    <span className="text-white/35">已刪除的渠道 #{r.provider_id}</span>
+                    <span className="text-fg/35">已刪除的渠道 #{r.provider_id}</span>
                   )}
                 </span>
-                <span className="rounded bg-white/[0.06] px-1.5 py-px font-mono text-[10px] text-white/40">
+                <span className="rounded bg-fg/[0.06] px-1.5 py-px font-mono text-[10px] text-fg/40">
                   {r.api_format}
                 </span>
                 {r.learned_format && (
@@ -115,18 +115,18 @@ export function FailoverQueue() {
                   </span>
                 )}
                 {!r.enabled && (
-                  <span className="rounded bg-white/[0.06] px-1.5 py-px text-[10px] text-white/35">
+                  <span className="rounded bg-fg/[0.06] px-1.5 py-px text-[10px] text-fg/35">
                     已停用
                   </span>
                 )}
                 <span className="flex-1" />
-                <span className="shrink-0 text-[10px] text-white/25">
+                <span className="shrink-0 text-[10px] text-fg/25">
                   {r.model_count} 個模型
                 </span>
               </div>
             ))}
           </div>
-          <p className="pt-2.5 text-[11px] leading-relaxed text-white/25">
+          <p className="pt-2.5 text-[11px] leading-relaxed text-fg/25">
             {cur ? `${cur.model}：` : ""}
             候選 {rows.data?.length ?? 0} 個來源。實際請求還會逐來源試「宣告協議 → 學到的協議
             → 另一種協議」（Responses 入站時 chat ↔ responses 都生得出來），

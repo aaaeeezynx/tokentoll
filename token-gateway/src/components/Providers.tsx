@@ -242,7 +242,7 @@ export default function ProvidersPage() {
               <p className="mb-2 text-xs text-emerald-400/80">{listMsg}</p>
             )}
             {providers.isPending && (
-              <p className="text-sm text-white/30">載入中…</p>
+              <p className="text-sm text-fg/30">載入中…</p>
             )}
         {listErr && (
           <p className="mb-2 break-all text-xs text-red-400">{listErr}</p>
@@ -319,17 +319,17 @@ export default function ProvidersPage() {
           <Icon
             name="chevron-right"
             size={13}
-            className={`shrink-0 text-white/25 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${gpOpen ? "rotate-90" : ""}`}
+            className={`shrink-0 text-fg/25 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${gpOpen ? "rotate-90" : ""}`}
           />
-          <span className="text-sm font-semibold tracking-tight text-white/80">
+          <span className="text-sm font-semibold tracking-tight text-fg/80">
             {view === "tools" ? "本機工具版本" : "全域預設定價"}
           </span>
           {view !== "tools" && gpCount !== null && (
-            <span className="rounded-full bg-white/[0.07] px-2 py-px text-[10px] font-medium text-white/45">
+            <span className="rounded-full bg-fg/[0.07] px-2 py-px text-[10px] font-medium text-fg/45">
               {gpCount}
             </span>
           )}
-          <span className="truncate text-xs text-white/30">
+          <span className="truncate text-xs text-fg/30">
             {view === "tools"
               ? "已安裝工具的實際版本與一鍵更新"
               : "來源未單獨定價時的回退"}
@@ -337,7 +337,7 @@ export default function ProvidersPage() {
         </button>
         <div className="acc-body" data-open={gpOpen}>
           <div>
-            <div className="mt-3 border-t border-white/[0.06] pt-3">
+            <div className="mt-3 border-t border-fg/[0.06] pt-3">
               {view === "tools" ? (
                 <ToolVersions />
               ) : (

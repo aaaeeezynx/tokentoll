@@ -22,7 +22,7 @@ export function Toggle(props: {
       }}
       className={`relative shrink-0 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
         sm ? "h-[20px] w-[34px]" : "h-[24px] w-[42px]"
-      } ${props.checked ? "bg-[#34c759]" : "bg-white/15"}`}
+      } ${props.checked ? "bg-[#34c759]" : "bg-fg/15"}`}
       style={
         props.checked
           ? { boxShadow: "0 0 8px rgba(52,199,89,0.35)" }
@@ -30,7 +30,7 @@ export function Toggle(props: {
       }
     >
       <span
-        className={`absolute rounded-full bg-white transition-transform duration-200 ${
+        className={`absolute rounded-full bg-fg transition-transform duration-200 ${
           sm ? "h-[16px] w-[16px]" : "h-[20px] w-[20px]"
         }`}
         style={{

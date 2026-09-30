@@ -114,14 +114,14 @@ export default function McpPage() {
       {dialog}
       <div className="glass p-5">
         <div className="mb-3 flex flex-wrap items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
             <Icon name="cpu" size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-semibold tracking-tight text-white">
+            <div className="text-[15px] font-semibold tracking-tight text-fg">
               MCP 伺服器
             </div>
-            <div className="text-[11px] text-white/30">
+            <div className="text-[11px] text-fg/30">
               開啟某個工具＝把伺服器寫進它的設定檔；關閉＝從那個檔案移除。
               你自己手寫、沒匯入這裡的伺服器不會被動到。
             </div>
@@ -159,7 +159,7 @@ export default function McpPage() {
         {err && <p className="pb-2 text-xs break-words text-red-400">{err}</p>}
 
         {lastSync && lastSync.some((o) => o.backup) && (
-          <p className="pb-2 text-[11px] break-all text-white/30">
+          <p className="pb-2 text-[11px] break-all text-fg/30">
             改寫前已備份：
             {lastSync
               .filter((o) => o.backup)
@@ -169,11 +169,11 @@ export default function McpPage() {
         )}
 
         {list.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : list.isError ? (
-          <p className="text-sm text-white/50">讀取失敗：{String(list.error)}</p>
+          <p className="text-sm text-fg/50">讀取失敗：{String(list.error)}</p>
         ) : servers.length === 0 ? (
-          <p className="text-[13px] leading-relaxed text-white/35">
+          <p className="text-[13px] leading-relaxed text-fg/35">
             還沒有任何伺服器。按「新增」從樣板開始（fetch／time／memory／
             sequential-thinking／context7），或按「匯入既有設定」把你已經在工具裡
             設好的伺服器收進來。
@@ -181,20 +181,20 @@ export default function McpPage() {
         ) : (
           <div className="space-y-2">
             {/* 標題列：每個工具一個「整欄開/關」 */}
-            <div className="flex items-center gap-2 px-3 text-[11px] text-white/35">
+            <div className="flex items-center gap-2 px-3 text-[11px] text-fg/35">
               <span className="min-w-0 flex-1">伺服器</span>
               {apps.map((a) => (
                 <span key={a.app} className="flex w-[92px] shrink-0 items-center gap-1">
                   <span className="min-w-0 flex-1 truncate">{appLabel(a.app)}</span>
                   <button
-                    className="shrink-0 rounded px-1 text-white/30 hover:text-white/80"
+                    className="shrink-0 rounded px-1 text-fg/30 hover:text-fg/80"
                     title={`${appLabel(a.app)}：全部開啟`}
                     onClick={() => bindAll.mutate({ app: a.app, enabled: true })}
                   >
                     ⏻
                   </button>
                   <button
-                    className="shrink-0 rounded px-1 text-white/30 hover:text-white/80"
+                    className="shrink-0 rounded px-1 text-fg/30 hover:text-fg/80"
                     title={`${appLabel(a.app)}：全部關閉`}
                     onClick={() => bindAll.mutate({ app: a.app, enabled: false })}
                   >
@@ -225,7 +225,7 @@ export default function McpPage() {
           </div>
         )}
 
-        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+        <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
           Claude Code 寫 <span className="font-mono">~/.claude.json</span> 的
           <span className="font-mono"> mcpServers</span>；Codex 寫
           <span className="font-mono"> ~/.codex/config.toml</span> 的

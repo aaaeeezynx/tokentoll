@@ -2,6 +2,17 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type UsageRange } from "../lib/api";
 import { ACCENTS, applyAccentVars, isAccentId, loadAccent, saveAccentLocal } from "../lib/theme";
+import {
+  THEME_LABEL,
+  applyTheme,
+  isThemePref,
+  loadThemePref,
+  resolveTheme,
+  saveThemePref,
+  watchSystemTheme,
+  type ResolvedTheme,
+  type ThemePref,
+} from "../lib/appearance";
 import { Icon } from "./icons";
 import { RangePicker, type CustomRange } from "./RangePicker";
 import { Toggle } from "./Toggle";
@@ -19,17 +30,17 @@ function SectionHead(props: {
   return (
     <div className="mb-3 flex items-center gap-2.5">
       <span
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-white"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-fg"
         style={{ background: props.tile }}
       >
         <Icon name={props.icon} size={17} />
       </span>
       <div className="min-w-0">
-        <div className="text-[15px] font-semibold tracking-tight text-white">
+        <div className="text-[15px] font-semibold tracking-tight text-fg">
           {props.title}
         </div>
         {props.caption && (
-          <div className="truncate text-[11px] text-white/30">
+          <div className="truncate text-[11px] text-fg/30">
             {props.caption}
           </div>
         )}
@@ -54,6 +65,53 @@ export default function SettingsPage() {
   const [csvCustom, setCsvCustom] = useState<CustomRange | null>(null);
   const [csvMsg, setCsvMsg] = useState("");
   const [exporting, setExporting] = useState(false);
+
+  // 主題與開機自啟（P4.3／P4.4）
+  const [themePref, setThemePref] = useState<ThemePref>(loadThemePref());
+  const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(loadThemePref()));
+  const [autoMsg, setAutoMsg] = useState("");
+  const appearance = useQuery({
+    queryKey: ["appearance_state"],
+    queryFn: api.appearanceState,
+  });
+  const autoMut = useMutation({
+    mutationFn: (v: boolean) => api.appearanceSetAutostart(v),
+    onSuccess: (s) => {
+      setAutoMsg(s.autostart ? "已開啟開機自啟" : "已關閉開機自啟");
+      void qc.invalidateQueries({ queryKey: ["appearance_state"] });
+    },
+    onError: (e) => setAutoMsg(String(e)),
+  });
+  const setAutoStartEnabled = (v: boolean) => autoMut.mutate(v);
+
+  // DB 是唯一真相：載入後用資料庫的值覆蓋快取
+  useEffect(() => {
+    const t = appearance.data?.theme;
+    if (isThemePref(t) && t !== themePref) {
+      setThemePref(t);
+      saveThemePref(t);
+      setResolved(applyTheme(t));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appearance.data?.theme]);
+
+  // 跟隨系統：系統切換時即時反映
+  useEffect(() => {
+    return watchSystemTheme(() => {
+      if (themePref === "system") setResolved(applyTheme("system"));
+    });
+  }, [themePref]);
+
+  const pickTheme = (t: ThemePref) => {
+    setThemePref(t);
+    saveThemePref(t);
+    setResolved(applyTheme(t));
+    setThemeMut.mutate(t);
+  };
+  const setThemeMut = useMutation({
+    mutationFn: (t: ThemePref) => api.appearanceSetTheme(t),
+    onError: (e) => setProtoMsg(String(e)),
+  });
 
   // Deep Link 協定（P4.1）
   const proto = useQuery({
@@ -166,7 +224,7 @@ export default function SettingsPage() {
           caption="本機代理監聽（僅 127.0.0.1）"
         />
         {settings.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : (
           <div>
             <div className="mac-frow">
@@ -189,13 +247,13 @@ export default function SettingsPage() {
               <span className="mac-cap">自動啟動</span>
               <div className="flex items-center gap-2">
                 <Toggle checked={autoStart} onChange={setAutoStart} size="sm" />
-                <span className="text-xs text-white/40">
+                <span className="text-xs text-fg/40">
                   應用程式啟動時自動啟動網關
                 </span>
               </div>
             </div>
-            {msg && <p className="pt-1.5 text-xs text-white/50">{msg}</p>}
-            <p className="pt-1.5 text-[11px] text-white/25">
+            {msg && <p className="pt-1.5 text-xs text-fg/50">{msg}</p>}
+            <p className="pt-1.5 text-[11px] text-fg/25">
               15721 常被 cc-switch 佔用，預設 15722。網關執行時不可改連接埠（需先停止）；改完後已切換工具需重新執行一次切換。
             </p>
             <div className="flex justify-end pt-2.5">
@@ -232,15 +290,61 @@ export default function SettingsPage() {
                 style={{ background: a.value }}
               >
                 {accent === a.id && (
-                  <Icon name="check" size={13} className="text-white" />
+                  <Icon name="check" size={13} className="text-fg" />
                 )}
               </button>
             ))}
-            <span className="text-xs text-white/40">
+            <span className="text-xs text-fg/40">
               {ACCENTS.find((a) => a.id === accent)?.label}
             </span>
           </div>
         </div>
+
+        {/* 主題（P4.3）：跟隨系統／淺色／深色 */}
+        <div className="mac-frow">
+          <span className="mac-cap">主題</span>
+          <div className="flex items-center gap-1.5">
+            {(["system", "light", "dark"] as const).map((t) => (
+              <button
+                key={t}
+                data-theme-option={t}
+                className={`rounded-lg px-3 py-1.5 text-[12px] transition-colors ${
+                  themePref === t
+                    ? "bg-fg/[0.14] text-fg"
+                    : "bg-fg/[0.05] text-fg/55 hover:bg-fg/[0.1]"
+                }`}
+                onClick={() => pickTheme(t)}
+              >
+                {THEME_LABEL[t]}
+              </button>
+            ))}
+            <span className="pl-1 text-[11px] text-fg/30" data-theme-now={resolved}>
+              目前：{resolved === "light" ? "淺色" : "深色"}
+            </span>
+          </div>
+        </div>
+
+        {/* 開機自啟（P4.4）：Windows 用登錄檔 Run 機碼（免管理員） */}
+        <div className="mac-frow">
+          <span className="mac-cap">開機自啟</span>
+          <div className="flex items-center gap-2">
+            <Toggle
+              checked={appearance.data?.autostart ?? false}
+              onChange={(v) => setAutoStartEnabled(v)}
+              size="sm"
+              disabled={appearance.isPending || autoMut.isPending}
+            />
+            <span className="text-xs text-fg/40">
+              登入 Windows 時自動啟動（寫 HKCU 的 Run 機碼）
+            </span>
+          </div>
+        </div>
+        {appearance.data?.autostart_command && (
+          <p className="font-mono text-[10px] break-all text-fg/25">
+            {appearance.data.autostart_command}
+          </p>
+        )}
+        {autoMsg && <p className="pt-1 text-[11px] text-emerald-400/80">{autoMsg}</p>}
       </div>
 
       {/* ── 用量匯出 ── */}
@@ -276,7 +380,7 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
-        {csvMsg && <p className="pt-1.5 text-xs text-white/50">{csvMsg}</p>}
+        {csvMsg && <p className="pt-1.5 text-xs text-fg/50">{csvMsg}</p>}
       </div>
 
       {/* ── Deep Link 協定（P4.1） ── */}
@@ -290,7 +394,7 @@ export default function SettingsPage() {
         <div className="mac-frow">
           <span className="mac-cap">協定註冊</span>
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] text-white/70">
+            <p className="text-[12px] text-fg/70">
               {proto.isPending
                 ? "查詢中…"
                 : proto.data?.registered
@@ -298,7 +402,7 @@ export default function SettingsPage() {
                   : "尚未註冊"}
             </p>
             {proto.data?.command && (
-              <p className="font-mono text-[10px] break-all text-white/25">
+              <p className="font-mono text-[10px] break-all text-fg/25">
                 {proto.data.command}
               </p>
             )}
@@ -320,7 +424,7 @@ export default function SettingsPage() {
             </button>
           )}
         </div>
-        <p className="text-[11px] leading-relaxed text-white/30">
+        <p className="text-[11px] leading-relaxed text-fg/30">
           連結格式（與 cc-switch 的 <span className="font-mono">ccswitch://</span> 相同參數）：
           <span className="font-mono"> tokengateway://v1/import?resource=provider&app=claude&name=…&endpoint=…</span>。
           匯入前一定會先跳出預覽確認；帶有 API Key 的連結只顯示遮罩後的值。
@@ -339,7 +443,7 @@ export default function SettingsPage() {
         <div className="mac-frow">
           <span className="mac-cap">數據目錄</span>
           <div className="flex items-center gap-2">
-            <p className="min-w-0 flex-1 font-mono text-[11px] break-all text-white/45">
+            <p className="min-w-0 flex-1 font-mono text-[11px] break-all text-fg/45">
               {dir.isPending ? "讀取中…" : dir.isError ? "讀取失敗" : dir.data}
             </p>
             {!dir.isPending && !dir.isError && dir.data && (

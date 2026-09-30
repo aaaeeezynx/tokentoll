@@ -74,7 +74,7 @@ export function UsageFilterBar(props: {
     queryKey: ["providers"],
     queryFn: api.providersList,
   });
-  const selCls = "field px-3 py-1.5 text-[13px] text-white/80";
+  const selCls = "field px-3 py-1.5 text-[13px] text-fg/80";
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 basis-full sm:basis-auto">
@@ -113,7 +113,7 @@ export function UsageFilterBar(props: {
         <Icon
           name="search"
           size={13}
-          className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-white/25"
+          className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-fg/25"
         />
         <input
           className={`${selCls} w-full pl-8`}

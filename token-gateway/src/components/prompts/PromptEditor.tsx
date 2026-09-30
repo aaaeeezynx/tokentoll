@@ -97,18 +97,18 @@ export function PromptEditor(props: {
       }}
     >
       <div className="my-auto flex max-h-[min(92vh,820px)] w-full max-w-2xl flex-col overflow-hidden glass-panel pop-in">
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] bg-[rgba(24,24,30,0.98)] px-5 py-4">
+        <div className="flex shrink-0 items-center gap-3 border-b border-fg/[0.06] bg-[var(--app-elevated-solid)] px-5 py-4">
           <button
-            className="rounded-full bg-white/[0.06] p-1.5 text-white/55 transition-colors hover:bg-white/[0.1] hover:text-white"
+            className="rounded-full bg-fg/[0.06] p-1.5 text-fg/55 transition-colors hover:bg-fg/[0.1] hover:text-fg"
             onClick={props.onClose}
             title="關閉"
           >
             <Icon name="x" size={14} />
           </button>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/65">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/65">
             <Icon name="pencil" size={17} />
           </span>
-          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-white">
+          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-fg">
             {props.initial ? `編輯「${props.initial.name}」` : "新增提示詞預設集"}
           </div>
         </div>
@@ -125,7 +125,7 @@ export function PromptEditor(props: {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+            <span className="text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
               內容（Markdown）
             </span>
             <span className="flex-1" />
@@ -139,7 +139,7 @@ export function PromptEditor(props: {
 
           {preview ? (
             <div
-              className="prose-mini min-h-[46vh] overflow-auto rounded-lg bg-black/25 p-3.5 text-[13px] leading-relaxed text-white/75"
+              className="prose-mini min-h-[46vh] overflow-auto rounded-lg bg-black/25 p-3.5 text-[13px] leading-relaxed text-fg/75"
               // 內容由使用者自己輸入，且已做 HTML 轉義（`miniMarkdown` 的 esc）
               dangerouslySetInnerHTML={{ __html: miniMarkdown(content) }}
             />
@@ -164,7 +164,7 @@ export function PromptEditor(props: {
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-fg/[0.06] px-5 py-3">
           <button className="btn-ghost px-5 py-1.5 text-[13px]" onClick={props.onClose}>
             取消
           </button>

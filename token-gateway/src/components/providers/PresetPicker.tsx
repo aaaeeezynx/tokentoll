@@ -36,7 +36,7 @@ export function PresetPicker(props: {
           <Icon
             name="search"
             size={13}
-            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-white/25"
+            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-fg/25"
           />
           <input
             className="field w-full py-1.5 pr-2 pl-8 text-xs"
@@ -55,13 +55,13 @@ export function PresetPicker(props: {
       </div>
 
       {presets.isPending ? (
-        <p className="px-1 py-3 text-center text-xs text-white/30">載入中…</p>
+        <p className="px-1 py-3 text-center text-xs text-fg/30">載入中…</p>
       ) : presets.isError ? (
-        <p className="px-1 py-3 text-center text-xs text-white/45">
+        <p className="px-1 py-3 text-center text-xs text-fg/45">
           讀取預設失敗：{String(presets.error)}
         </p>
       ) : list.length === 0 ? (
-        <p className="px-1 py-3 text-center text-xs text-white/30">
+        <p className="px-1 py-3 text-center text-xs text-fg/30">
           沒有符合的預設，改按「自訂」自己填。
         </p>
       ) : (
@@ -69,18 +69,18 @@ export function PresetPicker(props: {
           {list.map((p) => (
             <button
               key={p.id}
-              className="flex w-full flex-col gap-0.5 rounded-lg border border-white/[0.06] px-2.5 py-2 text-left transition-colors hover:border-white/15 hover:bg-white/[0.04]"
+              className="flex w-full flex-col gap-0.5 rounded-lg border border-fg/[0.06] px-2.5 py-2 text-left transition-colors hover:border-fg/15 hover:bg-fg/[0.04]"
               onClick={() => props.onPick(p)}
             >
               <span className="flex w-full items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white/85">
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-fg/85">
                   {p.name}
                 </span>
-                <span className="shrink-0 rounded bg-white/[0.06] px-1.5 py-px font-mono text-[10px] text-white/40">
+                <span className="shrink-0 rounded bg-fg/[0.06] px-1.5 py-px font-mono text-[10px] text-fg/40">
                   {p.api_format}
                 </span>
               </span>
-              <span className="w-full truncate font-mono text-[11px] text-white/30">
+              <span className="w-full truncate font-mono text-[11px] text-fg/30">
                 {p.base_url}
               </span>
               {p.note && (
@@ -93,7 +93,7 @@ export function PresetPicker(props: {
         </div>
       )}
 
-      <p className="pt-1 text-[11px] leading-relaxed text-white/25">
+      <p className="pt-1 text-[11px] leading-relaxed text-fg/25">
         選了預設只會填好連線資訊（名稱、上游地址、協議、鑑權），金鑰請自己貼；
         模型清單按表單上的「取得模型清單」現場抓。全部 {presets.data?.length ?? 0} 個預設的
         上游位址都已實測回應（見文件 §0.9.20）。

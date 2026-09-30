@@ -142,7 +142,7 @@ export default function SessionsPage() {
             {list.isFetching ? "掃描中…" : "重新整理"}
           </button>
           <button
-            className={`btn-ghost px-3 py-1.5 text-xs ${batch ? "text-white" : ""}`}
+            className={`btn-ghost px-3 py-1.5 text-xs ${batch ? "text-fg" : ""}`}
             onClick={() => {
               setBatch((v) => !v);
               setPicked(new Set());
@@ -192,7 +192,7 @@ export default function SessionsPage() {
         <div className="grid items-start gap-4 lg:grid-cols-2">
           {/* 左：清單 */}
           <div className="min-w-0">
-            <p className="pb-2 text-[11px] text-white/30">
+            <p className="pb-2 text-[11px] text-fg/30">
               {list.isPending ? "掃描中…" : `${rows.length} 則（新到舊）`}
             </p>
             <div className="max-h-[62vh] space-y-1.5 overflow-y-auto pr-0.5">
@@ -205,8 +205,8 @@ export default function SessionsPage() {
                   }}
                   className={`cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
                     sel && key(sel) === key(s)
-                      ? "border-white/20 bg-white/[0.06]"
-                      : "border-white/[0.06] hover:border-white/12"
+                      ? "border-fg/20 bg-fg/[0.06]"
+                      : "border-fg/[0.06] hover:border-fg/12"
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -219,14 +219,14 @@ export default function SessionsPage() {
                         onClick={(e) => e.stopPropagation()}
                       />
                     )}
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-white/80">
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-fg/80">
                       {s.title}
                     </span>
-                    <span className="shrink-0 rounded bg-white/[0.06] px-1.5 py-px text-[10px] text-white/40">
+                    <span className="shrink-0 rounded bg-fg/[0.06] px-1.5 py-px text-[10px] text-fg/40">
                       {appLabel(s.app)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 pt-0.5 text-[10px] text-white/30">
+                  <div className="flex items-center gap-2 pt-0.5 text-[10px] text-fg/30">
                     <span className="min-w-0 flex-1 truncate">
                       {s.project_dir ? basename(s.project_dir) : "—"}
                     </span>
@@ -235,7 +235,7 @@ export default function SessionsPage() {
                 </div>
               ))}
               {!list.isPending && rows.length === 0 && (
-                <p className="text-[13px] text-white/35">沒有符合的會話。</p>
+                <p className="text-[13px] text-fg/35">沒有符合的會話。</p>
               )}
             </div>
           </div>
@@ -243,19 +243,19 @@ export default function SessionsPage() {
           {/* 右：詳情 */}
           <div className="min-w-0">
             {!sel ? (
-              <p className="text-[13px] text-white/35">從左邊選一則會話看內容。</p>
+              <p className="text-[13px] text-fg/35">從左邊選一則會話看內容。</p>
             ) : (
-              <div className="rounded-xl border border-white/[0.06] p-3.5">
+              <div className="rounded-xl border border-fg/[0.06] p-3.5">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white/85">
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-fg/85">
                     {sel.title}
                   </span>
-                  <span className="rounded bg-white/[0.06] px-1.5 py-px text-[10px] text-white/40">
+                  <span className="rounded bg-fg/[0.06] px-1.5 py-px text-[10px] text-fg/40">
                     {appLabel(sel.app)}
                   </span>
                   {sel.deletable ? (
                     <button
-                      className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                      className="shrink-0 rounded-full p-1.5 text-fg/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
                       title="刪除這則會話（直接刪檔，無法復原）"
                       onClick={() =>
                         ask(`刪除「${sel.title}」？`, () => del.mutate([[sel.app, sel.path]]), {
@@ -267,13 +267,13 @@ export default function SessionsPage() {
                       <Icon name="trash" size={13} />
                     </button>
                   ) : (
-                    <span className="shrink-0 text-[10px] text-white/25" title="OpenCode 的會話在它自己的資料庫裡">
+                    <span className="shrink-0 text-[10px] text-fg/25" title="OpenCode 的會話在它自己的資料庫裡">
                       不可刪除
                     </span>
                   )}
                 </div>
 
-                <div className="space-y-0.5 pt-1.5 text-[11px] text-white/35">
+                <div className="space-y-0.5 pt-1.5 text-[11px] text-fg/35">
                   <div>最後活動：{new Date(sel.last_active_ms).toLocaleString()}</div>
                   {sel.project_dir && (
                     <div className="flex items-center gap-1.5">
@@ -281,7 +281,7 @@ export default function SessionsPage() {
                         專案：{sel.project_dir}
                       </span>
                       <button
-                        className="shrink-0 text-white/30 hover:text-white/70"
+                        className="shrink-0 text-fg/30 hover:text-fg/70"
                         title="複製完整路徑"
                         onClick={() => copy(sel.project_dir)}
                       >
@@ -289,14 +289,14 @@ export default function SessionsPage() {
                       </button>
                     </div>
                   )}
-                  <div className="font-mono text-[10px] break-all text-white/25">
+                  <div className="font-mono text-[10px] break-all text-fg/25">
                     {sel.path}
                   </div>
                 </div>
 
                 {sel.resume_command && (
                   <div className="mt-2 flex items-center gap-2 rounded-lg bg-black/25 px-2.5 py-2">
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/70">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg/70">
                       {sel.resume_command}
                     </span>
                     <button
@@ -311,13 +311,13 @@ export default function SessionsPage() {
 
                 <div className="mt-3 max-h-[46vh] space-y-1.5 overflow-y-auto pr-0.5">
                   {transcript.isPending ? (
-                    <p className="text-[12px] text-white/30">讀取對話中…</p>
+                    <p className="text-[12px] text-fg/30">讀取對話中…</p>
                   ) : transcript.isError ? (
-                    <p className="text-[12px] break-words text-white/50">
+                    <p className="text-[12px] break-words text-fg/50">
                       讀取失敗：{String(transcript.error)}
                     </p>
                   ) : (transcript.data?.length ?? 0) === 0 ? (
-                    <p className="text-[12px] text-white/30">這則會話沒有可顯示的訊息。</p>
+                    <p className="text-[12px] text-fg/30">這則會話沒有可顯示的訊息。</p>
                   ) : (
                     transcript.data?.map((m, i) => (
                       <div
@@ -325,15 +325,15 @@ export default function SessionsPage() {
                         className="rounded-lg px-2.5 py-2"
                         style={{ background: ROLE_STYLE[m.role] ?? "rgba(255,255,255,0.04)" }}
                       >
-                        <div className="pb-0.5 text-[10px] text-white/40">
+                        <div className="pb-0.5 text-[10px] text-fg/40">
                           {ROLE_LABEL[m.role] ?? m.role}
                           {m.ts > 0 && (
-                            <span className="pl-2 text-white/25">
+                            <span className="pl-2 text-fg/25">
                               {new Date(m.ts).toLocaleTimeString()}
                             </span>
                           )}
                         </div>
-                        <div className="text-[12px] leading-relaxed break-words whitespace-pre-wrap text-white/75">
+                        <div className="text-[12px] leading-relaxed break-words whitespace-pre-wrap text-fg/75">
                           {m.text.length > 4000 ? `${m.text.slice(0, 4000)}…` : m.text}
                         </div>
                       </div>
@@ -345,7 +345,7 @@ export default function SessionsPage() {
           </div>
         </div>
 
-        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+        <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
           Claude Code 讀 <span className="font-mono">~/.claude/projects/</span>；
           Codex 讀 <span className="font-mono">~/.codex/sessions/</span> 與
           <span className="font-mono"> archived_sessions/</span>；

@@ -81,8 +81,8 @@ export function QuotaRing(props: { w: QuotaWindow }) {
         </div>
       </div>
       <div className="text-center leading-tight">
-        <div className="text-[11px] text-white/55">{w.label}</div>
-        <div className="text-[10px] text-white/30">
+        <div className="text-[11px] text-fg/55">{w.label}</div>
+        <div className="text-[10px] text-fg/30">
           {w.resets_at ? `重置 ${fmtRemain(w.resets_at)}` : "—"}
         </div>
       </div>
@@ -98,7 +98,7 @@ export function QuotaCard(props: { q: SubscriptionQuota }) {
   return (
     <div className="glass-float float-hover anim-rise w-fit max-w-full min-w-0 p-4">
       <div className="mb-2 flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white/85">
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-fg/85">
           {title}
         </span>
       </div>
@@ -109,7 +109,7 @@ export function QuotaCard(props: { q: SubscriptionQuota }) {
           ))}
         </div>
       ) : (
-        <p className="text-xs break-words text-white/35">
+        <p className="text-xs break-words text-fg/35">
           {q.message || "暫無額度數據"}
         </p>
       )}
@@ -133,10 +133,10 @@ export function QuotaSection() {
   return (
     <div className="glass min-w-0 p-4 md:p-5">
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-sm font-semibold tracking-tight text-white/80">
+        <span className="text-sm font-semibold tracking-tight text-fg/80">
           訂閱額度
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-white/25">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-fg/25">
           {q.isFetching
             ? "查詢中…"
             : q.dataUpdatedAt
@@ -144,7 +144,7 @@ export function QuotaSection() {
               : ""}
         </span>
         <button
-          className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 px-2.5 py-0.5 text-[11px] text-white/50 transition-colors hover:border-white/20 hover:text-white disabled:opacity-40"
+          className="flex shrink-0 items-center gap-1 rounded-full border border-fg/10 px-2.5 py-0.5 text-[11px] text-fg/50 transition-colors hover:border-fg/20 hover:text-fg disabled:opacity-40"
           disabled={q.isFetching}
           onClick={() => void qc.invalidateQueries({ queryKey: ["quota_all"] })}
         >
@@ -153,7 +153,7 @@ export function QuotaSection() {
         </button>
       </div>
       {q.isPending ? (
-        <p className="text-sm text-white/30">查詢中…</p>
+        <p className="text-sm text-fg/30">查詢中…</p>
       ) : (
         <div className="flex min-w-0 flex-wrap items-start gap-3">
           {list.map((x) => (

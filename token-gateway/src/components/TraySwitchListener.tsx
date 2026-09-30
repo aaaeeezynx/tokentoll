@@ -89,11 +89,11 @@ export function TraySwitchListener() {
           size={14}
           className={err ? "mt-0.5 text-red-400" : "mt-0.5 text-emerald-400"}
         />
-        <div className="min-w-0 flex-1 text-[12px] leading-relaxed break-words text-white/75">
+        <div className="min-w-0 flex-1 text-[12px] leading-relaxed break-words text-fg/75">
           {err || msg}
         </div>
         <button
-          className="pointer-events-auto shrink-0 rounded p-0.5 text-white/35 hover:text-white/80"
+          className="pointer-events-auto shrink-0 rounded p-0.5 text-fg/35 hover:text-fg/80"
           onClick={() => {
             setMsg("");
             setErr("");

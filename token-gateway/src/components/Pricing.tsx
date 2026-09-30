@@ -64,7 +64,7 @@ export default function GlobalPricingManager(props: {
           <Icon name="plus" size={12} />
           新增定價
         </button>
-        <span className="text-[11px] text-white/25">
+        <span className="text-[11px] text-fg/25">
           美元/百萬 tokens，0 表示免費
         </span>
         <span className="flex-1" />
@@ -140,18 +140,18 @@ export default function GlobalPricingManager(props: {
           <div key={p.model_norm} className="mac-row">
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[13px] text-white/85">
+                <div className="truncate font-mono text-[13px] text-fg/85">
                   {p.model_norm}
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-white/30">
+                <div className="mt-0.5 truncate text-[11px] text-fg/30">
                   {p.in_pm}/{p.out_pm}/{p.cache_read_pm}/{p.cache_create_pm}
-                  <span className="ml-1.5 rounded-full bg-white/[0.06] px-1.5 py-px text-[10px] text-white/35">
+                  <span className="ml-1.5 rounded-full bg-fg/[0.06] px-1.5 py-px text-[10px] text-fg/35">
                     {p.source}
                   </span>
                 </div>
               </div>
               <button
-                className="shrink-0 rounded-full p-1.5 text-white/35 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                className="shrink-0 rounded-full p-1.5 text-fg/35 transition-colors hover:bg-red-500/10 hover:text-red-400"
                 title="刪除"
                 onClick={() =>
                   ask(`刪除 ${p.model_norm} 的定價？`, () =>
@@ -165,7 +165,7 @@ export default function GlobalPricingManager(props: {
           </div>
         ))}
         {(list.data || []).length === 0 && (
-          <div className="mac-row text-xs text-white/20">
+          <div className="mac-row text-xs text-fg/20">
             暫無全域定價，未命中時費用記 0。
           </div>
         )}

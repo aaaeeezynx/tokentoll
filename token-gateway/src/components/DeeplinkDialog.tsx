@@ -103,20 +103,20 @@ export function DeeplinkDialog() {
       }}
     >
       <div className="my-auto flex max-h-[min(92vh,760px)] w-full max-w-xl flex-col overflow-hidden glass-panel pop-in">
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] bg-[rgba(24,24,30,0.98)] px-5 py-4">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+        <div className="flex shrink-0 items-center gap-3 border-b border-fg/[0.06] bg-[var(--app-elevated-solid)] px-5 py-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
             <Icon name="download" size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold text-white">
+            <div className="truncate text-[15px] font-semibold text-fg">
               {preview ? preview.title : "Deep Link 匯入"}
             </div>
-            <div className="text-[11px] text-white/30">
+            <div className="text-[11px] text-fg/30">
               來自連結的設定 —— 確認後才會寫入
             </div>
           </div>
           <button
-            className="rounded-full bg-white/[0.06] p-1.5 text-white/55 transition-colors hover:bg-white/[0.1] hover:text-white"
+            className="rounded-full bg-fg/[0.06] p-1.5 text-fg/55 transition-colors hover:bg-fg/[0.1] hover:text-fg"
             onClick={close}
             title="關閉"
           >
@@ -125,7 +125,7 @@ export function DeeplinkDialog() {
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
-          {!preview && !err && <p className="text-[13px] text-white/40">解析中…</p>}
+          {!preview && !err && <p className="text-[13px] text-fg/40">解析中…</p>}
           {err && (
             <div className="rounded-lg border border-red-500/20 bg-red-500/[0.05] px-3 py-2 text-xs break-words text-red-400">
               {err}
@@ -137,8 +137,8 @@ export function DeeplinkDialog() {
               <div className="space-y-1">
                 {preview.fields.map(([k, v]) => (
                   <div key={k} className="flex gap-3 text-[12px]">
-                    <span className="w-20 shrink-0 text-white/35">{k}</span>
-                    <span className="min-w-0 flex-1 break-words whitespace-pre-wrap text-white/75">
+                    <span className="w-20 shrink-0 text-fg/35">{k}</span>
+                    <span className="min-w-0 flex-1 break-words whitespace-pre-wrap text-fg/75">
                       {v}
                     </span>
                   </div>
@@ -146,10 +146,10 @@ export function DeeplinkDialog() {
               </div>
 
               {preview.effects.length > 0 && (
-                <div className="rounded-lg bg-white/[0.03] px-3 py-2">
-                  <div className="pb-1 text-[11px] text-white/40">這次會做的事</div>
+                <div className="rounded-lg bg-fg/[0.03] px-3 py-2">
+                  <div className="pb-1 text-[11px] text-fg/40">這次會做的事</div>
                   {preview.effects.map((e) => (
-                    <div key={e} className="text-[12px] text-white/65">
+                    <div key={e} className="text-[12px] text-fg/65">
                       · {e}
                     </div>
                   ))}
@@ -166,7 +166,7 @@ export function DeeplinkDialog() {
                 </div>
               )}
 
-              <div className="rounded-lg bg-black/25 px-3 py-2 font-mono text-[10px] break-all text-white/25">
+              <div className="rounded-lg bg-black/25 px-3 py-2 font-mono text-[10px] break-all text-fg/25">
                 {url}
               </div>
             </>
@@ -179,7 +179,7 @@ export function DeeplinkDialog() {
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-fg/[0.06] px-5 py-3">
           <button className="btn-ghost px-5 py-1.5 text-[13px]" onClick={close}>
             {done ? "關閉" : "取消"}
           </button>

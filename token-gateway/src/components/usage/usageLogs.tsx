@@ -85,13 +85,13 @@ export function HistoryImportDialog(props: { onClose: () => void }) {
       }}
     >
       <div className={`w-full max-w-lg glass-panel p-5 ${closing ? "sheet-out" : "pop-in"}`}>
-        <div className="mb-1 text-sm font-medium text-white/80">歷史回填</div>
-        <p className="mb-3 text-xs text-white/30">
+        <div className="mb-1 text-sm font-medium text-fg/80">歷史回填</div>
+        <p className="mb-3 text-xs text-fg/30">
           離線解析本機會話（Claude / Codex / OpenCode / DeepSeek Harness），寫入用量統計。
           已回填過的不重複；與網關日誌疑似重複的自動跳過；費用按當前定價快照計算。
         </p>
         {scan.isPending && (
-          <p className="text-sm text-white/30">掃描本機文件中…</p>
+          <p className="text-sm text-fg/30">掃描本機文件中…</p>
         )}
         {scan.isError && (
           <p className="text-sm text-red-400">掃描失敗</p>
@@ -99,7 +99,7 @@ export function HistoryImportDialog(props: { onClose: () => void }) {
         {tools.map((t) => (
           <label
             key={t.tool}
-            className="flex cursor-pointer items-center gap-2 py-1.5 text-sm text-white/70"
+            className="flex cursor-pointer items-center gap-2 py-1.5 text-sm text-fg/70"
           >
             <input
               type="checkbox"
@@ -108,7 +108,7 @@ export function HistoryImportDialog(props: { onClose: () => void }) {
               onChange={() => toggle(t.tool)}
             />
             <span className="w-32">{appLabel(t.tool)}</span>
-            <span className="text-xs text-white/30">
+            <span className="text-xs text-fg/30">
               {t.files === 0
                 ? "無數據"
                 : `${t.files} 文件 · ${fmtBytes(t.bytes)}${t.sessions > 0 ? ` · ${t.sessions} 會話` : ""}`}
@@ -116,7 +116,7 @@ export function HistoryImportDialog(props: { onClose: () => void }) {
           </label>
         ))}
         {result && (
-          <p className="mt-3 rounded-xl bg-black/20 p-2.5 text-xs leading-relaxed text-white/60">
+          <p className="mt-3 rounded-xl bg-black/20 p-2.5 text-xs leading-relaxed text-fg/60">
             {result}
           </p>
         )}
@@ -172,12 +172,12 @@ export function RecentLogs() {
       void qc.invalidateQueries({ queryKey: [k] });
   };
   if (logs.isPending)
-    return <p className="text-sm text-white/30">載入中…</p>;
+    return <p className="text-sm text-fg/30">載入中…</p>;
   if (logs.isError)
     return <p className="text-sm text-red-400">日誌載入失敗</p>;
   if (logs.data.length === 0)
     return (
-      <p className="text-sm text-white/20">
+      <p className="text-sm text-fg/20">
         暫無請求。啟動網關並把工具 base_url 指向它後，這裡會即時記錄。
       </p>
     );
@@ -185,11 +185,11 @@ export function RecentLogs() {
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
-        <div className="text-sm font-semibold tracking-tight text-white/80">
+        <div className="text-sm font-semibold tracking-tight text-fg/80">
           最近請求
         </div>
         {newest > 0 && (
-          <span className="text-[11px] text-white/25">{timeAgo(newest)}</span>
+          <span className="text-[11px] text-fg/25">{timeAgo(newest)}</span>
         )}
         <span className="flex-1" />
         <button
@@ -203,7 +203,7 @@ export function RecentLogs() {
     <div className="overflow-x-auto">
       <table className="w-full min-w-[600px] text-left text-xs">
         <thead>
-          <tr className="text-white/55">
+          <tr className="text-fg/55">
             <th className="py-1.5 pr-2 whitespace-nowrap">時間</th>
             <th className="py-1.5 pr-2 whitespace-nowrap">本機工具</th>
             <th className="py-1.5 pr-2">模型</th>
@@ -216,11 +216,11 @@ export function RecentLogs() {
         </thead>
         <tbody>
           {logs.data.map((l) => (
-            <tr key={l.id} className="border-t border-white/[0.04]">
-              <td className="py-2 pr-2 font-mono whitespace-nowrap text-white/30">
+            <tr key={l.id} className="border-t border-fg/[0.04]">
+              <td className="py-2 pr-2 font-mono whitespace-nowrap text-fg/30">
                 {fmtTime(l.ts)}
               </td>
-              <td className="py-2 pr-2 whitespace-nowrap text-white/60">
+              <td className="py-2 pr-2 whitespace-nowrap text-fg/60">
                 <span className="inline-flex items-center gap-1.5">
                   <Logo name={l.app} size={13} className="shrink-0 opacity-80" />
                   {appLabel(l.app)}
@@ -229,16 +229,16 @@ export function RecentLogs() {
                   ) : null}
                 </span>
               </td>
-              <td className="max-w-40 truncate py-2 pr-2 text-white/60">
+              <td className="max-w-40 truncate py-2 pr-2 text-fg/60">
                 {l.model_raw || "—"}
               </td>
-              <td className="py-2 pr-2 text-right whitespace-nowrap text-white/60">
+              <td className="py-2 pr-2 text-right whitespace-nowrap text-fg/60">
                 {l.in_tok.toLocaleString()}
               </td>
-              <td className="py-2 pr-2 text-right whitespace-nowrap text-white/60">
+              <td className="py-2 pr-2 text-right whitespace-nowrap text-fg/60">
                 {l.out_tok.toLocaleString()}
               </td>
-              <td className="py-2 pr-2 text-right whitespace-nowrap text-white/60">
+              <td className="py-2 pr-2 text-right whitespace-nowrap text-fg/60">
                 {l.cost_usd.toFixed(4)}
               </td>
               <td
@@ -250,7 +250,7 @@ export function RecentLogs() {
               >
                 {l.status}
               </td>
-              <td className="py-2 pr-2 text-right whitespace-nowrap text-white/25">
+              <td className="py-2 pr-2 text-right whitespace-nowrap text-fg/25">
                 {l.source === "import" ? "歷史" : "即時"}
               </td>
             </tr>

@@ -74,13 +74,13 @@ export function ModelWhitelist(props: {
       {props.value.length > 0 && (
         <>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-white/30">
+          <span className="text-[11px] text-fg/30">
             已選 {props.value.length} 個（空＝全部允許）
           </span>
           <span className="flex-1" />
           <button
             type="button"
-            className="shrink-0 rounded-full px-2 py-0.5 text-[11px] text-white/35 transition-colors hover:bg-white/[0.07] hover:text-white/70"
+            className="shrink-0 rounded-full px-2 py-0.5 text-[11px] text-fg/35 transition-colors hover:bg-fg/[0.07] hover:text-fg/70"
             onClick={() => props.onChange([])}
           >
             清空
@@ -93,10 +93,10 @@ export function ModelWhitelist(props: {
               type="button"
               title="移除"
               onClick={() => toggle(v)}
-              className="flex max-w-full items-center gap-1.5 rounded-full bg-white/[0.07] px-2.5 py-[3px] font-mono text-[11px] text-white/70 transition-colors hover:bg-red-500/15 hover:text-red-300"
+              className="flex max-w-full items-center gap-1.5 rounded-full bg-fg/[0.07] px-2.5 py-[3px] font-mono text-[11px] text-fg/70 transition-colors hover:bg-red-500/15 hover:text-red-300"
             >
               <span className="truncate">{v}</span>
-              <Icon name="x" size={10} className="shrink-0 text-white/40" />
+              <Icon name="x" size={10} className="shrink-0 text-fg/40" />
             </button>
           ))}
         </div>
@@ -104,7 +104,7 @@ export function ModelWhitelist(props: {
       )}
 
       {pid == null ? (
-        <p className="text-[11px] text-white/30">
+        <p className="text-[11px] text-fg/30">
           先選上游來源，再從清單勾選；或手動輸入模型 ID。
         </p>
       ) : (
@@ -119,7 +119,7 @@ export function ModelWhitelist(props: {
               <Icon name="download" size={11} />
               {fetch.isPending ? "抓取中…" : "抓取目錄"}
             </button>
-            <span className="truncate text-[11px] text-white/30">
+            <span className="truncate text-[11px] text-fg/30">
               {catalog.data
                 ? `${catalog.data.models.length} 個模型`
                 : "尚未抓取"}
@@ -136,7 +136,7 @@ export function ModelWhitelist(props: {
                 <Icon
                   name="search"
                   size={12}
-                  className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-white/25"
+                  className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-fg/25"
                 />
                 <input
                   className="field w-full py-1.5 pr-3 pl-7 text-[12px]"
@@ -145,14 +145,14 @@ export function ModelWhitelist(props: {
                   onChange={(e) => setFilter(e.target.value)}
                 />
               </div>
-              <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/15 p-1">
+              <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-fg/[0.06] bg-black/15 p-1">
                 {filtered.length === 0 ? (
-                  <p className="px-2 py-3 text-center text-[11px] text-white/25">無匹配</p>
+                  <p className="px-2 py-3 text-center text-[11px] text-fg/25">無匹配</p>
                 ) : (
                   filtered.map(([id, src]) => (
                     <label
                       key={id}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12px] text-white/60 transition-colors hover:bg-white/[0.05]"
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12px] text-fg/60 transition-colors hover:bg-fg/[0.05]"
                     >
                       <input
                         type="checkbox"
@@ -161,7 +161,7 @@ export function ModelWhitelist(props: {
                         className="accent-[var(--mac-accent)]"
                       />
                       <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{id}</span>
-                      <span className="shrink-0 text-[10px] text-white/25">{src}</span>
+                      <span className="shrink-0 text-[10px] text-fg/25">{src}</span>
                     </label>
                   ))
                 )}

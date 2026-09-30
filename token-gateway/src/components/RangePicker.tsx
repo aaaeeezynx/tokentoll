@@ -163,10 +163,10 @@ export function RangePicker(props: {
             className="glass-panel pop-in z-[100] p-3.5"
             style={{ position: "fixed", left: pos.left, top: pos.top, width: pos.width }}
           >
-            <div className="mb-2 text-[13px] font-semibold text-white/85">
+            <div className="mb-2 text-[13px] font-semibold text-fg/85">
               自訂期間
             </div>
-            <label className="mb-1 block text-[11px] text-white/40">
+            <label className="mb-1 block text-[11px] text-fg/40">
               起始
               <input
                 type="datetime-local"
@@ -175,7 +175,7 @@ export function RangePicker(props: {
                 onChange={(e) => setDraftStart(e.target.value)}
               />
             </label>
-            <label className="mb-2 block text-[11px] text-white/40">
+            <label className="mb-2 block text-[11px] text-fg/40">
               結束
               <input
                 type="datetime-local"

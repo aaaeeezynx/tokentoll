@@ -121,7 +121,7 @@ export function HoverTip(props: {
       }}
     >
       {props.title && (
-        <div className="mb-1 text-[11px] font-semibold text-white/85">
+        <div className="mb-1 text-[11px] font-semibold text-fg/85">
           {props.title}
         </div>
       )}
@@ -140,10 +140,10 @@ export function HoverTip(props: {
               ) : (
                 <span className="w-2 shrink-0" />
               )}
-              <span className="min-w-0 flex-1 truncate text-white/40">
+              <span className="min-w-0 flex-1 truncate text-fg/40">
                 {r.label}
               </span>
-              <span className="shrink-0 font-medium tabular-nums text-white/80">
+              <span className="shrink-0 font-medium tabular-nums text-fg/80">
                 {r.value}
               </span>
             </div>
@@ -167,7 +167,7 @@ export function TrendChart(props: {
     [props.rows, props.stepMs, props.fillToday],
   );
   if (buckets.length === 0) {
-    return <p className="text-sm text-white/20">該範圍內暫無數據。</p>;
+    return <p className="text-sm text-fg/20">該範圍內暫無數據。</p>;
   }
   const max = Math.max(...buckets.map((b) => b.total), 1);
   const labelEvery = Math.max(1, Math.floor(buckets.length / 8));
@@ -189,7 +189,7 @@ export function TrendChart(props: {
                 setHover({ i, rect: e.currentTarget.getBoundingClientRect() })
               }
               onMouseLeave={() => setHover(null)}
-              className="chart-bar bar-grow flex w-full min-w-[4px] max-w-9 flex-1 flex-col justify-end overflow-hidden rounded-t border border-b-0 border-white/10 bg-white/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
+              className="chart-bar bar-grow flex w-full min-w-[4px] max-w-9 flex-1 flex-col justify-end overflow-hidden rounded-t border border-b-0 border-fg/10 bg-fg/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
               style={{
                 height: `${h}%`,
                 animationDelay: `${Math.min(i * 12, 400)}ms`,
@@ -239,7 +239,7 @@ export function TrendChart(props: {
           {apps.map((a) => (
             <span
               key={a}
-              className="flex items-center gap-1.5 text-[10px] text-white/40"
+              className="flex items-center gap-1.5 text-[10px] text-fg/40"
             >
               <span
                 className="inline-block h-2 w-2 rounded-sm"
@@ -253,7 +253,7 @@ export function TrendChart(props: {
           ))}
         </div>
       )}
-      <div className="mt-1 flex justify-center gap-1 text-[10px] text-white/25">
+      <div className="mt-1 flex justify-center gap-1 text-[10px] text-fg/25">
         {buckets.map((b, i) => (
           <div
             key={b.ts}

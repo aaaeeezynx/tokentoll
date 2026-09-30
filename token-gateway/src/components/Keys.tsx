@@ -80,12 +80,12 @@ export default function KeysPage() {
       <div className="glass p-5">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+            <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
               <Icon name="key" size={17} />
             </span>
             <div>
-              <div className="text-[15px] font-semibold tracking-tight text-white">本地 Key</div>
-              <div className="text-[11px] text-white/30">
+              <div className="text-[15px] font-semibold tracking-tight text-fg">本地 Key</div>
+              <div className="text-[11px] text-fg/30">
                 {keys.data?.length ?? 0} 個 · 綁定上游後簽發
               </div>
             </div>
@@ -102,9 +102,9 @@ export default function KeysPage() {
         {actionErr && <p className="mb-2 text-xs text-red-400">{actionErr}</p>}
 
         {keys.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : (keys.data || []).length === 0 ? (
-          <p className="text-sm text-white/30">
+          <p className="text-sm text-fg/30">
             還沒有 Key。先在「上游來源」添加來源，再回來簽發。
           </p>
         ) : (
@@ -135,18 +135,18 @@ export default function KeysPage() {
                     <div className="key-title">
                       <span className="truncate">{k.name}</span>
                       {!k.enabled && (
-                        <span className="rounded-full bg-white/[0.07] px-2 py-0.5 text-[10px] text-white/35">
+                        <span className="rounded-full bg-fg/[0.07] px-2 py-0.5 text-[10px] text-fg/35">
                           已停用
                         </span>
                       )}
                     </div>
                     <div className="key-meta">
                       <code>{k.key_prefix}</code>
-                      <span className="mx-1.5 text-white/20">·</span>
+                      <span className="mx-1.5 text-fg/20">·</span>
                       {k.provider_name || "未綁定"}
                       {k.quota_tokens > 0 && (
                         <>
-                          <span className="mx-1.5 text-white/20">·</span>
+                          <span className="mx-1.5 text-fg/20">·</span>
                           {k.used_tokens.toLocaleString()} / {fmtTokens(k.quota_tokens)}
                           {daysLeft !== null && (
                             <span className="ml-1.5">
@@ -163,15 +163,15 @@ export default function KeysPage() {
                       )}
                       {k.quota_tokens <= 0 && (
                         <>
-                          <span className="mx-1.5 text-white/20">·</span>
+                          <span className="mx-1.5 text-fg/20">·</span>
                           用量 {k.used_tokens.toLocaleString()}
                         </>
                       )}
-                      <span className="mx-1.5 text-white/20">·</span>
+                      <span className="mx-1.5 text-fg/20">·</span>
                       {k.rate_limit_qpm <= 0 ? "不限流" : `${k.rate_limit_qpm}/分`}
                     </div>
                     {k.quota_tokens > 0 && (
-                      <div className="mt-2 h-1 w-40 max-w-full overflow-hidden rounded-full bg-white/[0.06]">
+                      <div className="mt-2 h-1 w-40 max-w-full overflow-hidden rounded-full bg-fg/[0.06]">
                         <div
                           className={`h-full rounded-full bar-anim ${
                             pct > 95
@@ -187,7 +187,7 @@ export default function KeysPage() {
                   </div>
                   <div className="key-actions shrink-0">
                     <button
-                      className="rounded-full p-2 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+                      className="rounded-full p-2 text-fg/40 transition-colors hover:bg-fg/10 hover:text-fg"
                       title="查看／複製"
                       aria-label="查看／複製"
                       onClick={() => setViewKey(k)}
@@ -195,7 +195,7 @@ export default function KeysPage() {
                       <Icon name="eye" size={14} />
                     </button>
                     <button
-                      className="rounded-full p-2 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+                      className="rounded-full p-2 text-fg/40 transition-colors hover:bg-fg/10 hover:text-fg"
                       title="編輯"
                       aria-label="編輯"
                       onClick={() => setEditing(k)}
@@ -203,7 +203,7 @@ export default function KeysPage() {
                       <Icon name="pencil" size={14} />
                     </button>
                     <button
-                      className="rounded-full p-2 text-white/40 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
+                      className="rounded-full p-2 text-fg/40 transition-colors hover:bg-fg/10 hover:text-fg disabled:opacity-30"
                       disabled={rotate.isPending}
                       title="輪換"
                       aria-label="輪換"
@@ -217,7 +217,7 @@ export default function KeysPage() {
                       <Icon name="refresh" size={14} />
                     </button>
                     <button
-                      className="rounded-full p-2 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+                      className="rounded-full p-2 text-fg/40 transition-colors hover:bg-fg/10 hover:text-fg"
                       title={k.enabled ? "停用" : "啟用"}
                       aria-label={k.enabled ? "停用" : "啟用"}
                       onClick={() => toggle.mutate({ id: k.id, enabled: !k.enabled })}
@@ -225,7 +225,7 @@ export default function KeysPage() {
                       <Icon name="power" size={14} />
                     </button>
                     <button
-                      className="rounded-full p-2 text-white/40 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                      className="rounded-full p-2 text-fg/40 transition-colors hover:bg-red-500/10 hover:text-red-400"
                       title="刪除"
                       aria-label="刪除"
                       onClick={() =>
@@ -244,7 +244,7 @@ export default function KeysPage() {
         )}
       </div>
 
-      <p className="text-xs text-white/25">
+      <p className="text-xs text-fg/25">
         終端機使用範例：$env:TOKEN_GATEWAY_KEY="sk-local-…" 後把工具 base_url
         指向本網關（上游來源頁一鍵切換）。
       </p>

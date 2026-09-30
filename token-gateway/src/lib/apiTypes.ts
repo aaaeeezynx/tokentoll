@@ -527,6 +527,16 @@ export interface DeeplinkProtocolState {
   command: string;
 }
 
+// ── P4.3／P4.4：外觀與開機自啟 ──
+
+export interface AppearanceState {
+  /** system | light | dark */
+  theme: string;
+  autostart: boolean;
+  autostart_command: string;
+  exe: string;
+}
+
 export interface AppSettings {
   gateway_port: number;
   auto_start_proxy: boolean;

@@ -133,15 +133,15 @@ export function ProvidersIO(props: { count: number }) {
           }}
         >
           <div className="my-auto w-full max-w-lg overflow-hidden glass-panel pop-in">
-            <div className="flex items-center gap-3 border-b border-white/[0.06] bg-[rgba(24,24,30,0.98)] px-5 py-4">
+            <div className="flex items-center gap-3 border-b border-fg/[0.06] bg-[var(--app-elevated-solid)] px-5 py-4">
               <button
-                className="rounded-full bg-white/[0.06] p-1.5 text-white/55 transition-colors hover:bg-white/[0.1] hover:text-white"
+                className="rounded-full bg-fg/[0.06] p-1.5 text-fg/55 transition-colors hover:bg-fg/[0.1] hover:text-fg"
                 onClick={() => setOpen(false)}
                 title="關閉"
               >
                 <Icon name="x" size={14} />
               </button>
-              <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-white">
+              <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-fg">
                 來源匯入／匯出
               </div>
             </div>
@@ -149,10 +149,10 @@ export function ProvidersIO(props: { count: number }) {
             <div className="space-y-4 px-5 py-5">
               {/* ── 匯出 ── */}
               <div className="form-section">
-                <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                   匯出
                 </div>
-                <p className="pb-2 text-xs leading-relaxed text-white/35">
+                <p className="pb-2 text-xs leading-relaxed text-fg/35">
                   匯出全部 {props.count} 個來源的連線資訊、已登記模型、每模型價格與訂閱時段
                   （不含用量紀錄）。
                 </p>
@@ -188,8 +188,8 @@ export function ProvidersIO(props: { count: number }) {
                   </button>
                 </div>
                 {path && (
-                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/[0.04] px-2.5 py-2">
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/55" title={path}>
+                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-fg/[0.04] px-2.5 py-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg/55" title={path}>
                       {path}
                     </span>
                     <button
@@ -204,10 +204,10 @@ export function ProvidersIO(props: { count: number }) {
 
               {/* ── 匯入 ── */}
               <div className="form-section">
-                <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+                <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                   匯入
                 </div>
-                <p className="pb-2 text-xs leading-relaxed text-white/35">
+                <p className="pb-2 text-xs leading-relaxed text-fg/35">
                   同名且同上游地址的來源會被跳過（不覆蓋既有設定）。名稱若已有會自動加序號。
                 </p>
                 <div className="mac-frow">
@@ -248,7 +248,7 @@ export function ProvidersIO(props: { count: number }) {
                     <Icon name="upload" size={12} />
                     選擇檔案…
                   </button>
-                  <span className="text-[11px] text-white/25">或在下面直接貼上 JSON</span>
+                  <span className="text-[11px] text-fg/25">或在下面直接貼上 JSON</span>
                 </div>
                 <textarea
                   className="field mt-2 h-24 w-full px-3 py-2 font-mono text-[11px]"
@@ -269,15 +269,15 @@ export function ProvidersIO(props: { count: number }) {
               </div>
 
               {report && (
-                <div className="rounded-lg bg-white/[0.04] px-3 py-2.5 text-xs leading-relaxed text-white/70">
-                  <div className="font-medium text-white/85">匯入完成</div>
+                <div className="rounded-lg bg-fg/[0.04] px-3 py-2.5 text-xs leading-relaxed text-fg/70">
+                  <div className="font-medium text-fg/85">匯入完成</div>
                   <div className="pt-1">
                     新增 <span className="text-emerald-400">{report.added}</span> 個來源
                     （模型 {report.models}、價格 {report.pricing}、時段 {report.periods}）、
-                    跳過 <span className="text-white/50">{report.skipped}</span> 個已存在
+                    跳過 <span className="text-fg/50">{report.skipped}</span> 個已存在
                   </div>
                   {report.names.length > 0 && (
-                    <div className="truncate pt-1 font-mono text-[11px] text-white/40">
+                    <div className="truncate pt-1 font-mono text-[11px] text-fg/40">
                       {report.names.join("、")}
                     </div>
                   )}

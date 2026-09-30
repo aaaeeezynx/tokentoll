@@ -78,14 +78,14 @@ export function SwitchDialog(props: SwitchDialogProps) {
       >
         <div className="mb-4 flex items-center gap-2">
           <button
-            className="rounded-full bg-white/[0.055] p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-full bg-fg/[0.055] p-1.5 text-fg/60 transition-colors hover:bg-fg/10 hover:text-fg"
             onClick={requestClose}
             title="關閉"
           >
             <Icon name="x" size={14} />
           </button>
           <Logo name={tool.app} size={22} className="shrink-0" />
-          <div className="flex-1 text-[15px] font-semibold tracking-tight text-white">
+          <div className="flex-1 text-[15px] font-semibold tracking-tight text-fg">
             切換 {tool.display}
           </div>
           <Toggle
@@ -96,7 +96,7 @@ export function SwitchDialog(props: SwitchDialogProps) {
           />
         </div>
         {providers.length === 0 ? (
-          <p className="text-sm text-white/40">
+          <p className="text-sm text-fg/40">
             還沒有來源，請先在左側添加一個上游來源。
           </p>
         ) : (
@@ -139,7 +139,7 @@ export function SwitchDialog(props: SwitchDialogProps) {
                   />
                 )}
                 {(row || manualModel.trim()) && (
-                  <p className="font-mono text-xs text-white/40">
+                  <p className="font-mono text-xs text-fg/40">
                     → {row ? row.actual_model : manualModel.trim()}
                     {row?.context_window
                       ? ` · ${row.context_window.toLocaleString()} ctx`
@@ -156,11 +156,11 @@ export function SwitchDialog(props: SwitchDialogProps) {
               />
             )}
             {tool.app === "claude" && (
-              <div className="space-y-2.5 rounded-xl border border-white/[0.07] p-3">
-                <p className="text-[12px] font-semibold text-white/60">
+              <div className="space-y-2.5 rounded-xl border border-fg/[0.07] p-3">
+                <p className="text-[12px] font-semibold text-fg/60">
                   模型映射
                 </p>
-                <p className="-mt-1.5 text-[11px] text-white/30">
+                <p className="-mt-1.5 text-[11px] text-fg/30">
                   留空檔位跟隨上方選擇的模型，不寫入；其他工具不受影響。
                 </p>
                 {CLAUDE_TIERS.map((t) => (
@@ -205,14 +205,14 @@ export function SwitchDialog(props: SwitchDialogProps) {
                 ]}
               />
               {keyMsg && <p className="mt-1 text-xs text-amber-400">{keyMsg}</p>}
-              <p className="mt-1 text-[11px] text-white/30">
+              <p className="mt-1 text-[11px] text-fg/30">
                 {pickedKey
                     ? "經網關時以本地 Key 計量與限流；開關關閉則還原接管前配置並切回原生來源。"
                   : "留空 = 使用所選來源的上游 Key（不經本地 Key 轉發，用量照常記錄）"}
               </p>
             </div>
             {tool.app === "codex" && (
-              <label className="flex items-center gap-2 text-[13px] text-white/60">
+              <label className="flex items-center gap-2 text-[13px] text-fg/60">
                 <input
                   type="checkbox"
                   checked={genCatalog}
@@ -222,7 +222,7 @@ export function SwitchDialog(props: SwitchDialogProps) {
               </label>
             )}
             {tool.app === "codex" && genCatalog && (
-              <label className="flex items-center gap-2 text-[13px] text-white/60">
+              <label className="flex items-center gap-2 text-[13px] text-fg/60">
                 <input
                   type="checkbox"
                   checked={catalogUnion}
@@ -239,28 +239,28 @@ export function SwitchDialog(props: SwitchDialogProps) {
             >
               {apply.isPending ? "套用中…" : "套用（切換來源/模型）"}
             </button>
-            <div className="border-t border-white/[0.07]" />
+            <div className="border-t border-fg/[0.07]" />
             <div className="text-xs">
-              {plan.isPending && <p className="text-white/30">正在生成方案…</p>}
+              {plan.isPending && <p className="text-fg/30">正在生成方案…</p>}
               {plan.isError && (
                 <p className="text-red-400">{String(plan.error)}</p>
               )}
               {plan.data && (
                 <div className="space-y-2">
-                  <p className="truncate font-mono text-white/40" title={plan.data.config_path}>
+                  <p className="truncate font-mono text-fg/40" title={plan.data.config_path}>
                     {plan.data.config_path}
-                    <span className="ml-1.5 text-white/25">
+                    <span className="ml-1.5 text-fg/25">
                       {plan.data.will_backup ? "· 自動備份" : "· 將新建"}
                     </span>
                   </p>
                   {plan.data.edits.length > 0 && (
                     <details>
-                      <summary className="cursor-pointer text-white/50">
+                      <summary className="cursor-pointer text-fg/50">
                         {plan.data.edits.length} 項寫入
                       </summary>
                       <div className="mt-1.5 space-y-1">
                         {plan.data.edits.map((e) => (
-                          <p key={e} className="text-white/45">
+                          <p key={e} className="text-fg/45">
                             • {e}
                           </p>
                         ))}

@@ -18,7 +18,7 @@ function ago(secs: number | null): string {
 export function SourceHealthList({ list }: { list: SourceHealth[] }) {
   if (list.length === 0) {
     return (
-      <p className="text-[13px] text-white/35">
+      <p className="text-[13px] text-fg/35">
         還沒有任何來源健康紀錄 —— 沒有請求過的來源不會有紀錄（沒有證據就不假裝健康）。
       </p>
     );
@@ -28,17 +28,17 @@ export function SourceHealthList({ list }: { list: SourceHealth[] }) {
       {list.map((h) => (
         <div
           key={h.provider_id}
-          className="flex flex-wrap items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2"
+          className="flex flex-wrap items-center gap-2 rounded-md bg-fg/[0.04] px-3 py-2"
         >
-          <span className="min-w-0 truncate text-[13px] text-white/80">
+          <span className="min-w-0 truncate text-[13px] text-fg/80">
             {h.provider_name || (
-              <span className="text-white/35">已刪除的渠道 #{h.provider_id}</span>
+              <span className="text-fg/35">已刪除的渠道 #{h.provider_id}</span>
             )}
           </span>
-          <span className="font-mono text-[10px] text-white/25">
+          <span className="font-mono text-[10px] text-fg/25">
             #{h.provider_id}
           </span>
-          <span className="rounded bg-white/[0.06] px-1.5 py-px font-mono text-[11px] text-white/45">
+          <span className="rounded bg-fg/[0.06] px-1.5 py-px font-mono text-[11px] text-fg/45">
             {h.api_format || "—"}
           </span>
           <span
@@ -51,10 +51,10 @@ export function SourceHealthList({ list }: { list: SourceHealth[] }) {
           >
             {h.open ? `冷卻中 ${h.cooldown_secs}s` : "正常"}
           </span>
-          <span className="flex flex-1 flex-wrap items-center gap-2 text-[11px] text-white/35">
+          <span className="flex flex-1 flex-wrap items-center gap-2 text-[11px] text-fg/35">
             {h.consecutive_failures > 0 && (
               <span>
-                連續失敗 <span className="text-white/60">{h.consecutive_failures}</span> 次
+                連續失敗 <span className="text-fg/60">{h.consecutive_failures}</span> 次
               </span>
             )}
             <span>上次失敗 {ago(h.secs_since_failure)}</span>
@@ -62,7 +62,7 @@ export function SourceHealthList({ list }: { list: SourceHealth[] }) {
           </span>
           {h.last_error && (
             <span
-              className="w-full min-w-0 truncate font-mono text-[11px] text-white/30"
+              className="w-full min-w-0 truncate font-mono text-[11px] text-fg/30"
               title={h.last_error}
             >
               {h.last_error}

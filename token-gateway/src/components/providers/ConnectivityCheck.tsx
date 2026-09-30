@@ -29,7 +29,7 @@ export function ConnectivityCheck(props: { baseUrl: string }) {
   };
 
   return (
-    <div className="mt-3 rounded-lg bg-white/[0.03] px-3 py-2.5">
+    <div className="mt-3 rounded-lg bg-fg/[0.03] px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <button
           className="btn-ghost flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-40"
@@ -53,19 +53,19 @@ export function ConnectivityCheck(props: { baseUrl: string }) {
             >
               {res.reachable ? "可達" : "連不上"}
             </span>
-            <span className="text-white/45">{res.message}</span>
-            <span className="text-white/25">{res.latency_ms} ms</span>
+            <span className="text-fg/45">{res.message}</span>
+            <span className="text-fg/25">{res.latency_ms} ms</span>
           </span>
         )}
         {err && <span className="text-[11px] text-red-400">{err}</span>}
       </div>
 
       {res && (
-        <div className="pt-1.5 font-mono text-[10px] break-all text-white/25">
+        <div className="pt-1.5 font-mono text-[10px] break-all text-fg/25">
           GET {res.url}
         </div>
       )}
-      <p className="pt-1.5 text-[11px] leading-relaxed text-white/25">
+      <p className="pt-1.5 text-[11px] leading-relaxed text-fg/25">
         只檢查位址可不可達（不送模型請求、不帶金鑰），所以 401／403／404 都算「可達」。
         金鑰與模型名對不對，要真的發一次請求才知道 —— 檢查過了不等於一定能用。
       </p>

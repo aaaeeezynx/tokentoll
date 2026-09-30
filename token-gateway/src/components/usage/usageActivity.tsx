@@ -193,10 +193,10 @@ export function ContributionGrid(props: {
   return (
     <div className="glass relative min-w-0 p-4" ref={rootRef}>
       <div className="mb-2.5 flex min-w-0 flex-wrap items-center gap-2">
-        <div className="shrink-0 text-sm font-semibold tracking-tight text-white/80">
+        <div className="shrink-0 text-sm font-semibold tracking-tight text-fg/80">
           用量日曆
         </div>
-        <span className="text-[11px] text-white/45">
+        <span className="text-[11px] text-fg/45">
           共 {fmtInt(total)} tokens
         </span>
         <span className="flex-1" />
@@ -290,7 +290,7 @@ export function ContributionGrid(props: {
           </div>
         )}
       </div>
-      <div className="mt-1.5 flex items-center gap-1 text-[10px] text-white/35">
+      <div className="mt-1.5 flex items-center gap-1 text-[10px] text-fg/35">
         <span>少</span>
         {[0.2, 0.4, 0.62, 0.85].map((op) => (
           <div
@@ -321,7 +321,7 @@ export function ContributionGrid(props: {
       >
         {tip && !tip.d.future && tip.d.tokens > 0 && (
           <div className="mt-1.5 flex items-center gap-2">
-            <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.07]">
+            <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-fg/[0.07]">
               <div
                 className="h-full rounded-full"
                 style={{
@@ -330,7 +330,7 @@ export function ContributionGrid(props: {
                 }}
               />
             </div>
-            <span className="shrink-0 text-[10px] text-white/30">
+            <span className="shrink-0 text-[10px] text-fg/30">
               {((tip.d.tokens / maxTokens) * 100).toFixed(0)}% 峰值
             </span>
           </div>

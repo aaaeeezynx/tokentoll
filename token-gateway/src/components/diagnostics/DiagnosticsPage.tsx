@@ -104,9 +104,9 @@ export default function DiagnosticsPage() {
           }
         />
         {summary.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : summary.isError ? (
-          <p className="text-sm text-white/50">
+          <p className="text-sm text-fg/50">
             讀取失敗：{String(summary.error)}
           </p>
         ) : (
@@ -137,17 +137,17 @@ export default function DiagnosticsPage() {
             {/* 上游狀態碼分佈 */}
             {(s?.top_status.length ?? 0) > 0 && (
               <div className="pt-3.5">
-                <div className="pb-1.5 text-[11px] text-white/35">
+                <div className="pb-1.5 text-[11px] text-fg/35">
                   上游狀態碼分佈
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {s?.top_status.map((t) => (
                     <span
                       key={t.status}
-                      className="flex items-center gap-1.5 rounded-md bg-white/[0.05] px-2.5 py-1"
+                      className="flex items-center gap-1.5 rounded-md bg-fg/[0.05] px-2.5 py-1"
                     >
                       <StatusBadge status={t.status} />
-                      <span className="font-mono text-[11px] text-white/55">
+                      <span className="font-mono text-[11px] text-fg/55">
                         {t.count}
                       </span>
                     </span>
@@ -156,7 +156,7 @@ export default function DiagnosticsPage() {
               </div>
             )}
 
-            <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+            <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
               追蹤只記錄異常請求，正常請求不寫入以免日誌洪水；網關啟動時保留最近
               5000 筆。金鑰永不落庫，請求體只存長度與 SHA-256 指紋（僅解析失敗時
               額外存前 512 bytes 的 hex 以供定案）。
@@ -174,9 +174,9 @@ export default function DiagnosticsPage() {
           caption="網關學到「這個渠道不收這個欄位」後，後續請求會預先剝離"
         />
         {stripped.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : (stripped.data?.length ?? 0) === 0 ? (
-          <p className="text-[13px] text-white/35">
+          <p className="text-[13px] text-fg/35">
             目前沒有記憶 —— 表示尚未遇到上游拒收欄位，或已全部重設。
           </p>
         ) : (
@@ -184,16 +184,16 @@ export default function DiagnosticsPage() {
             {stripped.data?.map((p) => (
               <div
                 key={p.provider_id}
-                className="flex flex-wrap items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2"
+                className="flex flex-wrap items-center gap-2 rounded-md bg-fg/[0.04] px-3 py-2"
               >
-                <span className="min-w-0 truncate text-[13px] text-white/80">
+                <span className="min-w-0 truncate text-[13px] text-fg/80">
                   {p.provider_name || (
-                    <span className="text-white/35">
+                    <span className="text-fg/35">
                       已刪除的渠道 #{p.provider_id}
                     </span>
                   )}
                 </span>
-                <span className="font-mono text-[10px] text-white/25">
+                <span className="font-mono text-[10px] text-fg/25">
                   #{p.provider_id}
                 </span>
                 <span className="flex flex-1 flex-wrap gap-1.5">
@@ -231,7 +231,7 @@ export default function DiagnosticsPage() {
             ))}
           </div>
         )}
-        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+        <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
           這份記憶持久化於 SQLite，網關重啟不會遺失 —— 原實作只存在進程記憶體，
           每次重啟都要為每個渠道重踩一次 400。
         </p>
@@ -246,15 +246,15 @@ export default function DiagnosticsPage() {
           caption="連續失敗 3 次的來源冷卻 60 秒，冷卻期間排到候選最後（不是跳過）"
         />
         {health.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : health.isError ? (
-          <p className="text-sm text-white/50">
+          <p className="text-sm text-fg/50">
             讀取失敗：{String(health.error)}
           </p>
         ) : (
           <SourceHealthList list={health.data ?? []} />
         )}
-        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+        <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
           只有「連不上」與「上游 5xx」算失敗；4xx（含協議不支援）代表來源活著，
           不列入。所以協議自動換手不會把健康的來源誤標成壞掉。冷卻期滿會自動放行
           一次探測（成功即恢復）。此狀態不落庫 —— 重啟代表重新開始。
@@ -270,7 +270,7 @@ export default function DiagnosticsPage() {
           caption="同一個來源的模型可能只在一種端點上架；學到之後下次第一個就試它"
         />
         <ProtocolMemory list={s?.learned_protocols ?? []} />
-        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+        <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
           Responses 入站（Codex）時，chat ↔ responses 兩種請求體都生得出來，所以能自動
           換手；Anthropic 入站（Claude Code）只生得出 chat 請求體，因此只在
           /responses 上架的模型仍然無解。按上方「上游能力記憶」的「重設」會一併清除
@@ -317,16 +317,16 @@ export default function DiagnosticsPage() {
           }
         />
 
-        {msg && <p className="pb-2.5 text-xs text-white/50">{msg}</p>}
+        {msg && <p className="pb-2.5 text-xs text-fg/50">{msg}</p>}
 
         {rows.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : rows.isError ? (
-          <p className="text-sm text-white/50">
+          <p className="text-sm text-fg/50">
             讀取失敗：{String(rows.error)}
           </p>
         ) : list.length === 0 ? (
-          <p className="text-[13px] text-white/35">
+          <p className="text-[13px] text-fg/35">
             {only === "problems"
               ? "沒有異常請求 —— 網關運作正常。"
               : "尚無追蹤記錄。追蹤只在異常時寫入，正常請求不會產生。"}

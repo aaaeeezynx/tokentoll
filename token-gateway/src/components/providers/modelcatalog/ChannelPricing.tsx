@@ -104,10 +104,10 @@ export function ChannelPricing(props: {
             >
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-mono text-[13px] text-white/85">
+                  <div className="truncate font-mono text-[13px] text-fg/85">
                     {r.model_norm === "*" ? "*（該來源預設）" : r.model_norm}
                   </div>
-                  <div className="mt-0.5 truncate text-[11px] text-white/30">
+                  <div className="mt-0.5 truncate text-[11px] text-fg/30">
                     基礎 {r.in_pm}/{r.out_pm}
                     {r.mode === "subscription" &&
                       ` · 月費 $${r.sub_fee_usd} · 已用 ${r.used_this_month.toLocaleString()}`}
@@ -116,7 +116,7 @@ export function ChannelPricing(props: {
                   </div>
                   {r.mode === "subscription" &&
                     r.sub_included_tokens >= 0 && (
-                      <div className="mt-1.5 h-1 w-24 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div className="mt-1.5 h-1 w-24 overflow-hidden rounded-full bg-fg/[0.06]">
                         <div
                           className="h-full rounded-full bg-(--mac-accent)/50 bar-anim"
                           style={{
@@ -126,11 +126,11 @@ export function ChannelPricing(props: {
                       </div>
                     )}
                 </div>
-                <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-white/40">
+                <span className="shrink-0 rounded-full bg-fg/[0.06] px-2 py-0.5 text-[10px] font-medium text-fg/40">
                   {MODE_LABEL[r.mode]}
                 </span>
                 <button
-                  className="shrink-0 rounded-full p-1.5 text-white/35 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                  className="shrink-0 rounded-full p-1.5 text-fg/35 transition-colors hover:bg-red-500/10 hover:text-red-400"
                   title="刪除"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -144,13 +144,13 @@ export function ChannelPricing(props: {
                 <Icon
                   name="chevron-down"
                   size={12}
-                  className={`shrink-0 text-white/25 transition-transform ${open ? "rotate-180" : ""}`}
+                  className={`shrink-0 text-fg/25 transition-transform ${open ? "rotate-180" : ""}`}
                 />
               </div>
               <div className="acc-body" data-open={open}>
             <div>
                   <div
-                    className="mt-2.5 border-t border-white/[0.06] pt-1"
+                    className="mt-2.5 border-t border-fg/[0.06] pt-1"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <ChannelPricingForm
@@ -170,14 +170,14 @@ export function ChannelPricing(props: {
           );
         })}
         {(rows.data || []).length === 0 && (
-          <div className="mac-row text-xs text-white/20">
+          <div className="mac-row text-xs text-fg/20">
             該來源還沒有單獨定價，會回退到全域預設定價（見下方）。
           </div>
         )}
       </div>
       {editing === "new" && effectivePid != null && (
         <div className="mac-rows mt-2 p-3.5">
-          <div className="mb-1 text-[13px] font-semibold text-white/80">
+          <div className="mb-1 text-[13px] font-semibold text-fg/80">
             新增模型定價
           </div>
           <ChannelPricingForm

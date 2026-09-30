@@ -60,7 +60,7 @@ export function ClaudeTierField(props: {
         />
       )}
       {eff && (
-        <p className="mt-1 font-mono text-xs text-white/40">→ {eff}</p>
+        <p className="mt-1 font-mono text-xs text-fg/40">→ {eff}</p>
       )}
     </div>
   );

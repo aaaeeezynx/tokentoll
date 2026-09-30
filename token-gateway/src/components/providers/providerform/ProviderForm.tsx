@@ -174,7 +174,7 @@ export function ProviderForm(props: {
   return (
     <div className="space-y-4">
       <div className="form-section">
-        <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+        <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
           基本資訊
         </div>
         <div className="mac-frow">
@@ -205,7 +205,7 @@ export function ProviderForm(props: {
       </div>
 
       <div className="form-section">
-        <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+        <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
           連線
         </div>
         <div className="mac-frow">
@@ -242,7 +242,7 @@ export function ProviderForm(props: {
             />
             <button
               type="button"
-              className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-white/30 transition-colors hover:text-white/70"
+              className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-fg/30 transition-colors hover:text-fg/70"
               title={showKey ? "隱藏" : "顯示"}
               onClick={() => setShowKey((v) => !v)}
             >
@@ -253,10 +253,10 @@ export function ProviderForm(props: {
       </div>
 
       <div className="form-section">
-        <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+        <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
           <span>使用模型</span>
           {!eff && draftModels.length > 0 && (
-            <span className="ml-auto rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] font-medium text-white/50">
+            <span className="ml-auto rounded-full bg-fg/[0.08] px-2 py-0.5 text-[10px] font-medium text-fg/50">
               {draftModels.length}
             </span>
           )}
@@ -281,7 +281,7 @@ export function ProviderForm(props: {
                 <Icon name="download" size={11} />
                 {draftFetching ? "建立中…" : "取得模型清單"}
               </button>
-              <span className="text-[11px] text-white/25">貼上 API Key 後直接抓取，無需先點儲存</span>
+              <span className="text-[11px] text-fg/25">貼上 API Key 後直接抓取，無需先點儲存</span>
             </div>
             {draftMsg && <p className="text-xs text-amber-300">{draftMsg}</p>}
             {draftModels.length > 0 && (
@@ -289,12 +289,12 @@ export function ProviderForm(props: {
                 {draftModels.map((m) => (
                   <span
                     key={m}
-                    className="flex items-center gap-1 rounded-full bg-white/[0.07] px-2.5 py-1 text-xs text-white/70"
+                    className="flex items-center gap-1 rounded-full bg-fg/[0.07] px-2.5 py-1 text-xs text-fg/70"
                   >
                     <span className="font-mono">{m}</span>
                     <button
                       type="button"
-                      className="rounded-full p-0.5 text-white/40 hover:bg-white/10 hover:text-white"
+                      className="rounded-full p-0.5 text-fg/40 hover:bg-fg/10 hover:text-fg"
                       onClick={() => setDraftModels((a) => a.filter((x) => x !== m))}
                       title="移除"
                     >
@@ -335,7 +335,7 @@ export function ProviderForm(props: {
                 新增
               </button>
             </div>
-            <p className="text-[11px] text-white/25">
+            <p className="text-[11px] text-fg/25">
               以上 {draftModels.length} 個將在儲存時一併建立；建立後可在此抓取清單、啟用/刪除。
             </p>
           </div>
@@ -348,7 +348,7 @@ export function ProviderForm(props: {
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-2.5 border-t border-white/[0.06] pt-3">
+      <div className="flex items-center justify-end gap-2.5 border-t border-fg/[0.06] pt-3">
         <button
           className="btn-ghost px-5 py-1.5 text-[13px]"
           onClick={props.onCancel}

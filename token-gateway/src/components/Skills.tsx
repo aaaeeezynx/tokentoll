@@ -107,14 +107,14 @@ export default function SkillsPage() {
       {dialog}
       <div className="glass p-5">
         <div className="mb-3 flex flex-wrap items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/70">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/70">
             <Icon name="cpu" size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-semibold tracking-tight text-white">
+            <div className="text-[15px] font-semibold tracking-tight text-fg">
               技能
             </div>
-            <div className="text-[11px] text-white/30">
+            <div className="text-[11px] text-fg/30">
               從 GitHub 儲存庫安裝；母本存在儲存目錄，再同步到各工具的 skills 資料夾
             </div>
           </div>
@@ -141,10 +141,10 @@ export default function SkillsPage() {
         {err && <p className="pb-2 text-xs break-words text-red-400">{err}</p>}
 
         {/* 安裝時要同步到哪些工具 */}
-        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg bg-white/[0.03] px-3 py-2">
-          <span className="text-[11px] text-white/40">安裝後同步到</span>
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg bg-fg/[0.03] px-3 py-2">
+          <span className="text-[11px] text-fg/40">安裝後同步到</span>
           {APPS.map((a) => (
-            <label key={a} className="flex items-center gap-1.5 text-[12px] text-white/65">
+            <label key={a} className="flex items-center gap-1.5 text-[12px] text-fg/65">
               <input
                 type="checkbox"
                 className="accent-[#0A84FF]"
@@ -159,7 +159,7 @@ export default function SkillsPage() {
             </label>
           ))}
           <span className="flex-1" />
-          <span className="flex items-center gap-2 text-[11px] text-white/35">
+          <span className="flex items-center gap-2 text-[11px] text-fg/35">
             儲存位置
             <span className="w-40">
               <PopSelect
@@ -186,9 +186,9 @@ export default function SkillsPage() {
         </div>
 
         {list.isPending ? (
-          <p className="text-sm text-white/30">載入中…</p>
+          <p className="text-sm text-fg/30">載入中…</p>
         ) : skills.length === 0 ? (
-          <p className="text-[13px] leading-relaxed text-white/35">
+          <p className="text-[13px] leading-relaxed text-fg/35">
             還沒有安裝任何技能。展開「探索技能」從內建儲存庫（Anthropic 官方技能）挑一個裝。
           </p>
         ) : (
@@ -212,7 +212,7 @@ export default function SkillsPage() {
           </div>
         )}
 
-        <p className="pt-3 text-[11px] leading-relaxed text-white/25">
+        <p className="pt-3 text-[11px] leading-relaxed text-fg/25">
           Claude Code 同步到 <span className="font-mono">~/.claude/skills/</span>；
           Codex <span className="font-mono">~/.codex/skills/</span>；
           OpenCode <span className="font-mono">~/.config/opencode/skills/</span>。
@@ -231,11 +231,11 @@ export default function SkillsPage() {
 
       {/* 備份（cc-switch 的 Restore from Backup） */}
       <div className="glass p-5">
-        <div className="mb-3 text-sm font-semibold tracking-tight text-white/80">
+        <div className="mb-3 text-sm font-semibold tracking-tight text-fg/80">
           技能備份
         </div>
         {(backups.data?.length ?? 0) === 0 ? (
-          <p className="text-[13px] text-white/35">
+          <p className="text-[13px] text-fg/35">
             還沒有備份 —— 解除安裝技能時會自動備份母本到這裡（保留全部，可手動刪）。
           </p>
         ) : (
@@ -243,11 +243,11 @@ export default function SkillsPage() {
             {backups.data?.map((b) => (
               <div
                 key={b.name}
-                className="flex flex-wrap items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2"
+                className="flex flex-wrap items-center gap-2 rounded-md bg-fg/[0.04] px-3 py-2"
               >
-                <span className="text-[13px] text-white/80">{b.skill}</span>
-                <span className="font-mono text-[10px] text-white/30">{b.at}</span>
-                <span className="text-[11px] text-white/30">
+                <span className="text-[13px] text-fg/80">{b.skill}</span>
+                <span className="font-mono text-[10px] text-fg/30">{b.at}</span>
+                <span className="text-[11px] text-fg/30">
                   {(b.bytes / 1024).toFixed(1)} KB
                 </span>
                 <span className="flex-1" />
@@ -288,17 +288,17 @@ function SkillRow(props: {
   const { s } = props;
   const on = (app: string) => s.bindings.find((b) => b.app === app)?.enabled ?? false;
   return (
-    <div className="rounded-xl border border-white/[0.06] p-3.5 transition-colors hover:border-white/10">
+    <div className="rounded-xl border border-fg/[0.06] p-3.5 transition-colors hover:border-fg/10">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1">
-          <span className="truncate text-sm font-semibold text-white/85">{s.name}</span>
+          <span className="truncate text-sm font-semibold text-fg/85">{s.name}</span>
           {s.repo_label && (
-            <span className="ml-2 rounded bg-white/[0.06] px-1.5 py-px text-[10px] text-white/40">
+            <span className="ml-2 rounded bg-fg/[0.06] px-1.5 py-px text-[10px] text-fg/40">
               {s.repo_label}
             </span>
           )}
         </span>
-        <span className="shrink-0 text-[10px] text-white/25">
+        <span className="shrink-0 text-[10px] text-fg/25">
           {(s.size / 1024).toFixed(1)} KB
         </span>
         <button
@@ -310,7 +310,7 @@ function SkillRow(props: {
           更新
         </button>
         <button
-          className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
+          className="shrink-0 rounded-full p-1.5 text-fg/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
           title="解除安裝（會先備份）"
           onClick={props.onUninstall}
         >
@@ -318,13 +318,13 @@ function SkillRow(props: {
         </button>
       </div>
       {s.description && (
-        <p className="mt-1 line-clamp-2 text-[11px] text-white/35">{s.description}</p>
+        <p className="mt-1 line-clamp-2 text-[11px] text-fg/35">{s.description}</p>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-4">
         {APPS.map((a) => (
           <label
             key={a}
-            className="flex items-center gap-1.5 text-[11px] text-white/50"
+            className="flex items-center gap-1.5 text-[11px] text-fg/50"
             title={`同步到 ${APP_LABEL[a]}`}
           >
             <Toggle

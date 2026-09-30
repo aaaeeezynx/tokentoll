@@ -13,17 +13,17 @@ export function SectionHead(props: {
   return (
     <div className="mb-3 flex items-center gap-2.5">
       <span
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-white"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-fg"
         style={{ background: props.tile }}
       >
         <Icon name={props.icon} size={17} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[15px] font-semibold tracking-tight text-white">
+        <div className="text-[15px] font-semibold tracking-tight text-fg">
           {props.title}
         </div>
         {props.caption && (
-          <div className="truncate text-[11px] text-white/30">
+          <div className="truncate text-[11px] text-fg/30">
             {props.caption}
           </div>
         )}

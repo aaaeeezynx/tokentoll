@@ -43,18 +43,18 @@ export function ProviderSheet(props: {
       <div
         className={`my-auto flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden glass-panel ${closing ? "sheet-out" : "pop-in"}`}
       >
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] bg-[rgba(24,24,30,0.98)] px-5 py-4">
+        <div className="flex shrink-0 items-center gap-3 border-b border-fg/[0.06] bg-[var(--app-elevated-solid)] px-5 py-4">
           <button
-            className="rounded-full bg-white/[0.06] p-1.5 text-white/55 transition-colors hover:bg-white/[0.1] hover:text-white"
+            className="rounded-full bg-fg/[0.06] p-1.5 text-fg/55 transition-colors hover:bg-fg/[0.1] hover:text-fg"
             onClick={requestClose}
             title="關閉"
           >
             <Icon name="x" size={14} />
           </button>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/65">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/65">
             <Icon name="server" size={17} />
           </span>
-          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-white">
+          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-fg">
             {props.initial
               ? `編輯「${props.initial.name}」`
               : newMode && picking
@@ -77,9 +77,9 @@ export function ProviderSheet(props: {
           ) : (
             <>
               {newMode && preset && (
-                <div className="mb-3 flex items-center gap-2 rounded-lg bg-white/[0.04] px-2.5 py-2">
+                <div className="mb-3 flex items-center gap-2 rounded-lg bg-fg/[0.04] px-2.5 py-2">
                   <Icon name="bolt-fill" size={12} />
-                  <span className="min-w-0 flex-1 truncate text-xs text-white/60">
+                  <span className="min-w-0 flex-1 truncate text-xs text-fg/60">
                     預設「{preset.name}」已填入連線資訊，可再改
                   </span>
                   <button

@@ -36,25 +36,25 @@ export function MonthlyLens(props: {
   const maxTokens = Math.max(...data.map((d) => d.tokens), 1);
   return (
     <div className="glass p-5">
-      <div className="mb-3 text-sm font-semibold tracking-tight text-white/80">月度用量</div>
+      <div className="mb-3 text-sm font-semibold tracking-tight text-fg/80">月度用量</div>
       <div className="space-y-1.5">
         {data.map((d) => (
-          <div key={d.month} className="flex items-center gap-3 rounded-xl bg-white/[0.03] px-3.5 py-2.5 transition-colors hover:bg-white/[0.055]">
-            <div className="w-16 text-xs font-medium text-white/50">{d.month}</div>
+          <div key={d.month} className="flex items-center gap-3 rounded-xl bg-fg/[0.03] px-3.5 py-2.5 transition-colors hover:bg-fg/[0.055]">
+            <div className="w-16 text-xs font-medium text-fg/50">{d.month}</div>
             <div className="flex-1">
-              <div className="h-4 overflow-hidden rounded-full bg-white/[0.05]">
+              <div className="h-4 overflow-hidden rounded-full bg-fg/[0.05]">
                 <div
                   className="h-full rounded-full bg-(--mac-accent)/45 bar-anim"
                   style={{ width: `${(d.tokens / maxTokens) * 100}%` }}
                 />
               </div>
             </div>
-            <div className="text-right text-[10px] text-white/35">
+            <div className="text-right text-[10px] text-fg/35">
               {fmtInt(d.tokens)} tok · ${fmtCost(d.cost)}
             </div>
           </div>
         ))}
-        {data.length === 0 && <p className="text-xs text-white/20">暫無數據</p>}
+        {data.length === 0 && <p className="text-xs text-fg/20">暫無數據</p>}
       </div>
     </div>
   );
@@ -89,25 +89,25 @@ export function DailyLens(props: {
   const maxTokens = Math.max(...data.map((d) => d.tokens), 1);
   return (
     <div className="glass p-5">
-      <div className="mb-3 text-sm font-semibold tracking-tight text-white/80">每日用量</div>
+      <div className="mb-3 text-sm font-semibold tracking-tight text-fg/80">每日用量</div>
       <div className="space-y-1">
         {data.map((d) => (
-          <div key={d.day} className="flex items-center gap-3 rounded-xl bg-white/[0.03] px-3.5 py-2">
-            <div className="w-12 text-[10px] font-medium text-white/40">{d.day}</div>
+          <div key={d.day} className="flex items-center gap-3 rounded-xl bg-fg/[0.03] px-3.5 py-2">
+            <div className="w-12 text-[10px] font-medium text-fg/40">{d.day}</div>
             <div className="flex-1">
-              <div className="h-3 overflow-hidden rounded-full bg-white/[0.05]">
+              <div className="h-3 overflow-hidden rounded-full bg-fg/[0.05]">
                 <div
                   className="h-full rounded-full bg-(--mac-accent)/45 bar-anim"
                   style={{ width: `${(d.tokens / maxTokens) * 100}%` }}
                 />
               </div>
             </div>
-            <div className="text-right text-[10px] text-white/30">
+            <div className="text-right text-[10px] text-fg/30">
               {fmtInt(d.tokens)} tok · ${fmtCost(d.cost)}
             </div>
           </div>
         ))}
-        {data.length === 0 && <p className="text-xs text-white/20">暫無數據</p>}
+        {data.length === 0 && <p className="text-xs text-fg/20">暫無數據</p>}
       </div>
     </div>
   );
@@ -130,7 +130,7 @@ export function HourlyLens(props: {
   const hd = hover != null ? filled[hover.i] : null;
   return (
     <div className="glass relative p-5" ref={rootRef}>
-      <div className="mb-3 text-sm font-semibold tracking-tight text-white/80">時段分佈（哪個時段最燒）</div>
+      <div className="mb-3 text-sm font-semibold tracking-tight text-fg/80">時段分佈（哪個時段最燒）</div>
       <div className="chart-row flex h-32 items-end gap-0.5">
         {filled.map((d, i) => (
           <div
@@ -155,7 +155,7 @@ export function HourlyLens(props: {
           />
         ))}
       </div>
-      <div className="mt-1 flex gap-0.5 text-[10px] text-white/25">
+      <div className="mt-1 flex gap-0.5 text-[10px] text-fg/25">
         {filled.map((d) => (
           <div key={d.hour} className="flex-1 text-center">
             {d.hour % 3 === 0 ? `${d.hour}` : ""}

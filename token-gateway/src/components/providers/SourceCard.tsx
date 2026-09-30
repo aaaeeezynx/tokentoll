@@ -53,7 +53,7 @@ export function SourceCard(props: {
       className={`sel-card anim-rise cursor-pointer rounded-xl border p-3.5 text-sm transition-all ${
         p.id === selId
           ? ""
-          : "border-white/[0.06] hover:border-white/10"
+          : "border-fg/[0.06] hover:border-fg/10"
       } ${dragId === p.id ? "opacity-40" : ""}`}
     >
       <div className="flex items-center gap-2">
@@ -61,20 +61,20 @@ export function SourceCard(props: {
           title="按住拖拽排序"
           onPointerDown={(e) => gripDown(e, p.id)}
           style={{ touchAction: "none" }}
-          className="grid shrink-0 cursor-grab grid-cols-2 gap-x-[3px] gap-y-[3px] px-1 text-white/20 select-none active:cursor-grabbing"
+          className="grid shrink-0 cursor-grab grid-cols-2 gap-x-[3px] gap-y-[3px] px-1 text-fg/20 select-none active:cursor-grabbing"
         >
           {[0, 1, 2, 3, 4, 5].map((d) => (
             <span key={d} className="h-[3px] w-[3px] rounded-full bg-current" />
           ))}
         </span>
-        <span className="min-w-0 flex-1 truncate font-semibold text-white/85">
+        <span className="min-w-0 flex-1 truncate font-semibold text-fg/85">
           {p.name}
-          <span className="ml-2 rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-white/30">
+          <span className="ml-2 rounded-full bg-fg/[0.06] px-2 py-0.5 text-[10px] font-medium text-fg/30">
             {modelCount} 模型
           </span>
         </span>
         <button
-          className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+          className="shrink-0 rounded-full p-1.5 text-fg/45 transition-colors hover:bg-fg/10 hover:text-fg"
           title="編輯"
           onClick={(e) => {
             e.stopPropagation();
@@ -84,7 +84,7 @@ export function SourceCard(props: {
           <Icon name="pencil" size={13} />
         </button>
         <button
-          className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+          className="shrink-0 rounded-full p-1.5 text-fg/45 transition-colors hover:bg-fg/10 hover:text-fg"
           title="複製來源（連模型、定價、訂閱時段一起，金鑰綁定不會複製）"
           onClick={(e) => {
             e.stopPropagation();
@@ -94,7 +94,7 @@ export function SourceCard(props: {
           <Icon name="copy" size={13} />
         </button>
         <button
-          className="shrink-0 rounded-full p-1.5 text-white/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
+          className="shrink-0 rounded-full p-1.5 text-fg/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
           title="刪除"
           onClick={(e) => {
             e.stopPropagation();
@@ -104,14 +104,14 @@ export function SourceCard(props: {
           <Icon name="trash" size={13} />
         </button>
       </div>
-      <p className="mt-1.5 truncate font-mono text-xs text-white/30">
+      <p className="mt-1.5 truncate font-mono text-xs text-fg/30">
         {p.base_url}
       </p>
       <div className="mt-0.5 flex items-center gap-2 text-xs">
-        <p className="min-w-0 flex-1 truncate text-white/20">
+        <p className="min-w-0 flex-1 truncate text-fg/20">
           {(p.models || []).join(", ") || "未登記模型"}
         </p>
-        <span className="shrink-0 text-[10px] text-white/25">
+        <span className="shrink-0 text-[10px] text-fg/25">
           {p.app_type} · {p.api_format} ·{" "}
           {p.auth_scheme === "goog-key" ? "Google Key" : "Bearer"}
         </span>

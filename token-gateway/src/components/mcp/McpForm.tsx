@@ -121,18 +121,18 @@ export function McpForm(props: {
       }}
     >
       <div className="my-auto flex max-h-[min(90vh,780px)] w-full max-w-lg flex-col overflow-hidden glass-panel pop-in">
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] bg-[rgba(24,24,30,0.98)] px-5 py-4">
+        <div className="flex shrink-0 items-center gap-3 border-b border-fg/[0.06] bg-[var(--app-elevated-solid)] px-5 py-4">
           <button
-            className="rounded-full bg-white/[0.06] p-1.5 text-white/55 transition-colors hover:bg-white/[0.1] hover:text-white"
+            className="rounded-full bg-fg/[0.06] p-1.5 text-fg/55 transition-colors hover:bg-fg/[0.1] hover:text-fg"
             onClick={props.onClose}
             title="關閉"
           >
             <Icon name="x" size={14} />
           </button>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.06] text-white/65">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-fg/[0.06] text-fg/65">
             <Icon name="cpu" size={17} />
           </span>
-          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-white">
+          <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-fg">
             {props.initial ? `編輯「${props.initial.name}」` : "新增 MCP 伺服器"}
           </div>
         </div>
@@ -140,14 +140,14 @@ export function McpForm(props: {
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
           {props.initial === null && (
             <div className="form-section">
-              <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+              <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                 從樣板開始（可選）
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {(presets.data ?? []).map((p) => (
                   <button
                     key={p.id}
-                    className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-left text-[12px] text-white/70 transition-colors hover:border-white/20 hover:bg-white/[0.04]"
+                    className="rounded-lg border border-fg/[0.08] px-2.5 py-1.5 text-left text-[12px] text-fg/70 transition-colors hover:border-fg/20 hover:bg-fg/[0.04]"
                     onClick={() => pickPreset(p)}
                     title={`${p.package}｜${p.note}`}
                   >
@@ -155,7 +155,7 @@ export function McpForm(props: {
                   </button>
                 ))}
               </div>
-              <p className="pt-1.5 text-[11px] leading-relaxed text-white/25">
+              <p className="pt-1.5 text-[11px] leading-relaxed text-fg/25">
                 樣板的套件名照抄 cc-switch 手冊；啟動指令是我們的判斷
                 （Python 伺服器用 uvx、TypeScript 用 npx -y）。沒有那個指令時伺服器
                 起不來，記得先安裝。
@@ -164,7 +164,7 @@ export function McpForm(props: {
           )}
 
           <div className="form-section">
-            <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+            <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
               基本
             </div>
             <div className="mac-frow">
@@ -209,7 +209,7 @@ export function McpForm(props: {
           </div>
 
           <div className="form-section">
-            <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+            <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
               {form.transport === "stdio" ? "指令" : "連線"}
             </div>
             {form.transport === "stdio" ? (
@@ -247,7 +247,7 @@ export function McpForm(props: {
           </div>
 
           <div className="form-section">
-            <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+            <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
               環境變數
             </div>
             <PairEditor
@@ -259,7 +259,7 @@ export function McpForm(props: {
 
           {form.transport !== "stdio" && (
             <div className="form-section">
-              <div className="mb-1 text-[11px] font-semibold tracking-wider text-white/40 uppercase">
+              <div className="mb-1 text-[11px] font-semibold tracking-wider text-fg/40 uppercase">
                 標頭
               </div>
               <PairEditor
@@ -275,10 +275,10 @@ export function McpForm(props: {
               {err}
             </div>
           )}
-          {msg && <p className="text-xs text-white/50">{msg}</p>}
+          {msg && <p className="text-xs text-fg/50">{msg}</p>}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-fg/[0.06] px-5 py-3">
           <button className="btn-ghost px-5 py-1.5 text-[13px]" onClick={props.onClose}>
             取消
           </button>

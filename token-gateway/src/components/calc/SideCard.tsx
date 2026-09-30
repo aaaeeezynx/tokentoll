@@ -14,7 +14,7 @@ export function SideCard(props: {
       className={`glass-float p-4 ${props.winner ? "ring-1 ring-[#30d158]/40" : ""}`}
     >
       <div className="flex items-center gap-2">
-        <div className="text-sm font-semibold tracking-tight text-white/85">
+        <div className="text-sm font-semibold tracking-tight text-fg/85">
           {props.title}
         </div>
         {props.winner && (
@@ -23,18 +23,18 @@ export function SideCard(props: {
           </span>
         )}
       </div>
-      <div className="mt-0.5 truncate font-mono text-[11px] text-white/35">
+      <div className="mt-0.5 truncate font-mono text-[11px] text-fg/35">
         {props.modelLabel}
       </div>
       {props.pending ? (
-        <p className="mt-2 text-sm text-white/30">試算中…</p>
+        <p className="mt-2 text-sm text-fg/30">試算中…</p>
       ) : q ? (
         <>
-          <div className="mt-2 text-2xl font-semibold tracking-tight text-white">
+          <div className="mt-2 text-2xl font-semibold tracking-tight text-fg">
             ${fmtCost(q.cost_usd)}
           </div>
           {q.mode === "subscription" ? (
-            <div className="mt-2 space-y-1.5 text-xs text-white/45">
+            <div className="mt-2 space-y-1.5 text-xs text-fg/45">
               <div className="flex justify-between">
                 <span>月費</span>
                 <span className="font-mono">${q.sub_fee_usd}</span>
@@ -50,7 +50,7 @@ export function SideCard(props: {
                   </span>
                 </div>
                 {q.sub_included_tokens >= 0 && (
-                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-fg/[0.06]">
                     <div
                       className="h-full rounded-full bg-(--mac-accent)/60 bar-anim"
                       style={{
@@ -66,12 +66,12 @@ export function SideCard(props: {
                   ${fmtCost(q.cost_usd - q.sub_fee_usd)}
                 </span>
               </div>
-              <div className="text-[11px] text-white/30">
+              <div className="text-[11px] text-fg/30">
                 超額基礎價 {q.in_pm}/{q.out_pm} · 費率來源：{q.source}
               </div>
             </div>
           ) : (
-            <div className="mt-2 space-y-1 text-xs text-white/45">
+            <div className="mt-2 space-y-1 text-xs text-fg/45">
               <div className="flex justify-between">
                 <span>輸入 ${q.in_pm}/M</span>
               </div>
@@ -83,12 +83,12 @@ export function SideCard(props: {
                   快取讀 ${q.cache_read_pm}/M · 建 ${q.cache_create_pm}/M
                 </span>
               </div>
-              <div className="text-[11px] text-white/30">費率來源：{q.source}</div>
+              <div className="text-[11px] text-fg/30">費率來源：{q.source}</div>
             </div>
           )}
         </>
       ) : (
-        <p className="mt-2 text-sm text-white/25">尚未試算</p>
+        <p className="mt-2 text-sm text-fg/25">尚未試算</p>
       )}
     </div>
   );

@@ -136,8 +136,8 @@ export function ChannelPricingForm(props: {
         </>
       )}
       {mode === "tou" && (
-        <div className="mt-2 rounded-xl border border-white/[0.06] bg-black/20 p-2.5">
-          <div className="mb-1.5 text-[11px] font-medium text-white/45">
+        <div className="mt-2 rounded-xl border border-fg/[0.06] bg-black/20 p-2.5">
+          <div className="mb-1.5 text-[11px] font-medium text-fg/45">
             峰谷時段（未命中用基礎價，可跨夜）
           </div>
           {model.trim() ? (
@@ -252,21 +252,21 @@ export function PeriodManager(props: { providerId: number; modelNorm: string }) 
         {(list.data || []).map((p) => (
           <div key={p.id} className="mac-row !py-2">
             <div className="flex items-center gap-2 text-xs">
-              <div className="min-w-0 flex-1 truncate text-white/70">
+              <div className="min-w-0 flex-1 truncate text-fg/70">
                 {p.name}
-                <span className="ml-1.5 font-mono text-white/35">
+                <span className="ml-1.5 font-mono text-fg/35">
                   {p.start}-{p.end} · {p.in_pm}/{p.out_pm}
                 </span>
               </div>
               <button
-                className="shrink-0 rounded-full p-1 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+                className="shrink-0 rounded-full p-1 text-fg/40 transition-colors hover:bg-fg/10 hover:text-fg"
                 title="編輯時段"
                 onClick={() => openEdit(p)}
               >
                 <Icon name="pencil" size={12} />
               </button>
               <button
-                className="shrink-0 rounded-full p-1 text-white/40 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                className="shrink-0 rounded-full p-1 text-fg/40 transition-colors hover:bg-red-500/10 hover:text-red-400"
                 title="刪除時段"
                 onClick={() => ask(`刪除時段 ${p.name}？`, () => del.mutate(p.id))}
               >
@@ -276,7 +276,7 @@ export function PeriodManager(props: { providerId: number; modelNorm: string }) 
           </div>
         ))}
         {(list.data || []).length === 0 && !editing && (
-          <div className="mac-row !py-2 text-[11px] text-white/20">
+          <div className="mac-row !py-2 text-[11px] text-fg/20">
             尚無時段
           </div>
         )}
@@ -301,7 +301,7 @@ export function PeriodManager(props: { providerId: number; modelNorm: string }) 
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
               />
-              <span className="text-white/25">–</span>
+              <span className="text-fg/25">–</span>
               <input
                 className={inputCls}
                 placeholder="HH:MM"
@@ -362,7 +362,7 @@ export function PeriodManager(props: { providerId: number; modelNorm: string }) 
           時段
         </button>
       )}
-      <p className="mt-1.5 text-[10px] text-white/15">
+      <p className="mt-1.5 text-[10px] text-fg/15">
         重疊時取優先級（ord）最小命中的；`*` 模型時段為全來源回退。
       </p>
       {confirmDialog}

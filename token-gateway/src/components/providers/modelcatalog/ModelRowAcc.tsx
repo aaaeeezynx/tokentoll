@@ -112,14 +112,14 @@ export function ModelRowAcc(props: {
     >
       <div className="flex items-center gap-2.5">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-medium text-white/85">
+          <div className="truncate text-[13px] font-medium text-fg/85">
             {row.display_name}
           </div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-white/30">
+          <div className="mt-0.5 truncate font-mono text-[11px] text-fg/30">
             {row.actual_model}
             {row.context_window ? ` · ctx ${row.context_window.toLocaleString()}` : ""}
             {row.reasoning && row.reasoning !== "unset" ? ` · ${row.reasoning.includes(",") ? row.reasoning.split(",").join(" / ") : row.reasoning}` : ""}
-            {!row.enabled && <span className="ml-1.5 text-white/20">· 已停用</span>}
+            {!row.enabled && <span className="ml-1.5 text-fg/20">· 已停用</span>}
           </div>
         </div>
         <Toggle
@@ -129,7 +129,7 @@ export function ModelRowAcc(props: {
           onChange={(v) => save.mutate({ ...base, enabled: v })}
         />
         <button
-          className="shrink-0 rounded-full p-1.5 text-white/35 transition-colors hover:bg-red-500/10 hover:text-red-400"
+          className="shrink-0 rounded-full p-1.5 text-fg/35 transition-colors hover:bg-red-500/10 hover:text-red-400"
           title="刪除"
           onClick={(e) => {
             e.stopPropagation();
@@ -143,13 +143,13 @@ export function ModelRowAcc(props: {
         <Icon
           name="chevron-down"
           size={12}
-          className={`shrink-0 text-white/25 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`shrink-0 text-fg/25 transition-transform ${open ? "rotate-180" : ""}`}
         />
       </div>
       <div className="acc-body" data-open={open}>
         <div>
           <div
-            className="mt-2.5 border-t border-white/[0.06] pt-1"
+            className="mt-2.5 border-t border-fg/[0.06] pt-1"
             onClick={(e) => e.stopPropagation()}
           >
           <div className="mac-frow">
@@ -209,7 +209,7 @@ export function ModelRowAcc(props: {
             />
           </div>
           <div className="mac-frow">
-            <span className="mac-cap">思考等級<span className="ml-1 font-normal text-white/25">空 = 全部檔位</span></span>
+            <span className="mac-cap">思考等級<span className="ml-1 font-normal text-fg/25">空 = 全部檔位</span></span>
             <PopSelect
               multi
               value={reasoning}

@@ -23,16 +23,16 @@ export function McpRow(props: {
       ? `${s.command} ${s.args.join(" ")}`.trim()
       : s.url;
   return (
-    <div className="rounded-xl border border-white/[0.06] p-3.5 transition-colors hover:border-white/10">
+    <div className="rounded-xl border border-fg/[0.06] p-3.5 transition-colors hover:border-fg/10">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1">
-          <span className="truncate text-sm font-semibold text-white/85">
+          <span className="truncate text-sm font-semibold text-fg/85">
             {s.name || s.slug}
           </span>
-          <span className="ml-2 rounded bg-white/[0.06] px-1.5 py-px font-mono text-[10px] text-white/40">
+          <span className="ml-2 rounded bg-fg/[0.06] px-1.5 py-px font-mono text-[10px] text-fg/40">
             {s.transport}
           </span>
-          <span className="ml-1.5 font-mono text-[10px] text-white/25">{s.slug}</span>
+          <span className="ml-1.5 font-mono text-[10px] text-fg/25">{s.slug}</span>
         </span>
         {props.apps.map((app) => (
           <span
@@ -49,14 +49,14 @@ export function McpRow(props: {
         ))}
         <span className="flex w-[52px] shrink-0 justify-end gap-1">
           <button
-            className="rounded-full p-1.5 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-full p-1.5 text-fg/45 transition-colors hover:bg-fg/10 hover:text-fg"
             title="編輯"
             onClick={props.onEdit}
           >
             <Icon name="pencil" size={13} />
           </button>
           <button
-            className="rounded-full p-1.5 text-white/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
+            className="rounded-full p-1.5 text-fg/45 transition-colors hover:bg-red-500/10 hover:text-red-400"
             title="刪除"
             onClick={props.onDelete}
           >
@@ -64,14 +64,14 @@ export function McpRow(props: {
           </button>
         </span>
       </div>
-      <p className="mt-1 truncate font-mono text-[11px] text-white/30" title={detail}>
+      <p className="mt-1 truncate font-mono text-[11px] text-fg/30" title={detail}>
         {detail}
       </p>
       {s.description && (
-        <p className="mt-0.5 truncate text-[11px] text-white/25">{s.description}</p>
+        <p className="mt-0.5 truncate text-[11px] text-fg/25">{s.description}</p>
       )}
       {(s.env.length > 0 || s.headers.length > 0) && (
-        <p className="mt-0.5 truncate font-mono text-[10px] text-white/20">
+        <p className="mt-0.5 truncate font-mono text-[10px] text-fg/20">
           {[...s.env, ...s.headers].map((p) => p.name).join(", ")}
         </p>
       )}

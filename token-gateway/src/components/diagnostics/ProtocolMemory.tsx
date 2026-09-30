@@ -11,7 +11,7 @@ import type { LearnedProtocol } from "../../lib/apiTypes";
 export function ProtocolMemory({ list }: { list: LearnedProtocol[] }) {
   if (list.length === 0) {
     return (
-      <p className="text-[13px] text-white/35">
+      <p className="text-[13px] text-fg/35">
         還沒有任何協議記憶 —— 表示所有來源的宣告協議都與實際上架情形一致
         （不需要換手），或還沒打過需要換手的模型。
       </p>
@@ -22,24 +22,24 @@ export function ProtocolMemory({ list }: { list: LearnedProtocol[] }) {
       {list.map((p) => (
         <div
           key={`${p.provider_id}:${p.model}:${p.declared_format}`}
-          className="flex flex-wrap items-center gap-2 rounded-md bg-white/[0.04] px-3 py-2"
+          className="flex flex-wrap items-center gap-2 rounded-md bg-fg/[0.04] px-3 py-2"
         >
-          <span className="min-w-0 truncate text-[13px] text-white/80">
+          <span className="min-w-0 truncate text-[13px] text-fg/80">
             {p.provider_name || (
-              <span className="text-white/35">已刪除的渠道 #{p.provider_id}</span>
+              <span className="text-fg/35">已刪除的渠道 #{p.provider_id}</span>
             )}
           </span>
-          <span className="font-mono text-[10px] text-white/25">
+          <span className="font-mono text-[10px] text-fg/25">
             #{p.provider_id}
           </span>
-          <span className="min-w-0 truncate font-mono text-[12px] text-white/60">
+          <span className="min-w-0 truncate font-mono text-[12px] text-fg/60">
             {p.model}
           </span>
           <span className="flex flex-1 flex-wrap items-center gap-1.5">
-            <span className="rounded bg-white/[0.06] px-1.5 py-px font-mono text-[11px] text-white/45">
+            <span className="rounded bg-fg/[0.06] px-1.5 py-px font-mono text-[11px] text-fg/45">
               {p.declared_format}
             </span>
-            <span className="text-white/30">→</span>
+            <span className="text-fg/30">→</span>
             <span
               className="rounded px-1.5 py-px font-mono text-[11px]"
               style={{ background: "rgba(48,209,88,0.14)", color: "#30d158" }}

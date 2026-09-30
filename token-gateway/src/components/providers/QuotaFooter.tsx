@@ -38,9 +38,9 @@ export function QuotaFooter(props: {
   // 沒設定、或查詢中還沒有結果 → 只留一個入口（不要讓卡片變吵）
   if (!q) {
     return (
-      <div className="mt-2 flex items-center gap-2 border-t border-white/[0.06] pt-2">
+      <div className="mt-2 flex items-center gap-2 border-t border-fg/[0.06] pt-2">
         <button
-          className="flex items-center gap-1 text-[11px] text-white/30 transition-colors hover:text-white/70"
+          className="flex items-center gap-1 text-[11px] text-fg/30 transition-colors hover:text-fg/70"
           onClick={(e) => {
             e.stopPropagation();
             props.onConfigure();
@@ -50,14 +50,14 @@ export function QuotaFooter(props: {
           <Icon name="chart-bar" size={11} />
           用量查詢
         </button>
-        {props.loading && <span className="text-[10px] text-white/25">查詢中…</span>}
+        {props.loading && <span className="text-[10px] text-fg/25">查詢中…</span>}
       </div>
     );
   }
 
   const col = quotaColor(q.percent);
   return (
-    <div className="mt-2 border-t border-white/[0.06] pt-2">
+    <div className="mt-2 border-t border-fg/[0.06] pt-2">
       <div className="flex flex-wrap items-center gap-2">
         {q.ok ? (
           <>
@@ -70,16 +70,16 @@ export function QuotaFooter(props: {
                 {q.percent < 10 ? q.percent.toFixed(1) : Math.round(q.percent)}%
               </span>
             )}
-            <span className="text-[11px] text-white/60">
+            <span className="text-[11px] text-fg/60">
               {q.plan_name ? `${q.plan_name} · ` : ""}
               餘額 {fmtNum(q.remaining, q.unit)}
               {q.total !== null && (
-                <span className="text-white/30"> / {fmtNum(q.total, q.unit)}</span>
+                <span className="text-fg/30"> / {fmtNum(q.total, q.unit)}</span>
               )}
             </span>
             {q.plans.length > 0 && (
               <button
-                className="rounded bg-white/[0.06] px-1.5 py-px text-[10px] text-white/50 hover:text-white/80"
+                className="rounded bg-fg/[0.06] px-1.5 py-px text-[10px] text-fg/50 hover:text-fg/80"
                 onClick={(e) => {
                   e.stopPropagation();
                   setOpen((v) => !v);
@@ -96,7 +96,7 @@ export function QuotaFooter(props: {
         )}
         <span className="flex-1" />
         <button
-          className="shrink-0 rounded p-0.5 text-white/30 transition-colors hover:text-white/80"
+          className="shrink-0 rounded p-0.5 text-fg/30 transition-colors hover:text-fg/80"
           title="重新查詢"
           onClick={(e) => {
             e.stopPropagation();
@@ -106,7 +106,7 @@ export function QuotaFooter(props: {
           <Icon name="refresh" size={11} className={props.loading ? "animate-spin" : ""} />
         </button>
         <button
-          className="shrink-0 rounded p-0.5 text-white/30 transition-colors hover:text-white/80"
+          className="shrink-0 rounded p-0.5 text-fg/30 transition-colors hover:text-fg/80"
           title="用量查詢設定"
           onClick={(e) => {
             e.stopPropagation();
@@ -126,13 +126,13 @@ export function QuotaFooter(props: {
                 : null;
             return (
               <div key={`${p.name}-${i}`} className="flex items-center gap-2 text-[11px]">
-                <span className="min-w-0 flex-1 truncate text-white/50">{p.name || "方案"}</span>
+                <span className="min-w-0 flex-1 truncate text-fg/50">{p.name || "方案"}</span>
                 {pct !== null && (
                   <span className="tabular-nums" style={{ color: quotaColor(pct) }}>
                     {Math.round(pct)}%
                   </span>
                 )}
-                <span className="tabular-nums text-white/40">
+                <span className="tabular-nums text-fg/40">
                   {fmtNum(p.remaining, p.unit)}
                 </span>
               </div>
@@ -141,7 +141,7 @@ export function QuotaFooter(props: {
         </div>
       )}
       {q.extra && (
-        <div className="pt-0.5 text-[10px] text-white/25">{q.extra}</div>
+        <div className="pt-0.5 text-[10px] text-fg/25">{q.extra}</div>
       )}
     </div>
   );
