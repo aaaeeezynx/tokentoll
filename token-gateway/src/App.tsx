@@ -29,6 +29,7 @@ import ProvidersPage from "./components/Providers";
 import McpPage from "./components/Mcp";
 import PromptsPage from "./components/Prompts";
 import SkillsPage from "./components/Skills";
+import SessionsPage from "./components/Sessions";
 import KeysPage from "./components/Keys";
 import SettingsPage from "./components/Settings";
 import DiagnosticsPage from "./components/Diagnostics";
@@ -49,6 +50,7 @@ type Tab =
   | "mcp"
   | "prompts"
   | "skills"
+  | "sessions"
   | "keys"
   | "diagnostics"
   | "calc"
@@ -60,6 +62,7 @@ const TABS: { id: Tab; label: string; icon: IconName; iconFill: IconName }[] = [
   { id: "mcp", label: "MCP", icon: "cpu", iconFill: "cpu" },
   { id: "prompts", label: "提示詞", icon: "pencil", iconFill: "pencil" },
   { id: "skills", label: "技能", icon: "download", iconFill: "download" },
+  { id: "sessions", label: "會話", icon: "clock", iconFill: "clock" },
   { id: "keys", label: "本地 Key", icon: "key", iconFill: "key-fill" },
   { id: "diagnostics", label: "診斷", icon: "alert", iconFill: "bolt-fill" },
   { id: "calc", label: "試算", icon: "calculator", iconFill: "calculator" },
@@ -293,6 +296,7 @@ function Shell() {
             {tab === "mcp" && <McpPage />}
             {tab === "prompts" && <PromptsPage />}
             {tab === "skills" && <SkillsPage />}
+            {tab === "sessions" && <SessionsPage />}
             {tab === "keys" && <KeysPage />}
             {tab === "diagnostics" && <DiagnosticsPage />}
             {tab === "settings" && <SettingsPage />}

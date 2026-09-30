@@ -776,6 +776,57 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.26 會話管理（P3.4，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §3.4 抄）
+
+- 一個地方瀏覽／搜尋／管理各工具的對話：左邊清單（搜尋＋依工具篩選＋重新整理），
+  右邊詳情（標題、最後活動時間、專案目錄、**續聊指令**、對話全文），依最後活動排序。
+- **續聊**：macOS 會開終端機；**其他平台只把指令複製到剪貼簿**，由使用者自己貼。
+- **刪除**：單筆／批次（全選、清除、確認框），**沒有本機來源路徑的會話不能刪**。
+- 訊息依角色上色（user／assistant／system／tool）。
+
+#### 我們做的（`sessions/`，沒有新增資料表）
+
+**先把三個工具的實際儲存位置與格式查清楚**（這是「不憑想像」）：
+
+| 工具 | 位置 | 形態 |
+|---|---|---|
+| Claude Code | `~/.claude/projects/<專案>/<uuid>.jsonl` | JSONL：`type: user/assistant` ＋ `message.content`；`cwd` 在事件上 |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`＋`archived_sessions/` | JSONL：第一行 `session_meta`（`id`／`cwd`），其後 `response_item` |
+| OpenCode | `~/.local/share/opencode/opencode.db` | **SQLite**：`session`（有 `title`／`directory`）＋`message`＋`part` |
+
+續聊指令也是用 CLI 自己的說明確認的：`codex resume <id>`、`claude --resume <id>`、
+`opencode -s <id>` ✓（`codex resume --help`、`claude --help`、`opencode --help`）。
+
+| 部分 | 內容 |
+|---|---|
+| 掃描 | 三個工具並行掃描，標題取「第一則使用者訊息」（Codex／Claude）或資料庫的 `title`（OpenCode）；只讀檔頭（上限 512 KB／400 行）以維持速度 |
+| 讀取 | 依角色解析訊息；工具呼叫（`function_call`、`tool_result`）也進時間軸；長對話只留最後 400 則 |
+| 續聊 | 顯示指令 ＋ 「複製指令」按鈕（Windows 上不擅自開終端機，與 cc-switch 的非 macOS 行為一致） |
+| 刪除 | 單筆／批次（全選／清除／確認框）；**只接受 `.jsonl`**、且路徑 `canonicalize` 後必須在該工具的會話目錄底下；**OpenCode 一律拒絕**（別人的資料庫只讀） |
+| 安全 | `SessionEnv` 明講允許的目錄；`SessionEnv::real()` 在**測試建置直接拒絕**（P3.2／P3.3 兩次教訓的同一條防線） |
+| 帳務 | 刪除後明確提示「已回填的用量統計不會被撤銷（用量是帳，不隨對話消失）」 |
+
+#### 實機驗證抓到的一個 bug（已修）
+
+第一版用「**全域** 500 筆上限再截斷」。實際資料是 Codex 617 檔、Claude 32、OpenCode 104，
+而 OpenCode 的會話比較舊 —— 結果**切到 OpenCode 篩選器看到 0 筆**，整個工具被擠掉。
+現在改成**每個工具各自上限 300**（合併後再排序，不設全域上限），並補了測試
+`per_app_cap_keeps_every_tool_visible` 把這條規則釘住。
+
+#### 測試（18 個新測試）
+
+- `sessions`（4）：續聊指令與三個 CLI 一致、專案目錄取名、標題單行化與截斷、支援的工具。
+- `sessions::scan`（6）：Codex／Claude 檔頭解析（id／cwd／標題）、壞檔與讀不到的檔不 panic、
+  `content` 兩種形狀（字串／陣列）、遞迴掃描、**每個工具各自上限**。
+- `sessions::read`（5）：Codex／Claude 每行→訊息（含工具呼叫與 `tool_result`）、
+  空白內容要略過、長對話保留尾端、不支援的工具要報錯。
+- `sessions::store`（3）：OpenCode／非 `.jsonl`／不存在一律拒絕、允許目錄底下才真的刪
+  （且回報大小、被拒的檔案必須還在）、**真實環境在測試建置被拒絕**。
+
+---
+
 ### 0.9.25 技能管理（P3.3，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §3.3 抄）
@@ -2593,7 +2644,55 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.25 最新建置（2026-10-01 04:18，P3.3：技能管理）—— **你目前安裝的就是這一個**
+### 9.26 最新建置（2026-10-01 04:48，P3.4：會話管理）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P3.4（設計與取捨見 §0.9.26）。**P3 到此完成。沒有動 schema
+（會話是唯讀＋刪檔，不需要新表，仍是 v13）**。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 04:48:12 |
+| `target\release\token-gateway.exe` | 10,002,432 bytes、sha256 `E60E5A52D0FEA33AD18FBAC068F1824EC55C863C3EDCF96852A67C2DA81C6599` |
+| NSIS 安裝檔 | 4,180,455 bytes、sha256 `AA6CAC0A6B864CC1666260C07EC865BC12BC4E9B030CFD0AD927774BA0419C16` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,002,432 bytes、sha256 `98C3E4313DAEB9CC418C0648C8938DF96E6A6A294B42EE6E40E2BAC3E0A1565A` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **402 passed / 0 failed / 11 ignored** ✅（+18：會話模組） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍是 **13**（這輪沒有動 schema）✅ |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/sessions/{mod,scan,read,store}.rs` | **新增**：型別與續聊指令、掃描（三種來源）、對話解析、刪除（含 `SessionEnv` 安全界線） |
+| `src-tauri/src/commands/sessions_cmd.rs` | **新增**：`sessions_apps／scan／read／delete`（掃描與讀取在 `spawn_blocking`） |
+| `src/components/Sessions.tsx` | **新增**：兩欄式頁面（清單＋搜尋＋工具篩選＋批次刪除；詳情＋續聊指令複製＋角色上色的對話） |
+| `src/App.tsx`、`src/lib/{api,apiTypes}.ts` | 導覽新增「會話」與型別／API |
+
+#### 實機驗證（安裝後的真實 App，CDP 讀畫面）
+
+| 驗證項 | 結果 |
+|---|---|
+| 掃描 | ✅ 三個工具都掃到（清單顯示 Codex／Claude Code／OpenCode 標籤），新到舊排序 |
+| 搜尋 | ✅ 輸入關鍵字即時過濾（用臨時會話檔驗證：全部→500+ 筆、搜尋「驗證用」→1 筆） |
+| 對話內容 | ✅ 點一則會話後右側載入對話，角色標籤（使用者／AI）與內容都正確 |
+| **續聊指令** | ✅ 顯示 `claude --resume zz-tokengateway-verify`；按「複製指令」→「已複製：claude --resume …」 |
+| **刪除** | ✅ 確認框 →「已刪除 1 則。**已刪除的對話不會從用量統計中扣除（用量是帳，不隨對話消失）**」 |
+| 刪除後零殘骸 | ✅ Claude 專案目錄比對：**「與基線相同（臨時會話檔已清掉、沒有殘留）」**（驗證用檔案是我自己建的，驗完刪掉） |
+| OpenCode 只讀 | ✅ 切到 OpenCode 篩選器 → **104 則**，詳情顯示「**不可刪除**」，續聊指令 `opencode -s ses_…` |
+| **要求二：本機工具篩選** | ✅ 用量頁下拉仍是 8 個選項（Claude Code／Codex／OpenCode／Hermes Agent／DeepSeek Harness／Cursor／Antigravity） |
+
+> **實機驗證抓到並修掉的一個 bug**：第一版用「全域 500 筆上限」，而你的 Codex 有
+> 617 個會話檔、OpenCode 只有 104 個且比較舊 —— 結果**切到 OpenCode 看到 0 筆**。
+> 改成每個工具各自上限 300（合併後再排序、不設全域上限），修完 OpenCode 顯示 104 筆 ✓，
+> 並補了 `per_app_cap_keeps_every_tool_visible` 把這條規則釘住。
+
+### 9.25 前一次建置（2026-10-01 04:18，P3.3：技能管理，已被 9.26 取代）
 
 CC Switch 對齊計畫 P3.3（設計與取捨見 §0.9.25）。**schema 12 → 13**
 （新增 `skill_repos`／`skills`／`skill_bindings`）。新增相依：`flate2`（離線快取已有）。

@@ -466,6 +466,42 @@ export interface SkillSettings {
   sync_mode: string;
 }
 
+// ── P3.4：會話管理（對標 cc-switch 的 Session Manager） ──
+
+export interface SessionApp {
+  app: string;
+  display: string;
+}
+
+export interface SessionSummary {
+  app: string;
+  id: string;
+  title: string;
+  project_dir: string;
+  /** 來源檔（OpenCode 是資料庫路徑） */
+  path: string;
+  last_active_ms: number;
+  size: number;
+  /** 只有本機檔案才可刪 */
+  deletable: boolean;
+  /** 續聊指令（空＝不支援） */
+  resume_command: string;
+  message_count: number;
+}
+
+export interface SessionMessage {
+  role: string;
+  text: string;
+  ts: number;
+}
+
+export interface SessionDeleteOutcome {
+  deleted: string[];
+  failed: [string, string][];
+  removed_bytes: number;
+  note: string;
+}
+
 export interface AppSettings {
   gateway_port: number;
   auto_start_proxy: boolean;

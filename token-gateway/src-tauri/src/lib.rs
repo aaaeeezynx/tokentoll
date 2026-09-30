@@ -13,6 +13,7 @@ mod prompt;
 mod provider_check;
 mod providers;
 mod providers_io;
+mod sessions;
 mod quota;
 #[doc(hidden)]
 pub mod proxy;
@@ -175,6 +176,11 @@ pub fn run() {
             commands::skills_restore,
             commands::skills_backup_delete,
             commands::skills_settings,
+            // 會話管理（P3.4，見 sessions/）
+            commands::sessions_apps,
+            commands::sessions_scan,
+            commands::sessions_read,
+            commands::sessions_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
