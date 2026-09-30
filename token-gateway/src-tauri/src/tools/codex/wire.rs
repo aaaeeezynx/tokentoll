@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::legacy::dedupe_codex_sections;
+use super::CODEX_RESERVED_PROVIDER_IDS;
 
 /// 按工具拼網關 URL（M2 由前端計算後傳入；M3 代理側複用本函數做權威拼接）。
 #[allow(dead_code)]
@@ -172,6 +173,12 @@ pub fn codex_apply(
     }
     for id in &managed {
         mp.remove(id.as_str());
+    }
+    // 清掉 Codex 內建 id 的段：那些名字不可定義，留著會讓**整份** config.toml
+    // 載入失敗（Codex 會報 `reserved built-in provider IDs`，使用者看到的是
+    // 「無法登入」）。舊版 App 或歷史殘留可能已經寫進去，所以這裡是修復點。
+    for id in CODEX_RESERVED_PROVIDER_IDS {
+        mp.remove(id);
     }
     for id in &managed {
         mp.insert(

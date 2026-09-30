@@ -180,6 +180,34 @@ pub fn codex_legacy_providers_report(codex_home: &Path) -> LegacyProviders {
 
 
 /// 要管理的別名段名 = （DB 讀到的 provider 名）∪（config.toml 裡**已經指向
+/// Codex **內建**的 provider id：設定檔只要定義了這些段，**整份** `config.toml`
+/// 都會載入失敗，工具表現成「無法登入」。
+///
+/// 2026-09-29 逐個候選實測（在 `model_provider` 仍指向網關的情況下額外定義一段，
+/// 看 Codex 是否拒絕載入）：`openai`／`ollama`／`lmstudio` 會觸發
+/// `model_providers contains reserved built-in provider IDs: … Built-in providers
+/// cannot be overridden.`；`oss`、`azure`、`aws`、`amazon-bedrock`、`anthropic`、
+/// `openrouter`、`google`、`gemini`、`openai-chat`、`openai-custom` 都可以自由定義。
+/// 檢查是針對**所有**已定義的段，不限當前 `model_provider`。
+///
+/// **為什麼會有這份清單（真實事故）**：App 會把「Codex 對話紀錄裡出現過的
+/// provider 名」聯集進要保留的別名段（見 `codex_legacy_providers_report` ＋
+/// `codex_alias_ids`）。Codex 一旦用**原生**來源跑過，`model_provider = "openai"`
+/// 就會出現在對話紀錄裡；下一次接管時 App 會替它**建出** `[model_providers.openai]`
+/// ——於是整份設定載入失敗。使用者看到的是「關掉網關回到官方之後，再切回指定來源
+/// 就無法登入」。
+pub(crate) const CODEX_RESERVED_PROVIDER_IDS: [&str; 3] = ["openai", "ollama", "lmstudio"];
+
+
+/// 這個 provider id 是不是 Codex 的內建 id（不可在設定檔裡定義）。
+pub(crate) fn is_reserved_codex_provider(id: &str) -> bool {
+    let id = id.trim();
+    CODEX_RESERVED_PROVIDER_IDS
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(id))
+}
+
+
 /// 本網關**的 `[model_providers.*]` 段名）。
 ///
 /// **為什麼要聯集**：`codex_apply` 只會刪除「在管理清單裡」的段。若清單只來自
@@ -190,8 +218,15 @@ pub fn codex_legacy_providers_report(codex_home: &Path) -> LegacyProviders {
 ///
 /// **只納入 base_url 已經指向本網關的段**，不碰使用者自己指向上游的 provider
 /// —— 否則接管會把「使用者想直連」的段也一併劫持。
+///
+/// **排除 Codex 內建 id**（`CODEX_RESERVED_PROVIDER_IDS`）：那些名字不可在設定檔
+/// 裡定義，聯集進來會讓整份設定載入失敗（真實事故，見該常數的說明）。
 pub(crate) fn codex_alias_ids(existing: &str, from_db: &[String], gw_url: &str) -> Vec<String> {
-    let mut out: Vec<String> = from_db.to_vec();
+    let mut out: Vec<String> = from_db
+        .iter()
+        .filter(|o| !is_reserved_codex_provider(o))
+        .cloned()
+        .collect();
     let clean = dedupe_codex_sections(existing);
     let Ok(doc) = clean.parse::<toml_edit::DocumentMut>() else {
         return out;
@@ -202,6 +237,7 @@ pub(crate) fn codex_alias_ids(existing: &str, from_db: &[String], gw_url: &str) 
     for (k, v) in mp.iter() {
         let id = k.trim();
         if id.is_empty()
+            || is_reserved_codex_provider(id)
             || id == CODEX_SHARED_PROVIDER_ID
             || id == GATEWAY_PROVIDER_ID
             || out.iter().any(|o| o == id)

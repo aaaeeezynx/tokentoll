@@ -122,6 +122,23 @@ fn codex_native(text: &str) -> NativeOutcome {
         out.changes
             .push("移除 model_catalog_json（App 產生的模型目錄；移除後才看得到 GPT 模型）".into());
     }
+    // Codex 內建 id（`openai` 等）不可在設定檔裡定義，留著會讓整份 config.toml
+    // 載入失敗、表現成「無法登入」。還原是最適合清掉它的時機（回到官方時本來
+    // 就不需要任何 provider 段）。
+    if let Some(mp) = doc.get_mut("model_providers").and_then(|m| m.as_table_mut()) {
+        let mut removed: Vec<&str> = vec![];
+        for id in super::codex::CODEX_RESERVED_PROVIDER_IDS {
+            if mp.remove(id).is_some() {
+                removed.push(id);
+            }
+        }
+        if !removed.is_empty() {
+            out.changes.push(format!(
+                "移除 Codex 內建 provider 段 {}（Codex 不允許覆寫內建 id；留著會讓整份設定載入失敗）",
+                removed.join("、")
+            ));
+        }
+    }
     out.text = doc.to_string();
     out
 }

@@ -64,6 +64,36 @@ fn codex_native_is_idempotent() {
 
 
 #[test]
+fn codex_native_removes_reserved_builtin_provider_sections() {
+    // 真實事故（2026-09-29）：接管把 `openai` 當成別名段寫進設定，Codex 因而
+    // 拒絕載入整份 config.toml（內建 id 不可覆寫），使用者看到「無法登入」。
+    // 還原（回到官方）是最適合清掉它的時機。
+    let dirty = "model_provider = \"custom\"\nmodel = \"m\"\n\
+                 [model_providers.openai]\nbase_url = \"http://127.0.0.1:15722/v1\"\n\
+                 [model_providers.custom]\nbase_url = \"http://127.0.0.1:15722/v1\"\n";
+    let out = to_native("codex", dirty, 15722);
+    assert!(out.warning.is_none(), "{:?}", out.warning);
+    let doc: toml_edit::DocumentMut = out.text.parse().expect("仍是合法 TOML");
+    assert_eq!(doc["model_provider"].as_str(), Some("openai"));
+    let mp = doc.get("model_providers").and_then(|m| m.as_table());
+    assert!(
+        mp.map(|m| m.get("openai").is_none()).unwrap_or(true),
+        "內建段必須被清掉：{}",
+        out.text
+    );
+    assert!(
+        out.changes.iter().any(|c| c.contains("內建 provider 段")),
+        "要告訴使用者做了什麼：{:?}",
+        out.changes
+    );
+    // 冪等：再跑一次不該又冒出變更。
+    let again = to_native("codex", &out.text, 15722);
+    assert_eq!(again.text, out.text);
+    assert!(again.changes.is_empty(), "{:?}", again.changes);
+}
+
+
+#[test]
 fn codex_native_inserts_top_level_keys_before_tables() {
     // 沒有 model_provider / model 的畸形配置：新鍵必須留在根表格，
     // 不能被序列化到最後一個 [model_providers.*] 段裡面。

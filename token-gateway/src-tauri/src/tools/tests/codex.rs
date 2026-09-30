@@ -233,6 +233,40 @@ fn codex_aliases_and_inline_models() {
 }
 
 
+/// 真實事故（2026-09-29）：設定檔裡已經被寫進 `[model_providers.openai]`
+/// （Codex 的內建 id，不可定義）→ 整份 config.toml 載入失敗，使用者看到
+/// 「無法登入」。接管必須把它清掉，否則錯誤永遠不會好。
+#[test]
+fn codex_apply_removes_reserved_builtin_provider_sections() {
+    let old = "model = \"a\"\n\
+               [model_providers.openai]\nbase_url = \"http://127.0.0.1:15722/v1\"\n\
+               [model_providers.ollama]\nbase_url = \"http://127.0.0.1:15722/v1\"\n\
+               [model_providers.lmstudio]\nbase_url = \"http://127.0.0.1:15722/v1\"\n\
+               [model_providers.keepme]\nbase_url = \"http://127.0.0.1:15722/v1\"\n";
+    let out = codex_apply(
+        old,
+        "http://127.0.0.1:15722/v1",
+        "m",
+        None,
+        None,
+        &["keepme".to_string()],
+        &[],
+        CodexAuth::default(),
+    )
+    .unwrap();
+    let v: toml_edit::DocumentMut = out.parse().unwrap();
+    let mp = v.get("model_providers").and_then(|m| m.as_table()).unwrap();
+    for bad in CODEX_RESERVED_PROVIDER_IDS {
+        assert!(mp.get(bad).is_none(), "內建段 `{bad}` 必須被清掉：{out}");
+    }
+    assert!(mp.get("keepme").is_some(), "一般別名段不受影響：{out}");
+    assert!(is_reserved_codex_provider("OpenAI"));
+    assert!(is_reserved_codex_provider(" openai "));
+    assert!(!is_reserved_codex_provider("openai-custom"));
+    assert!(!is_reserved_codex_provider("custom"));
+}
+
+
 #[test]
 fn codex_direct_writes_bearer_no_envkey() {
     let old = "model = \"a\"\n";

@@ -774,6 +774,64 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 | `codex doctor` | `✓ config loaded`、`model gpt-5.6-luna · openai`、`config.toml parse ok`、`✓ auth auth is configured`、`stored auth mode chatgpt` ✅ |
 | **Codex 的模型清單** | `codex debug models` → **`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`**（＋2 個隱藏），NIM 的模型全部消失 ✅ |
 
+---
+
+### 0.9.10 真實事故：從官方來源切回指定來源後「無法登入」（2026-09-30）
+
+使用者回報：把工具從官方來源切成指定來源後，還是會出現登入錯誤。
+
+真正的錯誤（`codex exec` 一字不差）：
+
+```
+Error loading config.toml: model_providers contains reserved built-in provider IDs: `openai`.
+Built-in providers cannot be overridden. Rename your custom provider (for example, `openai-custom`).
+```
+
+Codex **拒絕載入整份 `config.toml`**，所以任何指令都做不了事，表現成「無法登入」。
+
+#### 因果鏈（每一步都有實測證據）
+
+| # | 環節 | 證據 |
+|---|---|---|
+| 1 | §0.9 的「關閉 → 回到原生來源」把 Codex 設成 `model_provider = "openai"` | 設定檔內容 ✅ |
+| 2 | Codex 用它跑過對話後，**自己的**對話資料庫就記下這個 provider | `state_5.sqlite` → `threads.model_provider` 出現 `openai`（1 個對話）✅ |
+| 3 | App 為了「舊會話要一直能續用」，把 `SELECT DISTINCT model_provider` 的名字**聯集**進要保留的別名段 | `codex_legacy_providers_report` ＋ `codex_alias_ids` ✅ |
+| 4 | 於是下一次接管替它**建出** `[model_providers.openai]`，指到網關 | 設定檔出現第 9 個段（原本 8 個）✅ |
+| 5 | Codex 認為那是內建 id、不可覆寫 → **整份設定載入失敗** | 上面那段錯誤訊息 ✅ |
+
+也就是說：**又是「回到原生來源」這個功能自己養出來的**（同 §0.9.9 的
+`backup_has_known_route`）。差別是這次它會讓工具**完全不能用**。
+
+#### 內建 id 清單是實測出來的
+
+在 `model_provider` 仍指向網關的情況下**額外定義**一段，看 Codex 是否拒絕載入
+（檢查針對**所有**已定義的段，不限當前 provider —— 上面的真實設定就是
+`model_provider = "custom"` 卻仍被 `openai` 段擋下）：
+
+| id | 結果 |
+|---|---|
+| `openai`／`ollama`／`lmstudio` | ❌ **保留（禁止定義）** |
+| `oss`／`azure`／`aws`／`amazon-bedrock`／`anthropic`／`openrouter`／`google`／`gemini`／`openai-chat`／`openai-custom` | ✅ 可自由定義 |
+
+#### 修法
+
+| 位置 | 改動 |
+|---|---|
+| `codex/legacy.rs` | 新增 `CODEX_RESERVED_PROVIDER_IDS` ＋ `is_reserved_codex_provider()` |
+| `codex/legacy.rs::codex_alias_ids` | 內建 id **不進**管理清單（DB 來源與既有段兩邊都擋） |
+| `codex/wire.rs::codex_apply` | 接管時**清掉**已存在的內建段 → 這是修復點，舊設定會自己好 |
+| `native.rs::codex_native` | 還原（回到官方）時也清掉，並在訊息裡說明 |
+
+回歸測試 3 條：`codex_alias_ids_excludes_reserved_builtin_ids`、
+`codex_apply_removes_reserved_builtin_provider_sections`、
+`codex_native_removes_reserved_builtin_provider_sections`。
+
+#### 附註
+
+`openai-chat`、`openai-custom` 這類**加後綴**的名字可以用 —— 如果哪天真的需要
+一個內建 id 的別名段，正確做法是改名（Codex 的錯誤訊息本身也是這樣建議的）。
+
+
 ### 0.9.9 端到端實測（2026-09-29 02:50–03:2x）：用量核算 ＋ 關工具／關網關／重啟
 
 使用者要求跑一輪完整測試：**開網關 → 用工具真實對話 → 檢查用量是否算對 →
@@ -1547,7 +1605,45 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.10 最新建置（2026-09-29 03:20，端到端測試輪：修好「原生備份無法還原」）—— **你目前安裝的就是這一個**
+### 9.11 最新建置（2026-09-30 13:50，修好「切回指定來源後無法登入」）—— **你目前安裝的就是這一個**
+
+使用者回報「從官方來源切回指定來源後無法登入」。真因是設定檔被寫進 Codex 的
+內建 provider 段 `[model_providers.openai]`，Codex 因而拒絕載入整份
+`config.toml`（§0.9.10）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 產物 13:50:28 |
+| 執行檔大小 | 9,040,896 bytes |
+| NSIS 大小 | 3,845,618 bytes |
+| **安裝後執行檔 SHA-256** | **`207558984CBC070E171A480380D82C987D9953DAA32AA3A3B03A2763C09A3538`**（前一版 `3561A32B…`） |
+| 後端測試 | **234 passed / 0 failed / 8 ignored**（+3 條回歸測試） |
+| clippy | **0 個警告** |
+| 檔案行數 | 全部 ≤ 400 行 |
+
+**實機驗證（修復 → 復發路徑全走一遍）**：
+
+| 步驟 | 結果 |
+|---|---|
+| 修復前現況 | 設定 10,747 bytes、`[model_providers.openai]` **1 段**、`codex exec` → `Error loading config.toml: reserved built-in provider IDs` ❌ |
+| 關閉 Codex | `(On -> Off)`、7,024 bytes、`[openai]` 段 **0**、`model_provider = "openai"`、指向網關 0 次 ✅ |
+| 再開啟（官方 → 指定來源，就是出錯的那一步） | `(Off -> On)`、`[openai]` 段 **0**、別名段回到原本的 **8 段**（custom／tokengateway／gw／mock／nim-direct／nvidia-nim／nvidia-proxy／opencode-zen）✅ |
+| alias 來源仍有 `openai` | `state_5.sqlite` 的 `threads.model_provider` 仍含 `openai`（1 對話）→ 證明**是過濾生效**，不是來源消失 ✅ |
+| `codex exec` | exit 0、9 秒、回覆「切回指定來源正常」✅ |
+| `codex doctor` | `✓ config loaded`、`model deepseek-v4.1-flash · custom` ✅ |
+| 用量 | 該次對話記為 `#4408 app=codex prov=22 deepseek-v4.1-flash in=11,436 out=64 st=200 2,102ms` ✅ |
+
+**這一輪改到的檔案**：`codex/legacy.rs`（保留清單＋過濾）、`codex/wire.rs`
+（接管時清除）、`native.rs`（還原時清除）、`tools/tests.rs`（再匯出）、
+測試 3 條、文件 §0.9.10／§9.11。
+
+**順手查到的一件事（未改動）**：`codex doctor` 每次執行都會對網關發出
+**2 個 401** 的連線探測（可重現），那些列會出現在用量頁。那是 Codex 自己的
+行為（探測端點是否需要認證），網關如實記錄；沒有改它。
+
+---
+
+### 9.10 前一次建置（2026-09-29 03:20，端到端測試輪：修好「原生備份無法還原」，已被 9.11 取代）
 
 使用者要求跑一輪完整端到端測試（開網關 → 對話 → 檢查用量 → 關工具 → 關網關 →
 重啟工具 → 檢查來源），過程中抓到並修掉 `backup_has_known_route` 的失效

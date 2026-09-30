@@ -132,3 +132,34 @@ fn codex_alias_ids_unions_db_and_existing() {
         "不應重複：{got:?}"
     );
 }
+
+
+/// 真實事故（2026-09-29）：Codex 用原生來源跑過之後，對話紀錄裡就有
+/// `model_provider = "openai"`；下一次接管把那個名字當成要保留的別名，
+/// **建出** `[model_providers.openai]` —— 而那是 Codex 的內建 id、不可定義，
+/// 於是整份 config.toml 載入失敗，使用者看到「從官方切回指定來源後無法登入」。
+/// 所以內建 id 既不能從 DB 收進來，也不能從既有段收進來。
+#[test]
+fn codex_alias_ids_excludes_reserved_builtin_ids() {
+    let gw = "http://127.0.0.1:15722/v1";
+    let existing = format!(
+        "model_provider = \"{CODEX_SHARED_PROVIDER_ID}\"\n\
+         [model_providers.{CODEX_SHARED_PROVIDER_ID}]\nbase_url = \"{gw}\"\n\
+         [model_providers.openai]\nbase_url = \"{gw}\"\n\
+         [model_providers.ollama]\nbase_url = \"{gw}\"\n\
+         [model_providers.keepme]\nbase_url = \"{gw}\"\n"
+    );
+    let db: Vec<String> = ["openai", "lmstudio", "fromdb"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let got = codex_alias_ids(&existing, &db, gw);
+    for bad in CODEX_RESERVED_PROVIDER_IDS {
+        assert!(
+            !got.contains(&bad.to_string()),
+            "內建 id `{bad}` 不可進管理清單（接管會建出禁用的段）：{got:?}"
+        );
+    }
+    assert!(got.contains(&"keepme".to_string()), "一般段仍要保留：{got:?}");
+    assert!(got.contains(&"fromdb".to_string()), "{got:?}");
+}
