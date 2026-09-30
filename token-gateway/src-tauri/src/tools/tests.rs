@@ -45,6 +45,29 @@ pub(crate) use crate::tools::native::to_native;
 // ---- summary ----
 pub(crate) use crate::tools::summary::restore_summary;
 
+// ---- 共用測資 ----
+// 一份「接管前」的 Codex 設定：自訂 provider 指向 NIM、帶 App 產生的模型目錄、
+// 另有別名段與使用者自己的 `[plugins.*]`。native.rs 與 roundtrip.rs 共用。
+pub(crate) const NIM_CONFIG: &str = r#"model = "moonshotai/kimi-k3"
+model_provider = "custom"
+model_reasoning_effort = "medium"
+disable_response_storage = true
+model_catalog_json = 'C:\Users\x\AppData\Roaming\com.tokencounter.gateway\catalogs\codex-15.json'
+
+[model_providers.custom]
+name = "custom"
+base_url = "https://integrate.api.nvidia.com/v1"
+wire_api = "responses"
+
+[model_providers.nvidia-nim]
+name = "nvidia-nim"
+base_url = "https://integrate.api.nvidia.com/v1"
+wire_api = "responses"
+
+[plugins."foo@bar"]
+enabled = true
+"#;
+
 // ---- switch ----
 pub(crate) use crate::tools::switch::SwitchRequest;
 pub(crate) use crate::tools::switch::apply_switch;
@@ -166,6 +189,7 @@ mod codex_wire_api;
 mod codex_legacy;
 mod restore;
 mod native;
+mod roundtrip;
 mod apply;
 mod live;
 mod misc;

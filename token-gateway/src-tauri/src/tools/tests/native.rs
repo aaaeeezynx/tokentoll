@@ -13,27 +13,6 @@
 use super::*;
 
 
-const NIM_CONFIG: &str = r#"model = "moonshotai/kimi-k3"
-model_provider = "custom"
-model_reasoning_effort = "medium"
-disable_response_storage = true
-model_catalog_json = 'C:\Users\x\AppData\Roaming\com.tokencounter.gateway\catalogs\codex-15.json'
-
-[model_providers.custom]
-name = "custom"
-base_url = "https://integrate.api.nvidia.com/v1"
-wire_api = "responses"
-
-[model_providers.nvidia-nim]
-name = "nvidia-nim"
-base_url = "https://integrate.api.nvidia.com/v1"
-wire_api = "responses"
-
-[plugins."foo@bar"]
-enabled = true
-"#;
-
-
 #[test]
 fn codex_native_switches_to_openai_gpt_and_keeps_alias_sections() {
     let out = to_native("codex", NIM_CONFIG, 15722);
