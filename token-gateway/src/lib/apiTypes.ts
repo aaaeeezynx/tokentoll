@@ -165,8 +165,7 @@ export interface QuotaPlan {
 }
 
 /** 一次用量查詢的結果（不含任何金鑰）。 */
-export interface QuotaView {
-  provider_id: number;
+export interface QuotaView {  provider_id: number;
   ok: boolean;
   message: string;
   unit: string;
@@ -249,6 +248,88 @@ export interface SwitchResult {
   config_path: string;
   backup_path: string | null;
   extra_files: string[];
+}
+
+// ── P3.1：MCP 管理（對標 cc-switch 的 MCP Management） ──
+
+/** 名稱／值配對（MCP 的標頭與環境變數共用）。 */
+export interface McpPair {
+  name: string;
+  value: string;
+}
+
+/** 一個 MCP 伺服器對一個工具的啟用狀態。 */
+export interface McpBinding {
+  app: string;
+  enabled: boolean;
+}
+
+export interface McpServer {
+  id: number;
+  /** Server ID（設定檔裡的鍵；唯一） */
+  slug: string;
+  name: string;
+  description: string;
+  /** stdio | http | sse */
+  transport: string;
+  command: string;
+  args: string[];
+  url: string;
+  headers: McpPair[];
+  env: McpPair[];
+  bindings: McpBinding[];
+}
+
+export interface McpInput {
+  id?: number | null;
+  slug: string;
+  name: string;
+  description: string;
+  transport: string;
+  command: string;
+  args: string[];
+  url: string;
+  headers: McpPair[];
+  env: McpPair[];
+}
+
+export interface McpPreset {
+  id: string;
+  name: string;
+  /** 套件名（照抄 cc-switch 手冊的表） */
+  package: string;
+  description: string;
+  note: string;
+  input: {
+    slug: string;
+    name: string;
+    description: string;
+    transport: string;
+    command: string;
+    args: string[];
+    url: string;
+  };
+}
+
+/** 某個工具的同步結果。 */
+export interface McpSyncOutcome {
+  app: string;
+  display: string;
+  /** 沒安裝就 true（cc-switch：不報錯，只是不寫） */
+  skipped: boolean;
+  message: string;
+  path: string;
+  written: string[];
+  removed: string[];
+  backup: string | null;
+}
+
+/** 匯入既有設定的報告（每個工具一列，失敗的附原因）。 */
+export interface McpImportReport {
+  added: number;
+  skipped: number;
+  per_app: { app: string; count: number; error: string }[];
+  imported: string[];
 }
 
 export interface AppSettings {

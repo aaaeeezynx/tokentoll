@@ -776,6 +776,65 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.23 MCP 伺服器管理（P3.1，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §3.1 抄）
+
+- **一個統一的面板**，七個工具共用；每個伺服器可以**逐工具**開啟／關閉。
+- 新增：預設樣板（fetch／time／memory／sequential-thinking／context7）或自訂。
+  欄位＝Server ID（必填、唯一）、名稱、說明、傳輸型別（stdio／http／sse）、
+  Command（stdio 必填）、Arguments、URL（http／sse 必填）、Headers、環境變數。
+- **開啟＝寫進那個工具的設定檔**；關閉＝從那個檔案移除。
+  Claude `~/.claude.json` 的 `mcpServers`、Codex `~/.codex/config.toml` 的
+  `[mcp_servers]`、OpenCode `opencode.json` 的 `mcp`。
+- **只動資料庫管得到的伺服器**：使用者手寫、沒匯入的不碰。
+- 同步條件：該工具有安裝才寫（沒裝就靜默不寫、不算錯誤）。
+- **匯入既有設定**：一次讀遍各工具設定檔，匯入的伺服器**自動對來源工具啟用**；
+  讀不到的工具會回報原因。
+- 整欄一鍵全開／全關。
+
+#### 我們做的（`mcp/`，schema v11）
+
+| 部分 | 內容 |
+|---|---|
+| 資料表 | `mcp_servers`（slug 唯一）＋ `mcp_bindings`（server × app 的啟用狀態） |
+| 同步工具 | **只同步可以接管的三個**（Claude Code／Codex／OpenCode）—— 能寫設定檔的工具才可能同步 MCP，所以直接共用 `tools::TAKEOVER_APPS`，不另外維護一份清單 |
+| 樣板 | 5 個，套件名照抄它手冊的表格；**啟動指令是我們的判斷**（Python 用 uvx、TS 用 npx -y），說明欄直說 |
+| 形狀 | Claude stdio `{command,args,env}`／http `{type,url,headers}`；Codex `[mcp_servers.X]` ＋ `[mcp_servers.X.env]`，streamable HTTP 用 `url`（**用 `codex mcp add --help` 問來的**，不是猜的）；OpenCode `{type:"local",command:[…],environment,enabled}`／`{type:"remote",url,headers,enabled}` |
+| 整欄切換 | 標題列每個工具兩個鈕（全開／全關） |
+| 匯入 | 讀三個設定檔 → 過同一套驗證 → 進資料庫並對來源工具啟用；重複的 slug 略過、壞掉的檔案回報原因 |
+
+#### 實機驗證抓到的三個問題（都修掉了，也都有測試）
+
+1. **同步會在多餘的檔案裡留下空殼。** 第一次實機驗證後 `opencode.json` 也被改了 ——
+   因為 `sync_all` 對三個工具都跑，opencode 沒有要寫的伺服器，卻被插入了
+   `"mcp": {}`。現在：**沒有東西要寫、檔案裡也沒有我們管的 slug 時，完全不碰檔案**。
+2. **移除最後一個條目會留下 `"mcpServers": {}`。** 現在空了就把鍵拿掉，
+   使用者的檔案回到原狀。
+3. **覆蓋會吃掉我們沒建模的欄位。** 使用者的 Codex 設定可能有 `cwd`、
+   `startup_timeout_sec` 這類鍵；直接覆蓋會在「按一下同步」時無聲刪掉它們。
+   現在改成**合併**：只更新我們管的鍵（command／args／url／env／headers／type），
+   其他原封不動。
+
+另外為了不讓使用者的 `~/.claude.json` 被「整份重排」，`serde_json` 開了
+`preserve_order`（鍵序照原樣；indexmap 本來就在離線快取裡），
+並且在**值沒變時直接回傳原文** —— 所以「開了又關」是真正的 no-op：
+實機驗證的檔案雜湊與操作前**完全相同**。
+
+#### 測試（34 個新測試）
+
+- `mcp`（5）：Server ID 驗證（允許 `@scope/pkg`、擋空白與引號、長度上限）、
+  傳輸型別、各型別的必填欄位、空名稱回退成 slug、空白鍵值對會被丟掉。
+- `mcp::presets`（3）：五個樣板形狀正確且都過得了驗證、**套件名與 cc-switch 手冊逐項比對**。
+- `mcp::store`（5）：CRUD、重複 slug 的清楚錯誤、逐工具綁定來回、不支援的工具被拒（`cursor`／`hermes`）、刪除連綁定一起清。
+- `mcp::apply`（14）：三種條目的形狀、JSON／TOML 改寫保留其他鍵與註解、
+  壞檔要拒絕、**合併語意（我們沒建模的鍵不能被吃掉）**、
+  **沒事不碰檔案**、**移除後空區塊要拿掉**、**開了又關要逐字回到原狀**、
+  備份與輪換、建立不存在的檔案、三種格式的匯入解析（含 Codex 的 `.env` 子表格不算另一個伺服器）。
+- `mcp::sync`（2）：同步寫入／移除與手寫項目保留、匯入驗證擋掉壞資料。
+
+---
+
 ### 0.9.22 用量查詢：每來源可設定的餘額／額度查詢（P2.1）＋卡片顯示（P2.2）（2026-10-01）
 
 #### cc-switch 的實際行為（照它的使用者手冊 §2.5 抄）
@@ -2401,7 +2460,65 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.22 最新建置（2026-10-01 02:31，P2：每來源用量查詢 ＋ 卡片顯示）—— **你目前安裝的就是這一個**
+### 9.23 最新建置（2026-10-01 03:22，P3.1：MCP 伺服器管理）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P3 的第一塊（設計與取捨見 §0.9.23）。**schema 從 10 升到 11**
+（新增 `mcp_servers`／`mcp_bindings`，純新增表）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 03:22:15 |
+| `target\release\token-gateway.exe` | 9,553,408 bytes、sha256 `8A09611DD03D681298332682F2FBA01233BC8C43835705A901C6003949F1112E` |
+| NSIS 安裝檔 | 4,016,040 bytes、sha256 `FC4AE621046F23077F3619EEB5300E3AFD42FA83F8218DD77AFAAEE2D2C3A489` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,553,408 bytes、sha256 `26AF4652F340781177A5B4C805CA8D1993385C913DD6A8A6FFB859A46C9174D7` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **344 passed / 0 failed / 8 ignored** ✅（+34：MCP 五個模組的測試） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | **11** ✅ |
+| 新增相依特性 | `serde_json` 開 `preserve_order`（鍵序照原樣；`indexmap` 已在離線快取，離線建置照樣過） |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/mcp/{mod,presets,store,apply,sync}.rs` | **新增**：型別與驗證、5 個樣板、DB 存取、設定檔讀寫（JSON／TOML）、同步與匯入 |
+| `src-tauri/src/commands/mcp_cmd.rs` | **新增**：`mcp_list／presets／upsert／delete／set_binding／set_app_all／sync／import` |
+| `src-tauri/src/db/{schema,mod}.rs`、`db/tests/{fresh,migrate}.rs` | 新表、版本 10→11、核心表清單 |
+| `src/components/Mcp.tsx`、`src/components/mcp/{McpRow,McpForm}.tsx` | **新增**：MCP 頁（列表／整欄切換／匯入／重新同步）與表單 |
+| `src/App.tsx`、`src/lib/{api,apiTypes}.ts` | 導覽新增「MCP」頁與型別／API |
+| `src-tauri/Cargo.toml` | `serde_json` 加 `preserve_order` |
+
+#### 實機驗證（安裝後的真實 App，CDP 讀畫面 ＋ 檔案雜湊比對）
+
+驗證前先把三個設定檔的**雜湊與複本**留下來（`.workbuddy/tmp/mcp_baseline.py`），
+驗證後逐項比對；你機器上原本的 MCP 伺服器是 Codex 的 `node_repl`。
+
+| 驗證項 | 結果 |
+|---|---|
+| MCP 頁與空狀態 | ✅ 導覽出現「MCP」，首次進入顯示「還沒有任何伺服器」 |
+| **匯入既有設定** | ✅ 「匯入完成：新增 1 個、略過 0 個」，列表出現 `node_repl`（stdio） |
+| 匯入後的自動啟用 | ✅ 三個開關＝**Claude 關、Codex 開、OpenCode 關** —— 與 cc-switch「匯入的伺服器對來源工具啟用」一致 |
+| 開關一個工具 | ✅ 打開 Claude → 「已更新：已寫入 Claude Code 1 項」，開關變 開／開／關 |
+| Claude 設定檔真的被寫 | ✅ `~/.claude.json` 的 `mcpServers.node_repl` 帶著 command 與完整 env；**其他鍵的順序照原樣**（`numStartups`、`firstStartTime`… 不是字母序） |
+| **沒有連帶改動別的檔案** | ✅ `opencode.json` 雜湊**與驗證前完全相同**；`config.toml` 也完全相同（合併後輸出與原文一致 → 直接不寫） |
+| Codex 仍讀得懂自己的設定 | ✅ `codex mcp list` 仍列出 `node_repl`（含 `env_vars`、`startup_timeout_sec` 這些我們沒建模的鍵）；`codex exec -m grok-4.7` → `P3-OK` |
+| 關閉＋刪除後回到原狀 | ✅ 開關全關、刪除該列後：`claude_mcp_now = []`、`codex_mcp_now = []`、資料庫 0 列 |
+| **驗證收尾** | ✅ 用基線複本還原三個檔案；`codex mcp list` 再次列出 `node_repl`、`codex exec` → `P3-OK`。你的設定回到驗證前的狀態（`opencode.json` 逐位元相同；`claude.json` 只有 Claude Code 自己會動的遙測欄位不同） |
+
+> **這一輪最有價值的收穫是實機驗證抓到的三個問題**（都已修好並補上測試）：
+> ① 同步會在沒有內容可寫的檔案裡留下空的 `"mcp": {}`；
+> ② 移除最後一個條目會留下 `"mcpServers": {}` 空殼；
+> ③ **覆蓋會吃掉我們沒建模的欄位** —— 你的 `node_repl` 有 `env_vars` 與
+> `startup_timeout_sec`，直接覆蓋會在「按一下同步」時無聲刪掉它們。
+> 另外為了不讓 `~/.claude.json` 被整份重排，`serde_json` 開了 `preserve_order`，
+> 並在值沒變時直接回傳原文（「開了又關」是真正的 no-op）。
+
+### 9.22 前一次建置（2026-10-01 02:31，P2：每來源用量查詢 ＋ 卡片顯示，已被 9.23 取代）
 
 CC Switch 對齊計畫 P2（設計與取捨見 §0.9.22）。**schema 從 9 升到 10**（新增
 `provider_usage_query`，純新增表，舊庫開啟時自動補上）。

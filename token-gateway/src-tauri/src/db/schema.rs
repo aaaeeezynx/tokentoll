@@ -223,6 +223,32 @@ CREATE TABLE IF NOT EXISTS provider_usage_query (
     auto_interval_min INTEGER NOT NULL DEFAULT 0,
     updated_at        INTEGER NOT NULL DEFAULT 0
 );
+
+-- MCP 伺服器（P3.1，對標 cc-switch 的 MCP Management）。
+-- 這裡只存「我們管的」伺服器：清單本身與每個工具要不要啟用。
+-- 使用者自己在工具設定檔裡手寫、沒匯入的伺服器一律不碰（與 cc-switch 同規則）。
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug        TEXT NOT NULL UNIQUE,          -- Server ID（唯一識別）
+    name        TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    transport   TEXT NOT NULL DEFAULT 'stdio', -- stdio | http | sse
+    command     TEXT NOT NULL DEFAULT '',
+    args_json   TEXT NOT NULL DEFAULT '[]',
+    url         TEXT NOT NULL DEFAULT '',
+    headers_json TEXT NOT NULL DEFAULT '[]',
+    env_json    TEXT NOT NULL DEFAULT '[]',
+    created_at  INTEGER NOT NULL DEFAULT 0,
+    updated_at  INTEGER NOT NULL DEFAULT 0
+);
+
+-- 每個伺服器對每個工具的啟用狀態（cc-switch 的 app binding）。
+CREATE TABLE IF NOT EXISTS mcp_bindings (
+    server_id INTEGER NOT NULL,
+    app       TEXT NOT NULL,                   -- claude | codex | opencode
+    enabled   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, app)
+);
 "#;
 
 /// 內置種子定價（美元/百萬 token，source='seed'；未知模型費用記 0，M4 做定價管理）。

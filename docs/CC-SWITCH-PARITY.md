@@ -62,7 +62,7 @@
 
 | # | CC Switch 的功能 | 我們的現況 | 證據 |
 |---|---|---|---|
-| C1 | **MCP 管理**（統一面板、範本、同步到各工具、匯入既有設定、Deep Link） | ❌ | 全庫只在「保留未知段」測試裡出現 `[mcp_servers]` |
+| C1 | **MCP 管理**（統一面板、範本、同步到各工具、匯入既有設定、Deep Link） | ✅ 面板／樣板／逐工具同步／匯入／整欄切換都做了（**只同步可接管的三個工具**；Deep Link 屬 P4） | `mcp/`、§0.9.23 |
 | C2 | **Prompts 管理**（Markdown 編輯器、寫進 CLAUDE.md／AGENTS.md、原內容回填） | ❌ | 無 |
 | C3 | **Skills 管理**（搜 skills.sh／GitHub／ZIP 安裝、更新、symlink 同步） | ❌ | 無 |
 | C4 | **Session Manager**（瀏覽／搜尋各工具對話、複製續聊指令、刪除） | ❌ | 我們的 `history` 是**用量**回填，不是對話瀏覽 |
@@ -116,8 +116,16 @@ P1.6 的「用滑鼠點托盤圖示」這一步無法在這台機器自動化，
 ### P3 — 擴充面板（MCP／Prompts／Skills／Sessions）
 
 四個新子系統，各自都是獨立的大工程（MCP 面板＋同步、Markdown prompt 庫＋回填、
-skills.sh／GitHub 安裝＋symlink、對話瀏覽＋續聊指令）。**這一期最花時間**，
-但它是 CC Switch 使用者最有感的部分。
+skills.sh／GitHub 安裝＋symlink、對話瀏覽＋續聊指令）。
+
+進度（2026-10-01）：**C1 MCP 完成**（見 `docs/TESTING.md` §0.9.23）；Prompts／Skills／Sessions 待做。
+
+| 項目 | 內容 | 狀態 |
+|---|---|---|
+| P3.1 MCP 管理 | 統一面板、5 個樣板、逐工具同步（Claude／Codex／OpenCode）、匯入既有設定、整欄切換 | ✅ |
+| P3.2 Prompts 管理 | Markdown 編輯器、寫進 CLAUDE.md／AGENTS.md、原內容回填 | ⬜ |
+| P3.3 Skills 管理 | 搜尋 skills.sh／GitHub／ZIP 安裝、更新、symlink 同步 | ⬜ |
+| P3.4 Session Manager | 瀏覽／搜尋各工具對話、複製續聊指令、刪除 | ⬜ |
 
 ### P4 — 平台面
 

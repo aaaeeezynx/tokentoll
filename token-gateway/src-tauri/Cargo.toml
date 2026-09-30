@@ -22,7 +22,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order：JSON 物件的鍵序照原樣保留。MCP 會改寫使用者的 ~/.claude.json
+# 與 opencode.json；沒有這個特性時 serde_json 會把鍵**按字母排序**，
+# 一次「開關伺服器」就讓整份檔案看起來被翻掉。indexmap 已在離線快取中。
+serde_json = { version = "1", features = ["preserve_order"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = "0.4"
 thiserror = "2"

@@ -15,6 +15,11 @@ import type {
   KeyInput,
   LocalKey,
   LogRow,
+  McpImportReport,
+  McpInput,
+  McpPreset,
+  McpServer,
+  McpSyncOutcome,
   ModelStat,
   PriceExtractResult,
   PriceQuote,
@@ -136,6 +141,25 @@ export const api = {
     invoke("usage_query_run", { providerId }),
   /** 所有已啟用設定的來源各查一次（來源頁載入時）。 */
   usageQueryRunAll: (): Promise<QuotaView[]> => invoke("usage_query_run_all"),
+  // ── P3.1 MCP 管理 ──
+  mcpList: (): Promise<McpServer[]> => invoke("mcp_list"),
+  mcpPresets: (): Promise<McpPreset[]> => invoke("mcp_presets"),
+  mcpUpsert: (input: McpInput): Promise<McpServer> =>
+    invoke("mcp_upsert", { input }),
+  mcpDelete: (id: number): Promise<McpSyncOutcome[]> =>
+    invoke("mcp_delete", { id }),
+  /** 設定某個伺服器在某個工具上的啟用（改完立刻同步設定檔）。 */
+  mcpSetBinding: (
+    id: number,
+    target: string,
+    enabled: boolean,
+  ): Promise<McpSyncOutcome[]> =>
+    invoke("mcp_set_binding", { id, target, enabled }),
+  /** 一鍵把某個工具的所有伺服器開或關。 */
+  mcpSetAppAll: (target: string, enabled: boolean): Promise<McpSyncOutcome[]> =>
+    invoke("mcp_set_app_all", { target, enabled }),
+  mcpSync: (): Promise<McpSyncOutcome[]> => invoke("mcp_sync"),
+  mcpImport: (): Promise<McpImportReport> => invoke("mcp_import"),
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),
   toolVersions: (): Promise<ToolVersion[]> => invoke("tool_versions"),

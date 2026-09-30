@@ -5,6 +5,7 @@ mod db;
 mod fsutil;
 mod history;
 mod keys;
+mod mcp;
 mod models;
 mod price_extract;
 mod presets;
@@ -138,6 +139,15 @@ pub fn run() {
             commands::usage_query_apply_template,
             commands::usage_query_run,
             commands::usage_query_run_all,
+            // MCP 管理（P3.1，見 mcp/）
+            commands::mcp_list,
+            commands::mcp_presets,
+            commands::mcp_upsert,
+            commands::mcp_delete,
+            commands::mcp_set_binding,
+            commands::mcp_set_app_all,
+            commands::mcp_sync,
+            commands::mcp_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
