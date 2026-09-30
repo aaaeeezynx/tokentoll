@@ -21,3 +21,5 @@
     mod strict_content;
     #[path = "e2e_strict/diagnostics.rs"]
     mod diagnostics;
+    #[path = "e2e_strict/failover.rs"]
+    mod failover;

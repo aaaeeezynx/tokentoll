@@ -54,6 +54,7 @@ mod retry;
 mod finish;
 mod pipeline;
 mod reqctx;
+mod failover;
 
 // 子模組共用匯入：各子模組開頭的 `use super::*;` 會取得這裡的綁定，
 // 因此某個模組要用兄弟模組的項目時，只要在這裡補一行即可。
@@ -62,15 +63,17 @@ mod reqctx;
 use {
     finish::{finish_response, FinishCtx},
     forward::{
-        build_upstream_target, provider_name, resolve_model_provider, strip_for_upstream,
-        translate_forward_body, BodyPrep, ForwardBody, ReroutedProvider, TransSpec,
+        build_upstream_target, provider_name, resolve_model_provider, resolve_model_providers,
+        strip_for_upstream, translate_forward_body, BodyPrep, ForwardBody, ReroutedProvider,
+        TransSpec,
     },
+    failover::{learn_format, learned_format, plan_attempts},
     logging::{err_json, extract_usage, insert_log, log_reject, reject, SseAcc},
     pipeline::{
         prepare_request, prelude, request_meta, resolve_model, upstream_for, PrepareInput, Prepared,
         Prelude, ReqMeta,
     },
-    retry::{send_with_strip_retry, RetryCtx, Upstream},
+    retry::{send_with_strip_retry, RetryCtx, SendOutcome, Upstream},
     reqctx::ReqCtx,
     stream::{
         relay_sse, responses_line_events, sse_response, AnthropicRelay, ResponsesRelay, StreamLog,
@@ -185,45 +188,145 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         return *resp;
     }
 
-    // ---- 格式矩陣 + 請求體轉譯與剝離（見 prepare_request）
-    let prep = match prepare_request(PrepareInput {
-        req: rc,
-        conn: &conn,
-        provider_id: authed.provider_id,
-        api_format: &authed.provider_api_format,
-        content_type: &content_type,
-        path_hint: &path_hint,
-        raw: &bytes,
-        body_json: &body_json,
-    }) {
-        Ok(p) => p,
-        Err(resp) => return *resp,
-    };
-    let (in_fmt, target_fmt, kind) = (prep.in_fmt, prep.target_fmt, prep.kind);
-    let translated = prep.translated;
-    let body_bytes = prep.bytes;
-    let translated_model = prep.model;
-
-    // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
-    let up = upstream_for(&ctx, &parts, &authed, translated, &app);
-
-    let upstream = match send_with_strip_retry(
-        &RetryCtx {
-            req: rc,
-            content_type: &content_type,
-            in_fmt,
-            target_fmt,
-            kind,
-        },
+    // ---- 候選（來源, 協議）佇列 ----
+    // 協議可能**逐模型**不同（opencode-go 實測：grok-4.7 只在 /responses、mimo-v2.6
+    // 只在 /chat/completions），所以同一來源也要換協議重試；其他登記了同一個模型
+    // 的來源一併排進佇列，當前來源連不上或 5xx 時可以換手。見 `failover.rs`。
+    let in_fmt = InFmt::from_path(&path_hint);
+    let others = resolve_model_providers(&conn, &model_raw, authed.provider_id);
+    let attempts = plan_attempts(
         authed.provider_id,
-        &up,
-        body_bytes,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(resp) => return *resp,
+        &authed.provider_api_format,
+        in_fmt,
+        learned_format(
+            &ctx.db_path.to_string_lossy(),
+            authed.provider_id,
+            &model_raw,
+            &authed.provider_api_format,
+        )
+        .as_deref(),
+        &others,
+    );
+    let total = attempts.len();
+    let mut last_reject: Option<Box<Response>> = None;
+    let mut success: Option<(reqwest::Response, Prepared, bool)> = None;
+    for (i, at) in attempts.iter().enumerate() {
+        if at.provider_id != authed.provider_id {
+            match others.iter().find(|p| p.id == at.provider_id) {
+                Some(p) => {
+                    authed.provider_id = p.id;
+                    authed.provider_base_url = p.base_url.clone();
+                    authed.provider_api_key = p.api_key.clone();
+                    authed.provider_auth_scheme = p.scheme.clone();
+                    authed.provider_api_format = p.format.clone();
+                }
+                None => continue,
+            }
+        }
+        // ---- 格式矩陣 + 請求體轉譯與剝離（見 prepare_request）
+        let prep = match prepare_request(PrepareInput {
+            req: rc,
+            conn: &conn,
+            provider_id: at.provider_id,
+            api_format: &at.api_format,
+            content_type: &content_type,
+            path_hint: &path_hint,
+            raw: &bytes,
+            body_json: &body_json,
+        }) {
+            Ok(p) => p,
+            // 第一個候選的失敗就是使用者的失敗（照原樣回報）；換協議／換來源後
+            // 矩陣不支援（例如 Anthropic→Responses 沒有翻譯器）只是這條路走不通。
+            Err(resp) => {
+                if i == 0 {
+                    return *resp;
+                }
+                continue;
+            }
+        };
+        let translated = prep.translated;
+        // ---- 組裝上游請求（翻譯時固定打 /chat/completions）
+        let up = upstream_for(&ctx, &parts, &authed, translated, &app);
+        let outcome = send_with_strip_retry(
+            &RetryCtx {
+                req: rc,
+                content_type: &content_type,
+                in_fmt: prep.in_fmt,
+                target_fmt: prep.target_fmt,
+                kind: prep.kind,
+            },
+            at.provider_id,
+            &up,
+            prep.bytes.clone(),
+        )
+        .await;
+        match outcome {
+            SendOutcome::Ok(r) if r.status().is_server_error() && i + 1 < total => {
+                trace::log_to(
+                    &ctx.db_path,
+                    &TraceRecord {
+                        app: app.clone(),
+                        model_raw: model_raw.clone(),
+                        in_fmt: prep.in_fmt.as_str().to_string(),
+                        target_fmt: prep.target_fmt.as_str().to_string(),
+                        trans_kind: prep.kind.as_str().to_string(),
+                        upstream_status: r.status().as_u16(),
+                        latency_ms: started.elapsed().as_millis() as i64,
+                        note: format!(
+                            "上游 {}：換下一個候選（來源 {}／協議 {}）重試",
+                            r.status().as_u16(),
+                            at.provider_id,
+                            at.api_format
+                        ),
+                        ..Default::default()
+                    }
+                    .warn(),
+                );
+            }
+            SendOutcome::Ok(r) => {
+                // 記住「這個來源的這個模型用這個協議會通」，下次第一個就試它。
+                learn_format(
+                    &ctx.db_path.to_string_lossy(),
+                    at.provider_id,
+                    &model_raw,
+                    &authed.provider_api_format,
+                    &at.api_format,
+                );
+                success = Some((r, prep, translated));
+                break;
+            }
+            SendOutcome::ProtocolMismatch => {
+                last_reject = None;
+            }
+            SendOutcome::Reject { resp, retryable } => {
+                if retryable && i + 1 < total {
+                    last_reject = Some(resp);
+                } else {
+                    return *resp;
+                }
+            }
+        }
+    }
+    let (upstream, prep, translated) = match success {
+        Some(v) => v,
+        None => {
+            return match last_reject {
+                Some(r) => *r,
+                None => reject(
+                    &ctx,
+                    &started,
+                    &app,
+                    &model_raw,
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "模型 {model_raw} 在來源的所有協議下都不被接受（試過 {total} 個候選）：\
+                         上游回報此模型不支援這些協議，請換模型或換來源"
+                    ),
+                ),
+            };
+        }
     };
+    let translated_model = prep.model;
     finish_response(
         upstream,
         &FinishCtx {
@@ -233,7 +336,7 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
             key_id: if authed.direct { None } else { Some(authed.id) },
             provider_id: authed.provider_id,
             translated,
-            kind,
+            kind: prep.kind,
         },
     )
     .await

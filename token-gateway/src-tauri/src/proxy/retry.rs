@@ -68,8 +68,29 @@ impl RetryCtx<'_> {
         )
     }
 }
+/// 送出上游的結果分類。
+///
+/// 會分類而不是直接回 `Result`，是因為「協議不支援」需要**呼叫端**換協議或換來源
+/// 再試一次（見 `failover.rs`）—— 這一層拿不到別的協議的請求體，只能把訊號往上傳。
+pub(super) enum SendOutcome {
+    /// 上游有回應（含上游自己的 4xx／5xx），照原樣交給收尾階段。
+    Ok(reqwest::Response),
+    /// 已備好的拒絕回應（連線失敗、剝離後仍失敗、非協議類 400）。
+    Reject { resp: Box<Response>, retryable: bool },
+    /// 上游明說「這個模型不支援這個協議」：換協議／換來源再試。
+    ProtocolMismatch,
+}
+
+/// 上游錯誤訊息是否為「協議不支援」。
+///
+/// opencode-go（zen 系）回的是
+/// `{"type":"error","error":{"type":"ModelProtocolUnsupported","message":"Model does not support this protocol."}}`；
+/// 兩種寫法都認，因為同族上游的 `type` 與 `message` 不一定同時出現。
+pub(super) fn is_protocol_mismatch(body: &str) -> bool {
+    body.contains("ModelProtocolUnsupported") || body.contains("does not support this protocol")
+}
 /// 送出請求；若上游回 400 且能從錯誤訊息解析出拒收欄位名，記住該欄位、
-/// 剝離後重試一次。回傳最終要用的上游響應，或已備好的拒絕回應
+/// 剝離後重試一次。回傳最終要用的上游響應分類
 /// （`Box<Response>`：`Response` 很大，直接當 Err 會讓 Result 過胖，
 /// 見 clippy::result_large_err）。
 ///
@@ -77,33 +98,51 @@ impl RetryCtx<'_> {
 /// 進程記憶體，網關每次停止／啟動即歸零，導致每個渠道的第一個請求都要
 /// 重踩一次 400 再重試（見 §3 B2）。正常情況下 `strip_for_upstream` 已先
 /// 套用這份記憶，所以不會走到這裡。
+///
+/// 2026-09-30：先判「協議不支援」再談剝離 —— 協議不對時剝欄位永遠不會成功，
+/// 硬剝只是白花一次上游呼叫（trace 一直是「無法解析出拒收欄位名」那條）。
 pub(super) async fn send_with_strip_retry(
     rc: &RetryCtx<'_>,
     provider_id: i64,
     up: &Upstream<'_>,
     body: Vec<u8>,
-) -> Result<reqwest::Response, Box<Response>> {
+) -> SendOutcome {
     let upstream = match up.send(body.clone()).await {
         Ok(r) => r,
-        Err(e) => return Err(Box::new(rc.connect_failed(&e))),
+        Err(e) => {
+            return SendOutcome::Reject {
+                resp: Box::new(rc.connect_failed(&e)),
+                retryable: true,
+            }
+        }
     };
     if upstream.status() != StatusCode::BAD_REQUEST {
-        return Ok(upstream);
+        return SendOutcome::Ok(upstream);
     }
-    // 400 且報拒收欄位 → 記住並剝離重發一次（New-API 系 unknown field；
-    // OpenRouter 系 Unsupported parameter(s)；多個一次全剝離）；
     // 仍失敗或無法解析則透出上游原文，不再吞錯。
     let eb: Vec<u8> = upstream.bytes().await.unwrap_or_default().to_vec();
     // 客戶端訊息用截斷版；追蹤表存完整原文（§5.3 第 0 層）
     let upstream_text = upstream_err_text(&eb);
     let upstream_full = String::from_utf8_lossy(&eb).to_string();
+    if is_protocol_mismatch(&upstream_full) {
+        let rec = rc
+            .trace(
+                400,
+                vec![],
+                "上游 400：此模型不支援本協議（換協議／換來源重試中）",
+            )
+            .with_body(&body)
+            .with_upstream_error(&upstream_full);
+        trace::log_to(&rc.req.ctx.db_path, &rec);
+        return SendOutcome::ProtocolMismatch;
+    }
     let mut retried: Option<reqwest::Response> = None;
     let mut applied: Vec<String> = vec![];
     let fields = parse_unknown_fields(&String::from_utf8_lossy(&eb));
     if !fields.is_empty() {
         let mut nb = body.clone();
         // 用短命連線寫記憶，而不是借用呼叫端的連線：
-        // `rusqlite::Connection` 是 Send 但**不是 Sync**，所以 `&Connection`
+        // `rusqlite::Connection` 是 Send 但**不是** Sync，所以 `&Connection`
         // 跨 await 會讓整個 future 變成 !Send，axum 的 Handler 就不成立。
         // 開新連線也與 `trace::log_to` 的既有做法一致。
         let mem = open_conn(&rc.req.ctx.db_path).ok();
@@ -129,12 +168,17 @@ pub(super) async fn send_with_strip_retry(
             trace::log_to(&rc.req.ctx.db_path, &rec);
             match up.send(nb).await {
                 Ok(r) => retried = Some(r),
-                Err(e) => return Err(Box::new(rc.connect_failed(&e))),
+                Err(e) => {
+                    return SendOutcome::Reject {
+                        resp: Box::new(rc.connect_failed(&e)),
+                        retryable: true,
+                    }
+                }
             }
         }
     }
     match retried {
-        Some(r) if !r.status().is_client_error() => Ok(r),
+        Some(r) if !r.status().is_client_error() => SendOutcome::Ok(r),
         Some(r) => {
             let st = r.status();
             let eb2 = r.bytes().await.unwrap_or_default().to_vec();
@@ -145,14 +189,17 @@ pub(super) async fn send_with_strip_retry(
                 .with_body(&body)
                 .with_upstream_error(&eb2_full);
             trace::log_to(&rc.req.ctx.db_path, &rec);
-            Err(Box::new(reject(
-                rc.req.ctx,
-                rc.req.started,
-                rc.req.app,
-                rc.req.model_raw,
-                st,
-                upstream_err_text(&eb2),
-            )))
+            SendOutcome::Reject {
+                resp: Box::new(reject(
+                    rc.req.ctx,
+                    rc.req.started,
+                    rc.req.app,
+                    rc.req.model_raw,
+                    st,
+                    upstream_err_text(&eb2),
+                )),
+                retryable: is_protocol_mismatch(&eb2_full),
+            }
         }
         None => {
             // 無法從錯誤訊息解析出欄位名 → 相容策略失效，必須留痕才能改進
@@ -166,14 +213,17 @@ pub(super) async fn send_with_strip_retry(
                 .with_body(&body)
                 .with_upstream_error(&upstream_full);
             trace::log_to(&rc.req.ctx.db_path, &rec);
-            Err(Box::new(reject(
-                rc.req.ctx,
-                rc.req.started,
-                rc.req.app,
-                rc.req.model_raw,
-                StatusCode::BAD_REQUEST,
-                upstream_text,
-            )))
+            SendOutcome::Reject {
+                resp: Box::new(reject(
+                    rc.req.ctx,
+                    rc.req.started,
+                    rc.req.app,
+                    rc.req.model_raw,
+                    StatusCode::BAD_REQUEST,
+                    upstream_text,
+                )),
+                retryable: false,
+            }
         }
     }
 }

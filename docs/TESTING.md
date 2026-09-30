@@ -776,6 +776,73 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.16 來源／協議自動換手：抄 cc-switch 的 failover，補它沒做的協議回退（2026-09-30）
+
+你的裁示是「照抄，並且補他沒做的」。參考 [cc-switch](https://github.com/farion1231/cc-switch)
+的做法：它的「上游格式」也是**逐來源**選的（跟我們一樣），真正解掉「某些模型不能用」的是
+**Auto-failover**（為每個工具排一條來源佇列，失敗就換下一個，帶 circuit breaker）與
+**Rectifier**（修上游吃不下的請求）。它**沒有**做「同一個來源換協議重試」那一格，我們補上。
+
+#### 做成了什麼
+
+把「候選（來源, 協議）」排成一條佇列，依序嘗試，失敗就往下換：
+
+```
+① 上次學到的協議（見下方快取）
+② 綁定來源的宣告協議
+③ 綁定來源的另一種協議（Responses 入站時 chat ↔ responses）
+④ 其他也登記了這個模型的來源（各自：宣告協議 → 另一種協議，依 priority/id）
+```
+
+觸發換手的條件：**上游說「此模型不支援本協議」**、**連線失敗**、**上游 5xx**。
+其他 4xx（內容政策、參數錯…）維持原樣直接回給使用者 —— 那些換來源只會多花錢、不會變好。
+
+- 程式位置：`proxy/failover.rs`（新的，規劃候選＋學習快取）、`proxy.rs::proxy_handler`
+  （嘗試迴圈）、`proxy/retry.rs`（`SendOutcome`：把「協議不支援」分類成訊號而不是死路）、
+  `proxy/forward.rs::resolve_model_providers`（候選來源清單）。
+- **學習快取**：某個（資料庫, 來源, 模型, 宣告協議）用哪個協議成功過就記住，下次第一個試它。
+  鍵刻意帶 **db_path**（`provider_id` 只在單一資料庫內唯一）與 **宣告協議**
+  （使用者把來源協議從 chat 改成 responses 是明確的設定變更，不可以被舊的學習結果蓋掉 ——
+  這一點是實作時被既有測試 `e2e_forward_auth_and_log`（B6 回歸）逼出來的）。
+
+#### 對 opencode-go 的實際效果
+
+| 模型 | 只有哪個端點有架 | Codex（Responses 入站） | Claude Code（Anthropic 入站） |
+|---|---|---|---|
+| deepseek-v4.1-flash／v4-flash | 兩邊都有 | ✅ 第一個候選就過 | ✅ |
+| grok-4.7／gpt-6-luna／muse-spark | responses | ✅ **先試 chat 被拒 → 自動換 responses** | ❌ 仍無解（見下） |
+| mimo-v2.6-pro／flash | chat | ✅ 第一個候選就過 | ✅ |
+
+**Claude Code 仍然無解**：Anthropic 入站的請求**只生得出 chat 請求體**
+（`Anthropic → Responses` 沒有翻譯器，矩陣直接回 `E_ANTHROPIC_UNSUPPORTED`），
+所以 responses-only 的模型在 Claude Code 永遠換不過去。要解只能另寫一個
+Anthropic→Responses 翻譯器（獨立工程，這一輪沒做）。
+
+#### 誠實揭露
+
+- **學習快取只放記憶體**：網關重啟後，每個「協議與宣告不符」的模型要多付一次失敗探測
+  （一次 400，不計費）。要持久化就再加一張表，之後可做。
+- **沒有真的做 circuit breaker**：cc-switch 有「連續失敗就暫時跳過某個來源」，
+  我們目前是**每次請求都依序試**。代價是第一名來源掛掉時，每個請求都先撞一次。
+- 換手只發生在「已經決定要轉發」之後：模型白名單、直連模式的語意**完全沒動**
+  （`直連模式僅允許來源「X」登記的模型` 那條規則照舊）。
+
+#### 測試
+
+| 測試 | 釘住什麼 |
+|---|---|
+| `failover::tests::responses_inbound_gets_responses_fallback_for_chat_provider` | Responses 入站 + chat 來源 → 候選 `[chat, responses]` |
+| `failover::tests::mixed_provider_gets_chat_fallback_for_chat_only_models` | `mixed` 來源也要有一條 chat 候選（chat-only 模型用） |
+| `failover::tests::anthropic_inbound_has_no_responses_fallback` | Claude Code 不排無效候選（翻 responses 矩陣不支援） |
+| `failover::tests::learned_format_goes_first_and_dedupes` | 學到的協議排第一，且不重複 |
+| `failover::tests::other_providers_come_after_bound_one` | 來源換手是備援，排在綁定來源之後 |
+| `failover::tests::learn_format_is_scoped_by_db_and_declared_format` | ★ 快取要分資料庫、分宣告協議 |
+| `e2e_responses_inbound_falls_back_to_responses_endpoint` | 端到端：假上游 chat 回真實的 `ModelProtocolUnsupported`、responses 正常 → 客戶端拿到 200 與 responses 內容；**路徑順序證明**先打 chat；第二次請求不再打 chat（學習生效） |
+| `e2e_failover_to_next_provider_when_first_is_dead` | 端到端：第一個來源連不上 → 換到第二個也登記了同一模型的來源並成功 |
+| （既有）`e2e_forward_auth_and_log` | B6：chat 請求打到 responses 來源**仍必須明確 400**，不被我的候選佇列救走 |
+
+---
+
 ### 0.9.15 讓 `mixed` 真的「Responses ＋ chat 兩邊都通」（2026-09-30）
 
 你問的：「mixed 同時支援 Responses+chat 是否可以做」——**可以做，而且兌現方式就是一行**。
@@ -1939,7 +2006,48 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.16 最新建置（2026-09-30 21:18，`mixed` 兩邊都通）—— **你目前安裝的就是這一個**
+### 9.17 最新建置（2026-09-30 21:57，來源／協議自動換手）—— **你目前安裝的就是這一個**
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-30 21:57:06 |
+| `target\release\token-gateway.exe` | 9,074,176 bytes、sha256 `584956D41F94F771F414E0E0828162457E626877DC44EEA2877EAF7DCEB10912` |
+| NSIS 安裝檔 | 3,865,094 bytes |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,074,176 bytes、sha256 `6C91D814DAD43CA3C6414C0DB9CDA768CE4BA3D240571E52C09DFB71A09DBCE8` |
+| 安裝方式 | NSIS `/S`，installer exit 0；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline` | **251 passed / 0 failed / 8 ignored** ✅（+8：6 個 `proxy::failover` 單元測試、2 個 e2e） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tauri build`（含 `tsc`） | 0 error ✅ |
+
+#### 實機驗證：真的用 Codex 打真實的 opencode-go
+
+```
+codex exec --skip-git-repo-check -m grok-4.7 "reply with exactly: GROKOK"   → 有回應（11,682 tokens）
+codex exec --skip-git-repo-check -m mimo-v2.6-pro "reply with exactly: MIMOOK" → MIMOOK（11,290 tokens）
+```
+
+**`grok-4.7` 是 responses-only 的模型**，在這之前它必定 `400 ModelProtocolUnsupported`；
+`mimo-v2.6-pro` 是 chat-only。兩個都能用 = 你要的「grok-4.7／gpt-6-luna／muse-spark／mimo
+都沒問題」在 **Codex 這一側**達成了（gpt-6-luna／muse-spark 與 grok-4.7 同一類，
+都是 responses-only）。這也是第一次看到 `app=codex` 被正確歸屬。
+
+網關自己的診斷留下決定性的一筆（`proxy_trace` id=109）：
+
+```
+lvl=warn app=codex model=grok-4.7 responses->openai-chat kind=responses_to_chat status=400 retry=0
+note=上游 400：此模型不支援本協議（換協議／換來源重試中）
+```
+
+也就是：**先照宣告協議翻成 chat 打過去 → 被上游拒絕 → 自動改打 responses 直通 → 成功**。
+而 `mimo-v2.6-pro` 那次**沒有任何 warn 列** —— 第一個候選就過，沒有多花一次上游呼叫。
+
+> Claude Code 那側沒有一起驗（也驗不出來）：Anthropic 入站只生得出 chat 請求體，
+> responses-only 模型仍然無解（見 §0.9.16 的限制說明）。
+
+### 9.16 前一次建置（2026-09-30 21:18，`mixed` 兩邊都通，已被 9.17 取代）
 
 | 項目 | 值 |
 |---|---|

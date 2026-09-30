@@ -130,6 +130,42 @@ pub(super) fn resolve_model_provider(
     )
     .ok()
 }
+/// 跨來源模型路由（**多候選**版）：其他啟用來源中登記了同一個模型的全部來源，
+/// 依來源優先級排序（同一來源只出現一次）。
+///
+/// `resolve_model_provider` 取第一名；這裡取整條佇列，讓 `failover.rs` 在第一名
+/// 失敗（連不上、5xx、協議不支援）時還能往下換 —— 這是 cc-switch「failover queue」
+/// 的精神。失敗換手只發生在**已經決定要轉發**之後，白名單與直連語意不變。
+pub(super) fn resolve_model_providers(
+    conn: &rusqlite::Connection,
+    model: &str,
+    exclude_pid: i64,
+) -> Vec<ReroutedProvider> {
+    let mut stmt = match conn.prepare(
+        "SELECT p.id, p.base_url, p.api_key, p.auth_scheme, p.api_format
+         FROM provider_models m JOIN providers p ON p.id = m.provider_id
+         WHERE m.enabled = 1 AND p.enabled = 1 AND p.id != ?2
+           AND (lower(m.display_name) = lower(?1) OR lower(m.actual_model) = lower(?1))
+         GROUP BY p.id
+         ORDER BY p.priority ASC, p.id ASC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let rows = stmt.query_map(rusqlite::params![model, exclude_pid], |r| {
+        Ok(ReroutedProvider {
+            id: r.get(0)?,
+            base_url: r.get(1)?,
+            api_key: r.get(2)?,
+            scheme: r.get(3)?,
+            format: r.get(4)?,
+        })
+    });
+    match rows {
+        Ok(it) => it.filter_map(Result::ok).collect(),
+        Err(_) => Vec::new(),
+    }
+}
 /// 翻譯決策（矩陣判定結果中，翻譯階段真正需要的部分）。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TransSpec {
