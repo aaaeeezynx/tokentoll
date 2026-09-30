@@ -776,6 +776,72 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.11 其他工具（Claude Code／OpenCode）在兩個方向切換的實測（2026-09-30）
+
+使用者要求：「確保使用其他工具在官方來源與指定來源間切換，不會出現同樣錯誤」。
+
+#### 一、切換機制本身：沒有 Codex 那種「寫出一個工具會拒收的設定」問題
+
+逐一檢查兩個工具被寫入的鍵，都是工具自己認識的：
+
+| 工具 | 接管寫入 | 原生還原移除 | 有沒有「保留清單」那種地雷 |
+|---|---|---|---|
+| Claude Code | `env.ANTHROPIC_BASE_URL`／`ANTHROPIC_AUTH_TOKEN`／模型映射 | 非官方 base URL、auth token、非 `claude-*` 的模型鍵 | **沒有**（Claude 忽略不認識的環境變數） |
+| OpenCode | `provider.tokengateway.*` | 網關 baseURL 與 `sk-local-` 金鑰 | **沒有**（provider id 可自訂） |
+
+#### 二、但實測發現**兩個工具在切換後都還有各自的問題**（都不是設定被寫壞）
+
+| 工具 | 方向 | 實測結果 |
+|---|---|---|
+| **Claude Code** | → **官方** | `claude -p "…"` → **`Not logged in · Please run /login`**（exit 1、1 秒）❌ |
+| Claude Code | → 指定（接管） | `claude -p` → `API Error: 400 ModelProtocolUnsupported` ❌ |
+| **OpenCode** | → 指定（接管） | `opencode run --model tokengateway/…` → 網關回「直連模式僅允許來源「NIM」登記的模型，`deepseek-ai/deepseek-v4-flash-0731` 不在其清單內，請求不會轉發」❌ |
+| OpenCode | → 官方（未接管） | `opencode run` → `Error: Anthropic API key is missing` ❌ |
+
+##### (a) Claude Code 的官方方向：就是使用者問的那種登入錯誤 —— **已修（改為明講）**
+
+根因不是 App 寫壞設定，而是**這台機器從來沒有 Anthropic 官方憑證**：
+`~/.claude/.credentials.json` 不存在、`.claude.json` 也不存在、沒有 `ANTHROPIC_API_KEY`。
+使用者一路都只透過網關用它，所以從來不需要官方登入。App 不能替他登入（帳號層級），
+但可以讓他不要撞上一個看起來像 bug 的錯誤。
+
+**修法**：`native.rs` 新增 `official_auth_hint(app, home, settings_text)`，還原
+（關閉）完成後追加一句警告，例如：
+
+> ⚠️ 這台機器找不到 Anthropic 官方登入憑證（…\.credentials.json 不存在、也沒有
+> ANTHROPIC_API_KEY）：切回官方後請先執行 `claude` 完成 /login，否則它會回
+> 「Not logged in」
+
+Codex 有 `~/.codex/auth.json`（ChatGPT 登入）所以不會觸發 —— 這正是 Codex 兩個
+方向都正常的原因。規則：憑證檔存在且非空、或設定裡有 API key，就不提醒。
+
+##### (b) Claude Code 的指定方向：模型本身無法路由 —— **待你決定**
+
+網關日誌 `#4423`：`app=claude model=muse-spark-1.3-contributor status=400 prov=None`
+—— 模型對不到任何 provider，所以請求根本沒出去。同一份設定裡另外兩個鍵
+（`ANTHROPIC_DEFAULT_{SONNET,HAIKU,OPUS}_MODEL = deepseek-v4.1-flash`）是**可以**
+路由的（同日 `app=claude deepseek-v4.1-flash st=403`，那次 403 是我用 python
+直打的 User-Agent 被 Cloudflare 擋，見下）。也就是說卡住的是
+`ANTHROPIC_MODEL` 這一個鍵。
+
+##### (c) OpenCode：接管沒有真的把它導到網關 —— **待你決定**
+
+接管只把 `provider.tokengateway.options.baseURL` 指到網關，**沒有選定 provider／
+模型**，所以 `opencode run` 仍然用它自己的預設 `claude-sonnet-4-6`（Anthropic）
+→ 沒有 Anthropic 金鑰 → 失敗。即使手動指定 `tokengateway/…`，設定裡那兩個模型
+（`deepseek-ai/deepseek-v4-flash-0731`、`moonshotai/kimi-k3`）也不在網關認可的
+NIM 清單內，請求照樣被擋。
+
+#### 三、順手釐清的一件事：Cloudflare 1010 不是網關壞了
+
+我用 python 直接打網關的 `/v1/messages`、`/v1/chat/completions` 時拿到
+`403 Access denied | opencode.ai used Cloudflare to restrict access`（error 1010）
+—— 那是**我的探測程式**的 User-Agent 被 opencode.ai 的 Cloudflare 規則擋掉，
+不是網關或 App 的問題：同一時間 Codex 走 `/v1/responses` 完全正常
+（`#4432 prov=22 deepseek-v4.1-flash st=200 2,379ms`）。用工具自己的 CLI 就沒有
+這個問題。
+
+
 ### 0.9.10 真實事故：從官方來源切回指定來源後「無法登入」（2026-09-30）
 
 使用者回報：把工具從官方來源切成指定來源後，還是會出現登入錯誤。
@@ -1634,7 +1700,42 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.11 最新建置（2026-09-30 13:50，修好「切回指定來源後無法登入」）—— **你目前安裝的就是這一個**
+### 9.12 最新建置（2026-09-30 14:25，切回官方前先講清楚憑證）—— **你目前安裝的就是這一個**
+
+使用者要求：「確保使用其他工具在官方來源與指定來源間切換，不會出現同樣錯誤」。
+實測發現 Claude Code 切回官方會直接回 `Not logged in · Please run /login`
+（這台機器沒有 Anthropic 官方憑證），於是加上官方憑證檢查與警告（§0.9.11）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 產物 14:25:53 |
+| 執行檔大小 | 9,043,968 bytes |
+| **安裝後執行檔 SHA-256** | **`8D4742D6B9506BD5CF7AFFD796BFDCC4EC333453E34AA902F3D8813C5FE98828`**（前一版 `20755898…`） |
+| 後端測試 | **236 passed / 0 failed / 8 ignored**（+1 條 `official_auth_hint_reports_missing_credentials`） |
+| clippy | **0 個警告** |
+| 檔案行數 | 全部 ≤ 400 行 |
+
+**實機驗證（關閉 Claude Code，讀卡片訊息）**：
+
+```
+C:\Users\luluna\.claude\settings.json｜還原自 settings.json.baseline-20260930-141556
+｜endpoint=api.anthropic.com（未覆寫，官方） model=claude-opus-5
+｜設定裡沒有可原生化的地方，維持原樣
+｜⚠️ 這台機器找不到 Anthropic 官方登入憑證（C:\Users\luluna\.claude\.credentials.json
+不存在、也沒有 ANTHROPIC_API_KEY）：切回官方後請先執行 `claude` 完成 /login，
+否則它會回「Not logged in」
+```
+
+驗證完已把 Claude Code 切回接管中（工具頁顯示 `本機工具（2/4 接管中）`，
+與測試前一致）。
+
+**這一輪改到的檔案**：`tools/native.rs`（`official_auth_hint` ＋ 接進還原訊息）、
+`tools/tests.rs`（再匯出）、`tools/tests/roundtrip.rs`（1 條測試）、
+文件 §0.9.11／§9.12。
+
+---
+
+### 9.11 前一次建置（2026-09-30 13:50，修好「切回指定來源後無法登入」，已被 9.12 取代）
 
 使用者回報「從官方來源切回指定來源後無法登入」。真因是設定檔被寫進 Codex 的
 內建 provider 段 `[model_providers.openai]`，Codex 因而拒絕載入整份

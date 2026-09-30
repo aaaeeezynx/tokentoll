@@ -41,6 +41,7 @@ pub(crate) use crate::tools::detect::detect_tools;
 // ---- native ----
 pub(crate) use crate::tools::native::restore_native_to_port;
 pub(crate) use crate::tools::native::to_native;
+pub(crate) use crate::tools::native::official_auth_hint;
 
 // ---- summary ----
 pub(crate) use crate::tools::summary::restore_summary;

@@ -270,6 +270,74 @@ fn opencode_native(text: &str, port: u16) -> NativeOutcome {
 }
 
 
+/// 回到官方來源之後，這個工具**能不能真的登入官方**？不能就回一句警告。
+///
+/// 2026-09-30 實測：Claude Code 在這台機器上從來沒有官方憑證
+/// （`~/.claude/.credentials.json` 不存在），所以「關閉網關」把它推回 Anthropic
+/// 官方之後，它立刻回：
+///
+/// ```text
+/// Not logged in · Please run /login
+/// ```
+///
+/// App 沒辦法替使用者登入（那是帳號層級的事），但可以在還原的結果訊息裡
+/// **先講清楚要去做什麼** —— 這樣同一句話就不再是一個看起來像 bug 的意外。
+/// 這正是 Codex 沒問題的原因：`~/.codex/auth.json` 有 ChatGPT 登入，
+/// 所以它回到官方之後直接可用（同日實測 exit 0）。
+///
+/// `settings_text` 是**原生化之後**的設定內容，用來判斷有沒有 API key 形式的憑證。
+pub(crate) fn official_auth_hint(app: &str, home: &Path, settings_text: &str) -> Option<String> {
+    let non_empty = |p: &Path| -> bool {
+        std::fs::read_to_string(p)
+            .map(|t| !t.trim().trim_matches(|c| c == '{' || c == '}').trim().is_empty())
+            .unwrap_or(false)
+    };
+    match app {
+        "claude" => {
+            let has_env_key = std::env::var("ANTHROPIC_API_KEY")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+            let has_cfg_key = settings_text.contains("ANTHROPIC_API_KEY");
+            let cred = home.join(".claude").join(".credentials.json");
+            if has_env_key || has_cfg_key || non_empty(&cred) {
+                return None;
+            }
+            Some(format!(
+                "這台機器找不到 Anthropic 官方登入憑證（{} 不存在、也沒有 ANTHROPIC_API_KEY）：\
+                 切回官方後請先執行 `claude` 完成 /login，否則它會回「Not logged in」",
+                cred.display()
+            ))
+        }
+        "codex" => {
+            let auth = home.join(".codex").join("auth.json");
+            if non_empty(&auth) {
+                return None;
+            }
+            Some(format!(
+                "找不到 Codex 官方登入憑證（{}）：切回官方後請先執行 `codex login`",
+                auth.display()
+            ))
+        }
+        "opencode" => {
+            let auth = home
+                .join(".local")
+                .join("share")
+                .join("opencode")
+                .join("auth.json");
+            if non_empty(&auth) {
+                return None;
+            }
+            Some(format!(
+                "找不到 OpenCode 自己的登入憑證（{}）：沒有網關接管時它會用它自己的預設模型，\
+                 請先 `opencode auth login`",
+                auth.display()
+            ))
+        }
+        _ => None,
+    }
+}
+
+
 /// 「關閉網關」= 忠實還原 + 原生來源化。
 ///
 /// 回傳值直接顯示在工具卡片下方，所以要講清楚「還原自哪份備份」與
@@ -312,6 +380,12 @@ pub fn restore_native_to_port(
     }
     if let Some(w) = outcome.warning {
         msg.push_str(&format!("｜⚠️ {w}"));
+    }
+    // 官方憑證檢查：講在最後，因為那是使用者接下來要做的動作（不是轉換失敗）。
+    if let Ok(home) = user_home() {
+        if let Some(h) = official_auth_hint(app, &home, &outcome.text) {
+            msg.push_str(&format!("｜⚠️ {h}"));
+        }
     }
     Ok(msg)
 }

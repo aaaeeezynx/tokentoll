@@ -9,6 +9,49 @@
 
 use super::*;
 
+/// 「切回官方之後能不能真的登入官方」——2026-09-30 實測：Claude Code 在這台
+/// 機器上沒有官方憑證，關閉後立刻回 `Not logged in · Please run /login`。
+/// App 不能替他登入，但必須先講。
+#[test]
+fn official_auth_hint_reports_missing_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+
+    // Claude：有憑證檔就不再提醒。
+    let cdir = home.join(".claude");
+    std::fs::create_dir_all(&cdir).unwrap();
+    std::fs::write(cdir.join(".credentials.json"), r#"{"claudeAiOauth":{"accessToken":"x"}}"#).unwrap();
+    assert!(official_auth_hint("claude", home, "{}").is_none());
+
+    // 設定裡有 API key 也算有憑證。
+    std::fs::remove_file(cdir.join(".credentials.json")).unwrap();
+    assert!(official_auth_hint("claude", home, r#"{"env":{"ANTHROPIC_API_KEY":"sk-a"}}"#).is_none());
+
+    // 兩者都沒有 → 必須提醒，而且要提到該做什麼。
+    let hint = official_auth_hint("claude", home, "{}").expect("沒有憑證時應該提醒");
+    assert!(hint.contains("Not logged in"), "{hint}");
+    assert!(hint.contains("/login"), "{hint}");
+
+    // Codex / OpenCode：同樣的規則，靠各自的 auth.json。
+    assert!(official_auth_hint("codex", home, "{}").is_some());
+    assert!(official_auth_hint("opencode", home, "{}").is_some());
+    let kdir = home.join(".codex");
+    std::fs::create_dir_all(&kdir).unwrap();
+    std::fs::write(kdir.join("auth.json"), r#"{"OPENAI_API_KEY":"x"}"#).unwrap();
+    assert!(official_auth_hint("codex", home, "{}").is_none());
+    let odir = home.join(".local").join("share").join("opencode");
+    std::fs::create_dir_all(&odir).unwrap();
+    std::fs::write(odir.join("auth.json"), r#"{"opencode":{}}"#).unwrap();
+    assert!(official_auth_hint("opencode", home, "{}").is_none());
+
+    // 空檔案不算憑證。
+    std::fs::write(kdir.join("auth.json"), "  \n").unwrap();
+    assert!(official_auth_hint("codex", home, "{}").is_some());
+
+    // 不支援的工具不亂講話。
+    assert!(official_auth_hint("cursor", home, "{}").is_none());
+}
+
 /// 真實事故 §0.9.10 的整合版鎖：官方（原生）與指定來源（接管）來回切換，
 /// 全程不得出現 Codex 的內建 provider 段。DB 別名刻意帶著 `openai`／`ollama`
 /// ——那是「用原生來源跑過之後，Codex 自己對話紀錄裡就會有的名字」，
