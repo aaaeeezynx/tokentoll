@@ -160,6 +160,22 @@ CREATE TABLE IF NOT EXISTS provider_stripped_fields (
     PRIMARY KEY (provider_id, field)
 );
 
+-- 學到的「上游協議」記憶（2026-09-30）。
+-- 同一個來源的模型可能**逐模型**只在一種端點上架：對 opencode-go 實測，
+-- grok-4.7 只在 /responses、mimo-v2.6 只在 /chat/completions、deepseek-* 兩邊都有。
+-- 網關先用宣告協議打；被上游回「此模型不支援本協議」就換另一種協議重送，
+-- 成功後把結果記在這裡，之後第一個就試它。
+-- `declared_format` 是鍵的一部分：使用者把來源協議改掉是**明確的設定變更**，
+-- 不可以被舊的學習結果蓋掉（否則會出現「改了設定卻沒生效」）。
+CREATE TABLE IF NOT EXISTS provider_model_protocol (
+    provider_id     INTEGER NOT NULL,
+    model           TEXT NOT NULL,
+    declared_format TEXT NOT NULL,
+    actual_format   TEXT NOT NULL,
+    learned_at      INTEGER NOT NULL,
+    PRIMARY KEY (provider_id, model, declared_format)
+);
+
 -- 請求追蹤。刻意「只在異常時寫入」（被剝離欄位、上游 4xx/5xx、body 解析
 -- 失敗、重試），正常請求不寫，避免日誌洪水。
 -- 隱私：body_sha256 是請求體指紋；body_hex 僅在 body 解析失敗時記錄

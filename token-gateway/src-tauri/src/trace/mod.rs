@@ -28,6 +28,7 @@
 mod record;
 mod store;
 mod stripped;
+mod protocol;
 
 // 保持原本 `crate::trace::*` 的取名路徑不變（部分條目僅測試使用，故允許未使用)。
 #[allow(unused_imports)]
@@ -36,6 +37,8 @@ pub use record::*;
 pub use store::*;
 #[allow(unused_imports)]
 pub use stripped::*;
+#[allow(unused_imports)]
+pub use protocol::*;
 
 use sha2::{Digest, Sha256};
 

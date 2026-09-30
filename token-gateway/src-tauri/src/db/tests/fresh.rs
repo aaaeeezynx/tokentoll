@@ -27,6 +27,7 @@ use super::*;
             "pricing_periods",
             "provider_models",
             "provider_stripped_fields",
+            "provider_model_protocol",
             "proxy_trace",
         ] {
             assert!(has_table(&c, t), "缺少表 {t}");

@@ -40,6 +40,19 @@ pub struct TraceSummary {
     pub with_body_hex: i64,
     pub stripped_fields: Vec<StrippedFieldStat>,
     pub top_status: Vec<StatusStat>,
+    /// 學到的「上游協議」記憶：哪個來源的哪個模型在哪種端點上架
+    /// （2026-09-30 的自動換手靠它，重啟後仍然有效）。
+    pub learned_protocols: Vec<LearnedProtocol>,
+}
+
+/// 一筆學到的上游協議（診斷頁顯示「網關記住了什麼」）。
+#[derive(Serialize)]
+pub struct LearnedProtocol {
+    pub provider_id: i64,
+    pub provider_name: String,
+    pub model: String,
+    pub declared_format: String,
+    pub actual_format: String,
 }
 
 /// 診斷總覽：一次查詢拿到所有計數，供診斷頁開頭顯示。
@@ -87,6 +100,20 @@ pub fn trace_summary(db: State<DbState>) -> Result<TraceSummary, String> {
         with_body_hex: count("SELECT COUNT(*) FROM proxy_trace WHERE body_hex <> ''"),
         stripped_fields,
         top_status,
+        learned_protocols: trace::protocol_summary(&conn)
+            .into_iter()
+            .map(
+                |(provider_id, provider_name, model, declared_format, actual_format)| {
+                    LearnedProtocol {
+                        provider_id,
+                        provider_name,
+                        model,
+                        declared_format,
+                        actual_format,
+                    }
+                },
+            )
+            .collect(),
     })
 }
 
@@ -166,8 +193,13 @@ pub fn provider_stripped_all(db: State<DbState>) -> Result<Vec<ProviderStripped>
 
 /// 清除某渠道的拒收記憶：下次請求會重新探測上游能力。
 /// 用於「改了渠道設定後想重測」或「誤剝離導致功能缺失」時。
+///
+/// 2026-09-30 起也一起清掉「學到的上游協議」：兩者都是同一種東西
+/// （網關對這個渠道的上游能力記憶），分開清只會讓使用者困惑。
 #[tauri::command]
 pub fn provider_stripped_clear(db: State<DbState>, provider_id: i64) -> Result<usize, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    trace::clear_stripped(&conn, provider_id)
+    let n = trace::clear_stripped(&conn, provider_id)?;
+    let _ = trace::clear_protocol(&conn, provider_id);
+    Ok(n)
 }

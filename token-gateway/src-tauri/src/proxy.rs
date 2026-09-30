@@ -199,7 +199,7 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
         &authed.provider_api_format,
         in_fmt,
         learned_format(
-            &ctx.db_path.to_string_lossy(),
+            ctx.db_path.as_path(),
             authed.provider_id,
             &model_raw,
             &authed.provider_api_format,
@@ -286,7 +286,7 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
             SendOutcome::Ok(r) => {
                 // 記住「這個來源的這個模型用這個協議會通」，下次第一個就試它。
                 learn_format(
-                    &ctx.db_path.to_string_lossy(),
+                    ctx.db_path.as_path(),
                     at.provider_id,
                     &model_raw,
                     &authed.provider_api_format,

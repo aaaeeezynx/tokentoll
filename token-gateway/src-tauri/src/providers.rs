@@ -191,6 +191,9 @@ pub fn provider_delete(app: AppHandle, db: State<DbState>, id: i64) -> Result<()
     //   清掉純粹是不留死資料。）
     conn.execute("DELETE FROM provider_stripped_fields WHERE provider_id=?1", [id])
         .map_err(|e| e.to_string())?;
+    // 同樣清掉學到的「上游協議」記憶（哪個模型在哪個端點上架）。
+    conn.execute("DELETE FROM provider_model_protocol WHERE provider_id=?1", [id])
+        .map_err(|e| e.to_string())?;
     drop(conn);
     // 順手清孤兒目錄（config 若仍指向它，Codex 回退內聯 models；下次接管即再生）。
     if let Ok(data) = app.path().app_data_dir() {

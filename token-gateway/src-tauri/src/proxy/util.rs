@@ -17,7 +17,11 @@ pub(crate) fn check_port(port: u16) -> Result<(), String> {
         Err(e) => Err(format!("連接埠 {port} 不可用：{e}")),
     }
 }
-pub(super) fn open_conn(db_path: &PathBuf) -> Result<rusqlite::Connection, String> {
+/// 開一條短命連線（給「觀測／記憶」這類不能借用主連線的場景用）。
+///
+/// 收 `&Path` 而不是 `&PathBuf`：呼叫端手上常常只有路徑的一部分
+/// （`Path::new(s)`、`dir.path().join(..)`），寬一點才不必到處 `to_path_buf()`。
+pub(super) fn open_conn(db_path: &std::path::Path) -> Result<rusqlite::Connection, String> {
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
     conn.execute_batch("PRAGMA busy_timeout=5000;")
         .map_err(|e| e.to_string())?;

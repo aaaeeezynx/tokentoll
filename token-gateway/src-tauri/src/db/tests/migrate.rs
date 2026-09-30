@@ -241,6 +241,7 @@ use rusqlite::Connection;
                 "pricing_periods",
                 "provider_models",
                 "provider_stripped_fields",
+                "provider_model_protocol",
                 "proxy_trace",
             ] {
                 assert!(has_table(&c, t), "v{target} 升級後缺少表 {t}");

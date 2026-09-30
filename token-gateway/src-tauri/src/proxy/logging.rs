@@ -227,7 +227,7 @@ pub(super) fn reject(
 /// `keys.rs` 裡的 `key_prefix`（首 12 字＋末 4 字）只用於 UI 顯示，
 /// 不會流到這裡。
 pub(super) fn log_reject(
-    db_path: &PathBuf,
+    db_path: &std::path::Path,
     app: &str,
     model_raw: &str,
     status: u16,

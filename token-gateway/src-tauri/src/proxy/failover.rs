@@ -9,15 +9,15 @@
 //! 這裡把「候選（來源, 協議）」排成一條佇列（抄 cc-switch 的 failover queue 精神），
 //! 上游回協議不支援、連線失敗或 5xx 就換下一個；**並且補上 cc-switch 沒做的那一格**：
 //! 同一個來源也換協議重試（Responses 入站時 chat ↔ responses 都生得出請求體）。
-//! 成功後把「這個來源的這個模型該用哪個協議」記在記憶體，下次第一個就試它。
+//! 成功後把「這個來源的這個模型該用哪個協議」**落庫**（`provider_model_protocol`），
+//! 下次第一個就試它 —— 落庫的理由與 `provider_stripped_fields` 當年一樣：
+//! 只放記憶體的話，網關每次重啟都要為每個這種模型重踩一次 400。
 //!
 //! 已知限制（照實寫在文件裡）：Anthropic 入站的請求**只生得出 chat 請求體**
 //! （`Anthropic → Responses` 沒有翻譯器，矩陣直接回 `E_ANTHROPIC_UNSUPPORTED`），
 //! 所以 responses-only 的模型在 Claude Code 永遠換不過去。
 
 use super::*;
-use std::collections::HashMap;
-use std::sync::Mutex;
 
 /// 一次上游嘗試：用哪個來源、哪個協議。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,78 +35,41 @@ impl Attempt {
     }
 }
 
-/// 學到的協議：`(db_path, provider_id, model, 宣告協議) -> 實際會通的協議`。
+/// 學到的協議：落庫在 `provider_model_protocol`（見 `crate::trace::protocol`）。
 ///
-/// 兩個維度都是必要的：
-/// - **`db_path`**：`provider_id` 只在單一資料庫內唯一（測試各自開暫存庫，使用者
-///   重置後也會拿到同樣的 id）。少了它，A 資料庫學到的會被 B 資料庫沿用。
+/// **為什麼不只放記憶體**：網關每次重啟就會忘掉，於是每個「宣告協議與實際不符」的
+/// 模型都要多付一次失敗探測（一次 400）。這與 `provider_stripped_fields` 當年的
+/// 問題一模一樣，所以用同一種做法（短命連線、錯誤一律吞掉）。
+///
+/// 兩個維度是必要的：
+/// - **資料庫**：由 `db_path` 決定連到哪個庫，`provider_id` 只在單一資料庫內唯一。
 /// - **宣告協議**：使用者把來源協議從 `openai-chat` 改成 `openai-responses` 是
-///   **明確的設定變更**，不可以被舊的學習結果蓋掉（那會讓「改了設定卻沒生效」）。
-///   所以學到的值只在「宣告協議沒變」時才拿來排第一。
+///   **明確的設定變更**，不可以被舊的學習結果蓋掉（那會讓「改了設定卻沒生效」）——
+///   它是表的主鍵之一。
 ///
-/// 只放記憶體（v1）：網關重啟後每個模型要多付一次失敗探測，但不會有跨版本的
-/// 殘留錯資料。之後若要持久化，再加一張表並在啟動時載入即可。
-/// 學習快取的鍵與表（見下方 `LEARNED` 的說明）。
-type LearnKey = (String, i64, String, String);
-type Learned = HashMap<LearnKey, String>;
-
-static LEARNED: Mutex<Option<Learned>> = Mutex::new(None);
-
-fn with_learned<T>(f: impl FnOnce(&mut Learned) -> T) -> T {
-    let mut guard = LEARNED.lock().unwrap_or_else(|e| e.into_inner());
-    let map = guard.get_or_insert_with(HashMap::new);
-    f(map)
-}
-
-/// 記住「這個資料庫的這個來源、這個模型，在宣告協議 X 之下用 Y 會通」。
+/// 記住「這個來源的這個模型，在宣告協議 X 之下用 Y 會通」。
 pub(super) fn learn_format(
-    db_path: &str,
+    db_path: &std::path::Path,
     provider_id: i64,
     model: &str,
     declared_fmt: &str,
     used_fmt: &str,
 ) {
-    if model.trim().is_empty() || used_fmt.trim().is_empty() {
+    let Ok(conn) = open_conn(db_path) else {
         return;
-    }
-    with_learned(|m| {
-        m.insert(
-            (
-                db_path.to_string(),
-                provider_id,
-                model.to_lowercase(),
-                declared_fmt.to_lowercase(),
-            ),
-            used_fmt.to_string(),
-        );
-    });
+    };
+    let _ = trace::remember_protocol(&conn, provider_id, model, declared_fmt, used_fmt);
 }
 
 /// 上次學到的協議（沒有就 `None`）。**只在宣告協議相同時才回傳。**
 pub(super) fn learned_format(
-    db_path: &str,
+    db_path: &std::path::Path,
     provider_id: i64,
     model: &str,
     declared_fmt: &str,
 ) -> Option<String> {
-    if model.trim().is_empty() {
-        return None;
-    }
-    with_learned(|m| {
-        m.get(&(
-            db_path.to_string(),
-            provider_id,
-            model.to_lowercase(),
-            declared_fmt.to_lowercase(),
-        ))
-        .cloned()
-    })
-}
-
-/// 測試用：清空學習快取（避免測試之間互相影響）。
-#[cfg(test)]
-pub(super) fn forget_all() {
-    with_learned(|m| m.clear());
+    let conn = open_conn(db_path).ok()?;
+    trace::load_protocol(&conn, provider_id, model, declared_fmt)
 }
 
 /// 這個協議「另一邊」有哪些可換的具體協議。
@@ -259,24 +222,60 @@ mod tests {
     }
 
     #[test]
-    fn learn_format_is_scoped_by_db_and_declared_format() {
-        forget_all();
-        assert!(learned_format("t.db", 1, "m", "openai-chat").is_none());
-        learn_format("t.db", 1, "M", "openai-chat", "openai-responses");
+    fn learned_protocol_persists_per_db_and_declared_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.db");
+        let b = dir.path().join("b.db");
+        crate::db::open_and_ensure(&a).unwrap();
+        crate::db::open_and_ensure(&b).unwrap();
+        let (pa, pb) = (a.as_path(), b.as_path());
+
+        assert!(learned_format(pa, 1, "m", "openai-chat").is_none());
+        learn_format(pa, 1, "M", "openai-chat", "openai-responses");
         // 大小寫不敏感
         assert_eq!(
-            learned_format("t.db", 1, "m", "openai-chat").as_deref(),
+            learned_format(pa, 1, "m", "openai-chat").as_deref(),
             Some("openai-responses")
         );
-        // 別的來源、別的資料庫都不可以看到
-        assert!(learned_format("t.db", 2, "m", "openai-chat").is_none());
-        assert!(learned_format("other.db", 1, "m", "openai-chat").is_none());
+        // 別的來源、別的資料庫都看不到
+        assert!(learned_format(pa, 2, "m", "openai-chat").is_none());
+        assert!(learned_format(pb, 1, "m", "openai-chat").is_none());
         // ★ 宣告協議改了就是明確的設定變更 → 舊的學習結果不可以蓋掉它
-        assert!(learned_format("t.db", 1, "m", "openai-responses").is_none());
-        // 空字串不進快取（沒有模型名時無從學習）
-        learn_format("t.db", 1, "", "openai-chat", "openai-chat");
-        assert!(learned_format("t.db", 1, "", "openai-chat").is_none());
-        forget_all();
-        assert!(learned_format("t.db", 1, "m", "openai-chat").is_none());
+        assert!(learned_format(pa, 1, "m", "openai-responses").is_none());
+        // 同一個鍵再學一次會更新（後蓋前）
+        learn_format(pa, 1, "m", "openai-chat", "mixed");
+        assert_eq!(
+            learned_format(pa, 1, "m", "openai-chat").as_deref(),
+            Some("mixed")
+        );
+        // 空模型名／空協議不進庫
+        learn_format(pa, 1, "  ", "openai-chat", "openai-chat");
+        assert!(learned_format(pa, 1, "  ", "openai-chat").is_none());
+    }
+
+    /// 落庫的證據：新開一個連線（模擬網關重啟）仍讀得到。
+    #[test]
+    fn learned_protocol_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("r.db");
+        crate::db::open_and_ensure(&p).unwrap();
+        let ps = p.as_path();
+        learn_format(ps, 7, "grok-x", "openai-chat", "openai-responses");
+        // 直接查表，確認是真的寫進 DB 而不是行程記憶體
+        let conn = crate::db::open_and_ensure(&p).unwrap();
+        let got: String = conn
+            .query_row(
+                "SELECT actual_format FROM provider_model_protocol
+                 WHERE provider_id=7 AND model='grok-x' AND declared_format='openai-chat'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(got, "openai-responses");
+        drop(conn);
+        assert_eq!(
+            learned_format(ps, 7, "grok-x", "openai-chat").as_deref(),
+            Some("openai-responses")
+        );
     }
 }

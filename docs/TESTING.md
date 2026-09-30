@@ -776,6 +776,69 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.18 Claude Code 的「模型識別」策略：cc-switch 的別名法 vs 我們的真實名稱法（2026-09-30）
+
+objective 第 3 項要的取捨，寫清楚。
+
+**問題**：Claude Code 只認識 Claude 家族的模型。當我們把來源模型（`deepseek-v4.1-flash`）
+寫進 `ANTHROPIC_MODEL` 時，它會：
+
+1. 在 stderr 抱怨 `"deepseek-v4.1-flash" isn't described by this version's model catalog`，
+2. **只假設 200k 上下文**（`auto-compact keeps this session within 200k tokens`），
+   於是 1M 級的來源模型會被提早自動壓縮。
+
+**cc-switch 的做法（讀它的 README/FAQ）**：本機路由開啟時，寫進 Claude Code 設定的是
+**固定的 Claude 別名**（例如 `claude-sonnet-5`），`/model` 選單仍顯示真實模型名，
+真正的來源位址／Key／模型全留在 cc-switch 裡；請求日誌能看到「requested model → actual model」。
+也就是：**讓 Claude Code 相信自己正在用一個它認識的 Claude 模型**。
+
+**我們的做法**：寫**真實的來源模型名**，另外在知道模型真實視窗時補
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS`（§0.9.14）。
+
+| | cc-switch 別名法 | 真實名稱法（我們） |
+|---|---|---|
+| Claude Code 的內建模型檔 | ✅ 用得到（含上下文視窗、可用功能） | ❌ 未知模型，只假設 200k |
+| 那個 200k 假設 | ✅ 用別名的真實視窗（但**別名與來源模型不一致時就是說謊**：宣稱 1M、實際 200k 會靜默超長） | ⚠️ 要靠 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 修正，而它需要 DB 有 `context_window` |
+| 用量歸屬／除錯 | ❌ Claude Code 自己的紀錄寫的是別名（要對照路由層才知道真實模型） | ✅ 請求、日誌、用量頁看到的都是真實模型 |
+| 需要什麼基礎設施 | 路由層的 alias→real 對映 | 已在做（真實名稱直通） |
+| 現況 | 我們**已經有能力**支援：`provider_models` 的 `display_name`（別名）→ `actual_model`（真實），網關本來就會把顯示名改寫成實際名 | 已實作，但**休眠**：這台機器 38 筆模型的 `context_window` 全是 NULL |
+
+**結論（本輪的選擇）**：維持真實名稱法 —— 這個 App 的整個價值就是「用量要真實」，
+用別名會讓 Claude Code 自己的紀錄與用量歸屬都變成假名。要讓真實名稱法真正生效，
+缺的只是**把模型的 `context_window` 填起來**（在模型編輯裡填，或之後從 models.dev 匯入）；
+在那之前 200k 的假設仍然存在。
+
+**兩者可以並存**：若某個客戶端真的對未知模型名強硬拒絕，則在該來源的模型上填一個
+Claude 別名當 `display_name`（實際模型不變）即可走別名法；這是既有機制，不必改程式。
+
+---
+
+### 0.9.17 學到的協議改為落庫（schema v9）＋診斷頁看得見（2026-09-30）
+
+§0.9.16 的第一版把「這個來源的這個模型該用哪個協議」只放在**行程記憶體**，
+於是網關每次重啟，每個「宣告協議與實際不符」的模型都要**重踩一次 400**。
+這與 `provider_stripped_fields` 當年的問題**一模一樣**（那句註解就寫在
+`proxy/retry.rs` 裡），所以用同一種做法解決：
+
+- 新表 `provider_model_protocol (provider_id, model, declared_format, actual_format,
+  learned_at)`，主鍵是前三欄 —— `declared_format` 進主鍵是刻意的：使用者把來源協議
+  從 `openai-chat` 改成 `openai-responses` 是**明確的設定變更**，不可以被舊的學習
+  結果蓋掉（這是 §0.9.16 被 B6 回歸測試逼出來的那條規則，現在由 schema 保證）。
+- `SCHEMA_VERSION` 8 → 9（純新增表，走 `CREATE TABLE IF NOT EXISTS`，無需 ALTER）。
+- 讀寫都在 `trace/protocol.rs`（`remember_protocol` / `load_protocol` /
+  `clear_protocol` / `protocol_summary`），與 `stripped.rs` 同一種風格：
+  短命連線、錯誤一律吞掉（觀測設施不得影響請求）。
+- 刪除來源時一併清掉（`providers.rs`），`provider_stripped_clear`（UI 的
+  「重設上游能力記憶」）也一起清 —— 兩者都是「網關對這個渠道的上游能力記憶」。
+- **診斷頁看得見**：`trace_summary` 多了 `learned_protocols` 欄位
+  （來源／模型／宣告協議／實際協議），前端之後可直接渲染；現在先用 API 驗證。
+
+新增測試：`learned_protocol_persists_per_db_and_declared_format`、
+`learned_protocol_survives_reopen`（後者直接 `SELECT` 新表，證明是真的落庫而不是行程記憶），
+`db::tests::fresh`／`migrate` 的核心表清單也補上新表名。
+
+---
+
 ### 0.9.16 來源／協議自動換手：抄 cc-switch 的 failover，補它沒做的協議回退（2026-09-30）
 
 你的裁示是「照抄，並且補他沒做的」。參考 [cc-switch](https://github.com/farion1231/cc-switch)
@@ -2006,7 +2069,62 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.17 最新建置（2026-09-30 21:57，來源／協議自動換手）—— **你目前安裝的就是這一個**
+### 9.18 最新建置（2026-09-30 22:09，學到的協議落庫 schema v9）—— **你目前安裝的就是這一個**
+
+上一版（9.17）的換手邏輯只在**記憶體**裡記住「這個模型的真實協議」：同一個行程內有效，
+但**網關一重啟就忘光**，於是每次重開機／重啟 App 後的第一個 requests-only 模型，
+都還是得先白花一次 400 才知道要換協議。這一版把它**寫進 `app.db`（schema v9）**。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-30 22:09:22 |
+| `target\release\token-gateway.exe` | 9,078,784 bytes、sha256 `AFF5E6C6C551FBE4D4C71EE60E4E6682E9D45D86B0AE5A1561B5500FCA4C5A8D` |
+| NSIS 安裝檔 | 3,867,973 bytes |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,078,784 bytes、sha256 `A4F71DB39553DCF923C5D72407C54F2BA561548B4ABAA684AB73933A76EA0C52` |
+| 安裝方式 | NSIS `/S`，installer exit 0；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **252 passed / 0 failed / 8 ignored** ✅（+1：`learned_protocol_survives_reopen`） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tauri build`（含 `tsc`） | 0 error ✅ |
+| 檔案行數 | 全部 ≤ 400 行 ✅（最大 `proxy.rs` 322） |
+
+#### 這一版新增的東西
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/db/schema.rs` | **新增表** `provider_model_protocol(provider_id, model, declared_format, actual_format, learned_at, PK(provider_id, model, declared_format))` |
+| `src-tauri/src/db/mod.rs` | `SCHEMA_VERSION` 8 → **9**（舊庫自動補表，不影響既有資料） |
+| `src-tauri/src/trace/protocol.rs` | **新增**：`remember_protocol`／`load_protocol`／`clear_protocol`／`protocol_summary` |
+| `src-tauri/src/proxy/failover.rs` | `learn_format`／`learned_format` 由記憶體改走 DB |
+| `src-tauri/src/commands/diagnostics.rs` | 診斷多回 `learned_protocols`（供應商名稱＋模型＋宣告／實際協議） |
+| `src-tauri/src/providers.rs` | 刪供應商時一併清掉它的協議學習列（不留孤兒） |
+
+> `declared_format` 放進主鍵是**刻意的**：學習結果只在「供應商宣告的協議沒變」時才優先，
+> 使用者若手動改了該供應商的 `api_format`，舊的學習不會蓋掉新設定（有回歸測試盯著）。
+
+#### 實機驗證：重啟之後真的不再重複試錯
+
+這一輪用「網關自己留下的 `proxy_trace`」當證據，跑三次、中間重啟一次 App：
+
+| 步驟 | 動作 | 觀測 |
+|---|---|---|
+| A | 裝完新版後第一次 `codex exec -m grok-4.7` | 回應 `A-OK`；**出現 1 筆 warn**（`trace id=110`，`declared=openai-chat actual=openai-responses`） |
+| B | 同一個行程再跑一次（`B-OK`） | 沒有新增任何列 ✅ |
+| — | **完整關閉 App 再啟動**（模擬重開機） | — |
+| C | 重啟後再跑一次（`C-OK`） | **`max trace id` 仍是 110、協議不符的 warn 仍只有 2 筆** ✅✅ |
+
+C 這一步就是重點：如果是記憶體快取，重啟後必定會再冒出第 111 筆。它沒有 ——
+代表 `grok-4.7 → /responses` 這件事已經**從 DB 讀回來**，重啟後第一次呼叫就直達正解，
+不再浪費一次必定失敗的 400。DB 內容（`schema version: 9`）：
+
+```
+table present: True
+learned protocols: 1   pid=22 model=grok-4.7 declared=openai-chat actual=openai-responses
+```
+
+### 9.17 前一次建置（2026-09-30 21:57，來源／協議自動換手，已被 9.18 取代）
 
 | 項目 | 值 |
 |---|---|

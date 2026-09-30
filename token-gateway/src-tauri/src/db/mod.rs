@@ -29,7 +29,9 @@ pub(crate) use settings::*;
 /// 當前 schema 版本。後續升級時遞增，並補充 ALTER 遷移。
 /// v8（Phase 1）：新增 provider_stripped_fields / proxy_trace（純新增表，
 /// 走 SCHEMA 的 CREATE TABLE IF NOT EXISTS，無需 ALTER）。
-pub const SCHEMA_VERSION: i32 = 8;
+/// v9（2026-09-30）：新增 provider_model_protocol（學到的上游協議記憶；
+/// 同樣是純新增表，無需 ALTER）。
+pub const SCHEMA_VERSION: i32 = 9;
 
 /// 網關預設連接埠（C 方案：可在設定中修改；歷史預設 15721 與 cc-switch 衝突）。
 pub const DEFAULT_GATEWAY_PORT: u16 = 15722;
