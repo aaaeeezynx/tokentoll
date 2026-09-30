@@ -56,6 +56,7 @@ mod pipeline;
 mod reqctx;
 mod failover;
 mod health;
+mod queue;
 
 // 子模組共用匯入：各子模組開頭的 `use super::*;` 會取得這裡的綁定，
 // 因此某個模組要用兄弟模組的項目時，只要在這裡補一行即可。
@@ -69,7 +70,7 @@ use {
         TransSpec,
     },
     failover::{learn_format, learned_format, plan_attempts, Attempt},
-    health::{order_by_health, HealthRegistry},
+    health::order_by_health,
     logging::{err_json, extract_usage, insert_log, log_reject, reject, SseAcc},
     pipeline::{
         prepare_request, prelude, request_meta, resolve_model, upstream_for, PrepareInput, Prepared,
@@ -96,7 +97,12 @@ use {
 pub(crate) use logging::{recent_logs, LogRow};
 pub(crate) use util::{check_port, normalize_model};
 // 診斷命令要讀「來源健康狀態」（`commands/diagnostics.rs` 的 `source_health`）。
-pub(crate) use health::for_db as health_registry;
+// `pub use`：型別要與命令函式同樣可達，否則 `private_interfaces` 會警告。
+pub use health::{for_db as health_registry, HealthRegistry};
+// 故障轉移佇列的唯讀預覽（`commands/diagnostics.rs` 的 `failover_queue`／`failover_models`）。
+// 用 `pub use`（不是 pub(crate)）：命令函式是 `pub`，型別必須同樣可達，
+// 否則會觸發 `private_interfaces` 警告。
+pub use queue::{queue_models, queue_rows, QueueModel, QueueRow};
 
 mod matrix;
 

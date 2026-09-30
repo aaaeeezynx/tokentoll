@@ -1,6 +1,7 @@
 import type { Provider } from "../../lib/api";
 import { Icon } from "../icons";
 import { Segmented } from "../Segmented";
+import { ConnectivityCheck } from "./ConnectivityCheck";
 import { ChannelPricing, ModelPanel } from "./ModelCatalog";
 
 /**
@@ -51,6 +52,11 @@ export function SourceDetail(props: {
             <span>使用模型</span>
           </div>
           <ModelPanel key={sel.id} provider={sel} />
+          {/* 連線檢查（P1.5）：只測位址可達性，不送模型請求 */}
+          <ConnectivityCheck
+            key={`chk-${sel.id}`}
+            baseUrl={sel.base_url}
+          />
         </>
       ) : (
         <ChannelPricing

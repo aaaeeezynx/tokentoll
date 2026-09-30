@@ -776,6 +776,97 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.21 連線檢查、故障轉移佇列、系統匣切換（P1.4–P1.6，2026-10-01）
+
+CC Switch 對齊計畫的 P1 後半。三個功能各自的關鍵決定如下。
+
+#### P1.5 連線檢查（`provider_check.rs`）—— 語意刻意與 CC Switch 一致
+
+**只檢查位址可不可達，不送模型請求、不帶金鑰。** 所以 401／403／404 都算「可達」：
+它們證明主機與路徑活著，只是沒有金鑰或那個路徑本來就沒有端點。訊息文字會把這件事
+講清楚（「檢查過了不等於一定能用」），因為 CC Switch 的 FAQ 也特別提醒同一件事 ——
+它的「連線檢查」在 3.16.3 之後也改成只測位址。
+
+- `normalize_url`：沒寫 scheme 補 `https`、`localhost`／`127.0.0.1` 補 `http`、去尾斜線；
+  空字串／`ftp://`／只有 scheme 都回 `None`（UI 顯示「請先填寫有效的上游地址」）。
+- `classify`：狀態碼 → 人話。401 標「需要金鑰」、500 系列標「伺服器端問題」
+  （避免使用者把「可達」誤讀成「一切正常」）。
+- 逾時比網關短（連線 6 秒／整體 10 秒）：使用者在等一個按鈕，不是在等一次推理。
+- 用 GET 而不是 HEAD：有些上游對 HEAD 回 405 或直接斷線。
+- **位置與 CC Switch 不同**：它放在來源卡片上，我們放在右側詳情面板（那裡本來就是
+  這個來源的操作區），並在測試裡註明這個差異。
+
+#### P1.4 故障轉移佇列（`proxy/queue.rs`）—— 不自己排序
+
+這個面板**不重寫任何排序邏輯**：它呼叫後端的 `failover_queue`，而那個命令用的就是
+`proxy_handler` 換手時的**同一個查詢**（`resolve_model_providers`）＋同一條健康排序
+（`order_by_health`）。一旦有第二份排序邏輯，畫面就會開始說謊。
+
+- 以**模型**為中心：挑一個模型 → 看它在哪些來源上架、順序如何。
+- 每列顯示：順序、來源名、宣告協議、**學到的協議**（`provider_model_protocol`）、
+  冷卻狀態（斷路器）、模型數。
+- 冷卻中的來源在畫面上也被排到最後 —— 與請求路徑的行為一致。
+- 調整順序的方式就是**拖曳來源清單**（順序＝來源清單順序），面板只負責顯示；
+  「每個工具各自一條佇列」仍然只有全域一條（§1 的 B4 保持 ⚠️）。
+
+#### P1.6 系統匣切換（`tray.rs` + `TraySwitchListener.tsx`）—— 職責切分是重點
+
+托盤只做兩件事：**決定選單長相**（哪些工具、各有哪些可用來源）與**把點擊變成事件**
+（`emit("tray-switch", {app, provider_id})`）。真正寫入設定的動作**不在 Rust 做**，
+而是由前端既有的流程處理。
+
+為什麼：切換牽涉「上次用哪把 Key、那個模型還在不在」這些規則，而那份規則原本就寫在
+前端的 `resolveSelectionReq`。在 Rust 再寫一份＝製造第二個真相來源。所以這一輪把那段
+規則抽成 `switchReq.ts::buildSelectionReq`（**唯一一份實作**），
+`useToolSwitch` 與托盤兩邊都呼叫它。
+
+- 選單只列**可用**的來源：啟用中、且至少有一個啟用模型。列了卻點不動比不列更糟。
+- 選單在啟動時建立，**每 30 秒重建一次**（App 裡新增／改名／刪除來源不必重啟）。
+- 項目 id `sw:<app>:<provider_id>`；解析器**拒絕**不可接管的工具（hermes／cursor…）、
+  非數字、`0`／負數與其他任何字串（免得選單被動手腳後把設定寫到不存在的工具）。
+- 接收端掛在**全域**（`App.tsx`）而不是來源頁：使用者可能在「用量」頁就把托盤切了，
+  掛在來源頁會讓那個動作靜默失敗。回饋用一個小 toast（這個 App 原本沒有 toast，
+  但寫設定這種事不該靜默發生）。
+- 事件名稱與 payload 鍵名是**跨語言契約**（Rust `emit` ↔ TS `listen`），用常數
+  `EVENT_SWITCH` ＋ 測試釘住；打錯字只會讓「托盤點了沒反應」且沒有任何錯誤訊息。
+
+#### 測試（20 個新測試）
+
+- `provider_check`（5）：URL 正規化（補 scheme／localhost 用 http／去尾斜線／拒絕垃圾）、
+  狀態碼分類（401／403／404 都算可達、500 要說出是上游問題、0 說「連不上」）、
+  **真的對本機伺服器打一次**（可達、200、有延遲）、**真的對死埠打一次**（不可達）、
+  命令對空字串給得出人話。
+- `proxy::queue`（6）：順序＝來源 priority、停用的來源與模型都不進候選、
+  冷卻中的排最後、**學到的協議顯示得出來**、模型清單只列啟用來源的模型並附來源數。
+- `tray`（5）：只列三個可接管工具、不可用的來源（停用／沒模型／模型全停用）被隱藏、
+  順序＝來源 priority、項目 id 來回轉換與**垃圾輸入全部拒絕**、事件契約（名稱＋鍵名）。
+
+#### 這一段**沒能自動化驗證**的一件事（誠實記錄）
+
+**「用滑鼠點托盤圖示」這一步在這台機器上無法自動化**，原因是三個限制疊在一起：
+這台機器的**主工作列是自動隱藏的**（`Shell_TrayWnd` 的 rect 是 `T=1078 B=1128`，
+螢幕只到 1080，等於只有 2px 在畫面上）；Windows 11 **不把通知區域的圖示曝露給 UIA**
+（`ToolbarWindow32` 的 children 數是 0）；而本機模型**不能讀圖**、OCR 又讀不出純圖示。
+
+實際做過的嘗試與結果：用 tooltip 掃描**成功定位**到我們的圖示（hover x=1420–1510 時
+OCR 到 `Token Gateway`），但後續的點擊會先被 Windows 的工作列右鍵選單接走
+（讀到的是「工作列設定／工作管理員」那個選單）。因此：
+
+- **有驗到的**：選單內容與 id 對應（單元測試）、事件契約（單元測試）、
+  以及**接收端整條路徑**（`buildSelectionReq` → 寫入 → 訊息）—— 用真實 UI 把 Codex
+  關掉再開，畫面回了「已接管：deepseek-v4.1-flash @ opencode-go（直連上游 Key 已寫入
+  配置文件，僅本機可讀）」，之後 `codex exec -m grok-4.7` 回 `CX-OK`、
+  `claude -p` 回 `CC-OK`。
+- **沒驗到的**：`tray.rs` 那 3 行 `emit` 在真實點擊下會不會被觸發。
+- **失敗模式是良性的**：若事件名或 payload 不符，接收端只會拋錯並顯示紅色 toast，
+  不會寫壞任何設定。
+
+**人工檢查（10 秒）**：在工作列（先把滑鼠移到螢幕最下方讓它彈出來）找到
+「Token Gateway」圖示 → 按右鍵 → 應該看到「顯示主視窗 / 切換Claude Code / 切換Codex /
+切換OpenCode / 退出」；點「切換Codex → opencode-go」後，畫面右下角會出現切換成功的提示。
+
+---
+
 ### 0.9.20 來源預設集、複製、匯入／匯出（P1：來源管理對齊 CC Switch）（2026-09-30）
 
 使用者裁示「只要工具功能/體驗完全對齊 CC Switch 即可」，缺口清單在
@@ -2226,7 +2317,59 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.20 最新建置（2026-10-01 00:54，P1：來源預設集／複製／匯入匯出 ＋ 孤兒列清理）—— **你目前安裝的就是這一個**
+### 9.21 最新建置（2026-10-01 01:57，P1.4–P1.6：連線檢查／故障轉移佇列／系統匣切換）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P1 的後半（設計與取捨見 §0.9.21）。P1 到此完成。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 01:57:39 |
+| `target\release\token-gateway.exe` | 9,273,856 bytes、sha256 `604FCB61B3194A199D1F320D8792DF6466137BDB671674DB1DAE674ACDFFB1BB` |
+| NSIS 安裝檔 | 3,934,267 bytes、sha256 `7DD5E2937BB3BE9D0B99975662F889507E33AF1C37CE828A25579F9D73E79FF1` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,273,856 bytes、sha256 `0F578D82228CBAF04839F9D4FD51E36253B50B9CD1EEC4B6B5D2098BD319E9A2` |
+| 安裝方式 | NSIS `/S`；裝完先砍掉自動啟動的行程再手動啟動 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **290 passed / 0 failed / 8 ignored** ✅（+16：5 個 `provider_check`、6 個 `proxy::queue`、5 個 `tray`） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | **仍是 9**（沒有動 schema）✅ |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/provider_check.rs`（＋tests） | **新增**：連線檢查（`provider_check` 命令、`normalize_url`、`classify`） |
+| `src-tauri/src/proxy/queue.rs` | **新增**：故障轉移佇列預覽（重用 `resolve_model_providers` ＋ `order_by_health`） |
+| `src-tauri/src/commands/diagnostics.rs` | 新增 `failover_models`／`failover_queue` 命令 |
+| `src-tauri/src/tray.rs`（＋tests） | **新增**：托盤切換選單（`menu_model`／`item_id`／`parse_item_id`／`rebuild`／`spawn`／`EVENT_SWITCH`） |
+| `src-tauri/src/tools/consts.rs`、`tools.rs` | 新增並匯出 `TAKEOVER_APPS`（可接管的三個工具） |
+| `src-tauri/src/lib.rs` | 托盤改用 `tray::spawn` ＋ 啟動時 `rebuild` |
+| `src/components/providers/ConnectivityCheck.tsx` | **新增**：詳情面板的「檢查連線」 |
+| `src/components/providers/FailoverQueue.tsx` | **新增**：來源頁的故障轉移佇列面板 |
+| `src/components/providers/switchReq.ts` | **新增**：`buildSelectionReq`（工具卡片與托盤共用的唯一一份請求組裝） |
+| `src/components/TraySwitchListener.tsx` | **新增**：全域的托盤切換接收端＋toast |
+| `src/components/providers/{useToolSwitch.ts,SourceDetail.tsx}`、`src/App.tsx`、`src/lib/{api.ts,apiTypes.ts}` | 接線與型別 |
+
+#### 實機驗證（安裝後的真實 App，CDP 讀畫面）
+
+| 驗證項 | 結果 |
+|---|---|
+| **連線檢查** | ✅ 選中 `opencode-go` → 按「檢查連線」→ 回 **可達**、`GET https://opencode.ai/zen/go/v1`、說明文字「不送模型請求、不帶金鑰」都在畫面上 |
+| **故障轉移佇列** | ✅ 面板渲染、模型下拉 **25 個選項**（`deepseek-v4.1-flash（3 個來源）`…）；選了之後 **3 列**依序顯示，第 1 列掛「學到 openai-chat」徽章 |
+| 佇列順序的正確性 | ✅ 與資料庫**兩邊獨立對照**：UI 第 1／2／3 列的模型數是 9／6／1，而 DB 的 `priority` 順序是 `#22 opencode-go(9)`、`#21 aihubmix(6)`、`#18 xxy-DS(1)` —— 完全一致 |
+| **共用的請求組裝（P1.6 的核心）** | ✅ 用真實 UI 把 Codex 關掉再開（先清掉 localStorage 的 lastSwitch，逼它走按來源組裝那條路）→ 畫面回「**已接管：deepseek-v4.1-flash @ opencode-go（直連上游 Key 已寫入配置文件，僅本機可讀）**」 |
+| 之後的 CLI 仍正常 | ✅ `codex exec -m grok-4.7` → `CX-OK`；`claude -p` → `CC-OK` |
+| 托盤啟動即建立選單 | ✅ 應用程式啟動成功（`setup` 裡的 `tray::rebuild(...)?` 若失敗會直接中斷啟動），代表 `menu_model` 對真實資料庫查詢、`Menu::with_items`、`tray.set_menu` 三件事都成功 |
+| 工具狀態回到原狀 | ✅ 驗證過程中一度把兩個工具關掉（腳本誤點到別列的開關），已用**逐列定位**的腳本還原成 **3/4 接管中**（Claude Code／Codex／OpenCode＝接管中、DSH＝關） |
+| 最終建置的煙霧測試 | ✅ 重新啟動後 `3/4 接管中`、`codex exec -m grok-4.7` → `FIN-OK`、網關 15722 LISTEN |
+
+> **托盤「用滑鼠點圖示」這一步沒能自動化**（自動隱藏的工作列＋Win11 不曝露通知區域圖示
+> 給 UIA＋本機模型不能讀圖），細節與失敗模式評估寫在 §0.9.21，並附 10 秒的人工檢查法。
+
+### 9.20 前一次建置（2026-10-01 00:54，P1：來源預設集／複製／匯入匯出 ＋ 孤兒列清理，已被 9.21 取代）
 
 CC Switch 對齊計畫（`docs/CC-SWITCH-PARITY.md`）的 P1 第一批。設計與取捨見 §0.9.20。
 

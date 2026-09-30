@@ -11,6 +11,7 @@ import { Segmented } from "./Segmented";
 import { useConfirm } from "./Confirm";
 import GlobalPricingManager from "./Pricing";
 import { ProviderSheet, ToolVersions } from "./providers/ProviderForm";
+import { FailoverQueue } from "./providers/FailoverQueue";
 import { ProvidersIO } from "./providers/ProvidersIO";
 import { SourceCard } from "./providers/SourceCard";
 import { SourceDetail } from "./providers/SourceDetail";
@@ -218,6 +219,11 @@ export default function ProvidersPage() {
                 onDetailTab={setDetailTab}
               />
             </div>
+          </div>
+        )}
+        {view === "sources" && (
+          <div className="pt-4">
+            <FailoverQueue />
           </div>
         )}
         {view === "tools" && (

@@ -253,6 +253,25 @@ pub fn source_health(db: State<DbState>) -> Result<Vec<SourceHealth>, String> {
         .collect())
 }
 
+/// 候選模型清單（故障轉移佇列畫面挑模型用）：模型 + 有幾個來源登記它。
+#[tauri::command]
+pub fn failover_models(db: State<DbState>) -> Result<Vec<crate::proxy::QueueModel>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::proxy::queue_models(&conn)
+}
+
+/// 某個模型的候選來源順序 —— **與請求路徑用的是同一個查詢**
+/// （`resolve_model_providers` + `order_by_health`），所以畫面不會與實際行為不一致。
+#[tauri::command]
+pub fn failover_queue(
+    db: State<DbState>,
+    model: String,
+) -> Result<Vec<crate::proxy::QueueRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let health = crate::proxy::health_registry(&db.path);
+    crate::proxy::queue_rows(&conn, &db.path, &model, &health)
+}
+
 /// 清除某渠道的拒收記憶：下次請求會重新探測上游能力。
 /// 用於「改了渠道設定後想重測」或「誤剝離導致功能缺失」時。
 ///

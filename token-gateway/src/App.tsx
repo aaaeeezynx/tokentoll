@@ -35,6 +35,7 @@ import UsagePage, {
 } from "./components/Usage";
 import CalcPage from "./components/Calc";
 import { Icon, type IconName } from "./components/icons";
+import { TraySwitchListener } from "./components/TraySwitchListener";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -151,6 +152,8 @@ function Shell() {
   return (
     <div className="relative z-[1] flex h-screen">
       <AccentSync />
+      {/* 系統匣切換的接收端：掛在全域，任何頁面都能收到托盤的切換（P1.6） */}
+      <TraySwitchListener />
       {/* ── 環境光暈 ── */}
       <div className="bg-orbs" aria-hidden="true">
         <div

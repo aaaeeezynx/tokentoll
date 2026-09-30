@@ -30,6 +30,12 @@ pub const CODEX_SHARED_PROVIDER_ID: &str = "custom";
 pub const BACKUP_KEEP: usize = 1;
 
 
+/// 可以「接管」（把工具設定改指向本網關）的工具。
+///
+/// 其餘四個（hermes／dsh／cursor／antigravity）目前**只做用量統計**：
+/// 沒有設定檔格式、沒有原生還原邏輯，所以不該出現在接管清單或托盤切換選單裡。
+pub const TAKEOVER_APPS: [&str; 3] = ["claude", "codex", "opencode"];
+
 /// (app_id, 顯示名稱)
 pub const APPS: [(&str, &str); 7] = [
     ("claude", "Claude Code"),

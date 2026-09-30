@@ -58,7 +58,7 @@ pub(crate) struct HealthRow {
 
 /// 全部來源的健康狀態。`Clone` 共用同一份資料（`Arc`）。
 #[derive(Clone)]
-pub(crate) struct HealthRegistry {
+pub struct HealthRegistry {
     inner: Arc<Mutex<HashMap<i64, Health>>>,
     threshold: u32,
     cooldown: Duration,
@@ -79,7 +79,7 @@ impl Default for HealthRegistry {
 static GLOBAL: OnceLock<Mutex<HashMap<PathBuf, HealthRegistry>>> = OnceLock::new();
 
 /// 取「這個資料庫」的健康狀態表（第一次呼叫時建立）。
-pub(crate) fn for_db(db_path: &std::path::Path) -> HealthRegistry {
+pub fn for_db(db_path: &std::path::Path) -> HealthRegistry {
     let m = GLOBAL.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = m.lock().unwrap_or_else(|e| e.into_inner());
     map.entry(db_path.to_path_buf()).or_default().clone()

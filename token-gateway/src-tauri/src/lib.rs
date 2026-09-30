@@ -8,6 +8,7 @@ mod keys;
 mod models;
 mod price_extract;
 mod presets;
+mod provider_check;
 mod providers;
 mod providers_io;
 mod quota;
@@ -16,10 +17,10 @@ pub mod proxy;
 mod tools;
 mod trace;
 mod translate;
+mod tray;
 mod usage;
 
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,27 +35,12 @@ pub fn run() {
 
             let show = MenuItem::with_id(app, "show", "顯示主視窗", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
-            let icon = app
-                .default_window_icon()
-                .cloned()
-                .expect("missing default window icon");
-            TrayIconBuilder::new()
-                .icon(icon)
-                .tooltip("Token Gateway · 本地網關未執行")
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .build(app)?;
+            let sep = tauri::menu::PredefinedMenuItem::separator(app)?;
+            // 啟動時先放一個最小選單；tray::spawn 會立刻用資料庫內容重建
+            // （之後每 30 秒重建一次，來源變動不必重啟 App）。
+            let menu = Menu::with_items(app, &[&show, &sep, &quit])?;
+            tray::spawn(app.handle(), menu)?;
+            tray::rebuild(app.handle()).map_err(std::io::Error::other)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -138,6 +124,11 @@ pub fn run() {
             commands::provider_stripped_clear,
             // 來源健康狀態（斷路器，見 proxy/health.rs）
             commands::source_health,
+            // 故障轉移佇列預覽（P1.4，見 proxy/queue.rs）
+            commands::failover_models,
+            commands::failover_queue,
+            // 來源連線檢查（P1.5，見 provider_check.rs）
+            provider_check::provider_check,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

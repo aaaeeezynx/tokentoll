@@ -41,6 +41,7 @@ pub(crate) use {
     consts::GATEWAY_ENV_KEY,
     consts::GATEWAY_HOST,
     consts::GATEWAY_PROVIDER_ID,
+    consts::TAKEOVER_APPS,
 
     // ---- util ----
     util::is_gateway,

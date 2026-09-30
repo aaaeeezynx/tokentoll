@@ -7,6 +7,7 @@ import {
   type ToolStatus,
 } from "../../lib/api";
 import { loadLastSwitch, saveLastSwitch } from "./providersTypes";
+import { buildSelectionReq } from "./switchReq";
 
 /**
  * 「本機工具」卡片的接管／還原行為。
@@ -82,53 +83,17 @@ export function useToolSwitch(deps: {
 
   /**
    * 按指定來源組裝接管請求（開關無參數回退 / 來源切換自動重接管共用，永不彈框）。
-   * 模型：上次/現行仍在該來源啟用表則沿用，否則首個啟用模型；
-   * Key：所有工具一致可空（留空 = 以該來源上游 Key 直連，後端注入；用量照常記錄）。
+   *
+   * 規則本體已抽到 `switchReq.ts`（**唯一一份實作**）：系統匣切換（P1.6）也要用
+   * 同一套「挑模型、挑 Key」的規則，所以不能在這裡留第二份。
    */
-  const resolveSelectionReq = async (
-    t: ToolStatus,
-    provider: Provider,
-  ): Promise<{ req: SwitchRequest; upstreamKeyWritten: boolean }> => {
-    const saved = loadLastSwitch(t.app);
-    const apiKey = saved?.api_key ?? "";
-    const upstreamKeyWritten = !apiKey.trim();
-    if (upstreamKeyWritten && !(provider.api_key ?? "").trim()) {
-      throw new Error(`來源 ${provider.name} 未填寫上游 Key，無法直連`);
-    }
-    const models = await api.modelsList(provider.id);
-    const enabled = models.filter((m) => m.enabled);
-    if (enabled.length === 0) {
-      throw new Error(`來源 ${provider.name} 沒有啟用的模型`);
-    }
-    const currentModel =
-      (latest.current.tools || []).find((x) => x.app === t.app)?.current_model ?? null;
-    const candidates = [saved?.model, currentModel].filter(Boolean) as string[];
-    const hit = enabled.find((m) => candidates.includes(m.actual_model)) ?? null;
-    const row = hit ?? enabled[0];
-    const reasoning =
-      row.actual_model === saved?.model && saved?.reasoning
-        ? saved.reasoning
-        : row.reasoning !== "unset"
-          ? (row.reasoning.split(",")[0]?.trim() || null)
-          : null;
-    return {
-      req: {
-        app: t.app,
-        base_url: gatewayUrl(latest.current.port, t.app),
-        api_key: apiKey,
-        model: row.actual_model,
-        provider_id: provider.id,
-        provider_format: provider.api_format ?? null,
-        reasoning,
-        context_window: row.context_window ?? null,
-        gen_catalog: (saved?.gen_catalog ?? true) && t.app === "codex",
-        catalog_union: saved?.catalog_union ?? false,
-        direct_upstream: !apiKey.trim(),
-        key_id: saved?.key_id ?? null,
-      },
-      upstreamKeyWritten,
-    };
-  };
+  const resolveSelectionReq = (t: ToolStatus, provider: Provider) =>
+    buildSelectionReq({
+      app: t.app,
+      provider,
+      port: latest.current.port,
+      tools: latest.current.tools || [],
+    });
 
   /** 開關 ON：上次參數可用則沿用來源/模型/Key 偏好，但路由強制為本網關。 */
   const toggleOn = async (t: ToolStatus) => {

@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AppStat,
   CatalogCache,
+  CheckResult,
   DbStatus,
   HistoryScanTool,
   HistorySummary,
@@ -29,6 +30,8 @@ import type {
   ProviderStat,
   ProviderStripped,
   ProxyStatus,
+  QueueModel,
+  QueueRow,
   SubscriptionFees,
   SubscriptionQuota,
   SourceHealth,
@@ -103,6 +106,14 @@ export const api = {
   /** 從檔案路徑匯入（搭配匯出回傳的路徑）。 */
   providersImportFile: (path: string): Promise<ImportReport> =>
     invoke("providers_import_file", { path }),
+  /** 來源連線檢查：只測位址可達性，不送模型請求、不帶金鑰。 */
+  providerCheck: (baseUrl: string): Promise<CheckResult> =>
+    invoke("provider_check", { baseUrl }),
+  /** 故障轉移佇列：可挑的模型清單（含「有幾個來源」）。 */
+  failoverModels: (): Promise<QueueModel[]> => invoke("failover_models"),
+  /** 故障轉移佇列：某個模型的候選來源順序（與請求路徑同一個查詢）。 */
+  failoverQueue: (model: string): Promise<QueueRow[]> =>
+    invoke("failover_queue", { model }),
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),
   toolVersions: (): Promise<ToolVersion[]> => invoke("tool_versions"),

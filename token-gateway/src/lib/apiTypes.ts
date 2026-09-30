@@ -71,6 +71,42 @@ export interface ImportReport {
   includes_keys: boolean;
 }
 
+/**
+ * 來源連線檢查的結果（P1.5，對標 CC Switch 的 connectivity check）。
+ *
+ * `reachable` 是**傳輸層**的判斷：401／403／404 都算可達 ——
+ * 它們證明主機活著，只是沒有金鑰或那個路徑沒有端點。
+ * 「檢查過了」不等於「請求一定成功」（金鑰與模型名是另一回事）。
+ */
+export interface CheckResult {
+  url: string;
+  reachable: boolean;
+  /** 0 = 連線階段就失敗 */
+  status: number;
+  latency_ms: number;
+  message: string;
+}
+
+/** 故障轉移佇列裡的一列（＝某個模型在某個來源上的候選順序）。 */
+export interface QueueRow {
+  provider_id: number;
+  provider_name: string;
+  api_format: string;
+  enabled: boolean;
+  model_count: number;
+  /** 這個來源對這個模型學到的協議（null = 還沒學到） */
+  learned_format: string | null;
+  /** 斷路器：冷卻中（會被排到候選最後） */
+  open: boolean;
+  cooldown_secs: number;
+}
+
+/** 可挑選的模型 + 有幾個來源登記它。 */
+export interface QueueModel {
+  model: string;
+  sources: number;
+}
+
 export interface ToolStatus {
   app: string;
   display: string;
