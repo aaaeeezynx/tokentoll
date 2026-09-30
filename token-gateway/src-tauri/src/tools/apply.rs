@@ -151,6 +151,22 @@ pub fn opencode_apply(
                 .insert("context".to_string(), serde_json::json!(cw));
         }
     }
+    // 接管時一併指定模型。
+    //
+    // 只有 `provider.tokengateway.models.<模型>` 是不夠的：`opencode run`
+    // 在**沒有**頂層 `model` 時會用它自己的預設模型（這台機器實測是
+    // `claude-sonnet-4-6`），於是請求根本不會落到網關 —— 使用者看到的是
+    // 「Anthropic API key is missing」這種與網關無關的錯誤。頂層 `model`
+    // 的格式是 `<provider>/<model>`（OpenCode 自己的寫法）。
+    //
+    // 還原時 `opencode_native` 會把指向 `tokengateway/` 的這一鍵移除；
+    // 使用者原本的 `model` 值由基準備份還原（見 `backup.rs`）。
+    if !model.trim().is_empty() {
+        root.insert(
+            "model".to_string(),
+            serde_json::Value::String(format!("{GATEWAY_PROVIDER_ID}/{model}")),
+        );
+    }
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }
 

@@ -776,6 +776,95 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.13 「Model does not support this protocol」的真因 ＋ 接管時就指定模型（2026-09-30）
+
+你回報：Claude Code／OpenCode 走 opencode-go 時，除了 DeepSeek 系列以外的模型幾乎全掛，錯誤是
+
+```
+{"type":"error","error":{"type":"ModelProtocolUnsupported","message":"Model does not support this protocol."}}
+data: {"error":{"param":"","type":"server_error","message":"Streaming response failed: [400] Invalid request parameters"}}
+```
+
+#### 真因：同一個模型只在一種端點上架（不經網關，直接量上游）
+
+拿 opencode-go 的 Key 直接打 `https://opencode.ai/zen/go/v1`（要帶 `x-opencode-session`，
+不然上游回 `MissingSessionID`；另外 UA 不討喜時 Cloudflare 會回 `error 1010`，用
+`codex_cli_rs/…` 這種 UA 就進得去），每個模型各打一次 `chat/completions` 與 `responses`：
+
+| 模型 | `chat/completions` | `responses` |
+|---|---|---|
+| deepseek-v4.1-flash | 200（串流／非串流都 200） | 200（串流／非串流都 200） |
+| deepseek-v4-flash | 200 | 200 |
+| grok-4.7 | **400 ModelProtocolUnsupported**（串流／非串流都是） | 200 |
+| gpt-6-luna | **400 ModelProtocolUnsupported** | 200 |
+| muse-spark-1.3-contributor | **400 ModelProtocolUnsupported** | 429 `rate_limit_exceeded`（重測時被限流；第一次量到 200） |
+| mimo-v2.6-pro | 200 | **400 ModelProtocolUnsupported** |
+| mimo-v2.6-flash | 200 | **400 ModelProtocolUnsupported** |
+
+所以「Model does not support this protocol」不是參數寫錯，是**你打錯端點**的字面意思：
+這個模型沒有在你呼叫的那個路徑上架。
+
+#### 為什麼「目前能正常使用的模型只有 DeepSeek 系列」
+
+- DB 事實：這台機器上 7 個來源的 `providers.api_format` **全部是 `openai-chat`**。
+  `proxy/matrix.rs::resolve_trans_kind` 於是對 **Codex（Responses）** 與
+  **Claude Code（Anthropic）** 進來的請求，都翻譯成 `chat/completions` 送上游。
+- 只有 chat 端點有架的模型才活得下來 → responses-only 的 `grok-4.7`／`gpt-6-luna`／
+  `muse-spark-1.3-contributor` **必掛**；`deepseek-*` 兩邊都有架，所以「怎麼切都行」，
+  與你的觀察完全一致。
+- Claude Code 這側更硬：`resolve_trans_kind` 的
+  `(Anthropic, OpenAiResponses | Gemini | Unknown) => Err(E_ANTHROPIC_UNSUPPORTED)`
+  代表 Anthropic 進來的請求**永遠不可能**轉成 Responses 送上游 —— Claude Code 只能配
+  chat 端點有架的模型，沒有例外。
+
+> 要讓 **Codex** 用 responses-only 的模型，得把那個來源宣告成 `openai-responses`
+> （網關支援；`mixed` 仍會翻成 chat）。這是**來源層級**的設定，做法是另開一個共用
+> base_url／Key 的來源項（先例：`xxy-DS`／`xxy-GLM`／`xxy-GPT 272k` 共用同一個 URL）。
+> 這一輪**沒有動**它，因為那會改到你既有來源的語意。
+
+#### `mimo-*` 的第二個症狀是另一件事（還沒收乾）
+
+`Invalid request parameters` 與協議無關。實測：最小 body、帶 `tools`、帶 `reasoning.effort`、
+`store:false` ＋ `include:["reasoning.encrypted_content"]`、回放 reasoning item、113 KB 輸入、
+超大 `max_output_tokens=100000`、甚至 `input_image` 內容 —— **全部 200**（串流與非串流都試過）。
+只有 Codex 那條 937 KB 的真實 transcript 會 400，而且錯誤訊息裡**沒有欄位名**，
+`proxy/strip.rs::parse_unknown_fields` 解析不出來 → 相容策略放棄
+（trace 的 note：`上游 400 且無法解析出拒收欄位名（相容策略失效）`）。
+
+trace 的位元組數（937669 → 937673 → 937676 → 937678 → 937689，差額正好是模型名的長度差）
+證明那幾次重試是**同一段對話換模型名**反覆送 —— 也就是你在對話中換了模型。剩下的頭號嫌疑是
+**上一個模型的對話殘留**（真實的 encrypted reasoning／function_call 鏈）在新模型上不合法。
+**實務做法：換模型家族時開新對話。**（另一條路：讓網關在上游 400 又解析不出欄位名時，
+留下截斷的請求本體；目前 `proxy_trace.body_hex` 只在入站解析失敗時才寫。）
+
+#### 這一輪改的東西
+
+**1｜Claude Code 的模型檔位改成「真的跑得動的來源模型」。** 你原本的
+`~/.claude/settings.json` 是
+
+```
+ANTHROPIC_MODEL                        = muse-spark-1.3-contributor   ← responses-only，必掛
+ANTHROPIC_DEFAULT_FABLE_MODEL          = grok-4.7                     ← responses-only，必掛
+ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL = deepseek-v4.1-flash     ← 正常
+```
+
+App 的規則本來就是**留空的檔位跟隨主模型**（`claudeMapOpt` 的 `eff()`：`sel || effModel`），
+會寫成上面那樣是因為對話框裡存了**五個檔位的個別覆寫值**（`tg:lastSwitch:v1:claude`
+的 `claude_map`），App 每次都照抄。所以修法是：在切換對話框把「預設模型」「Fable」兩格
+改回可用的來源模型（或清成「跟隨主模型」）再接管一次，五格就全部一致。
+**程式碼這側不需要改** —— 這正是「指定哪個模型」的既有行為，錯的是存下來的值。
+
+**2｜OpenCode 接管時一併把模型釘進 `opencode.json`。** 這是真的程式改動。
+以前只寫 provider 段與模型清單，`opencode run` 會用**它自己的預設模型**
+（`claude-sonnet-4-6`）去打網關 → 網關不認得 → 看起來像「接管沒生效」。現在接管時多寫一行
+頂層 `"model": "tokengateway/<你選的模型>"`（`tools/apply.rs::opencode_apply`），
+`switch.rs` 的計畫頁與警告文案也跟著改（不再是「切換後需在 opencode 內手動選中模型」）。
+切回原生時（`tools/native.rs::opencode_native`）**只移除開頭是 `tokengateway/` 的頂層 model**，
+你自己設定的 `model`（例如 `anthropic/…`）不動 —— 而且 `restore_native_to_port` 是
+「先還原備份再原生化」，所以原本的 `model` 會從備份回來。
+
+---
+
 ### 0.9.12 讓 DeepSeek Harness 的用量出現在用量頁（歷史回填，2026-09-30）
 
 使用者問：「DSH 這工具是否可以直接檢測用量？」——**能力有**（App 的 M5 歷史回填
@@ -1793,7 +1882,49 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.13 最新建置（2026-09-30 15:27，DeepSeek Harness 歷史回填）—— **你目前安裝的就是這一個**
+### 9.14 最新建置（2026-09-30 17:34，接管時指定模型 ＋ 模型協議真因）—— **你目前安裝的就是這一個**
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-09-30 17:34:50 |
+| `target\release\token-gateway.exe` | 9,053,696 bytes、sha256 `0306DF67B34D6FBC6B83242409076E8964C62E0D86DBFCAF0E160823C475EAA2` |
+| NSIS 安裝檔 | 3,843,997 bytes、`bundle\nsis\token-gateway_0.1.0_x64-setup.exe` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,053,696 bytes（同大小）、sha256 `F597EC6AA5A4E45BA3FB52F5FFE12173A2D59010340601AA2FDC69B1A18ADF9E` |
+| 安裝方式 | NSIS `/S`，installer exit 0；裝完先砍掉自動啟動的行程再手動啟動 |
+
+閘門（這一輪的程式改動之後）：
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline` | **241 passed / 0 failed / 8 ignored** ✅ |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm build`（含 `tsc`） | 0 error ✅（本次建置已跑） |
+| 檔案行數 ≤ 400 | ✅ |
+
+實機驗證（安裝後的正式版本、真實 UI 點擊，不是單元測試）：
+
+| 步驟 | 觀察 |
+|---|---|
+| Claude Code 開關 → **關閉** | 回到原生基線：`ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` = `claude-haiku-4-5`／`claude-sonnet-5`／`claude-opus-5`，`ANTHROPIC_BASE_URL` 與 `ANTHROPIC_AUTH_TOKEN` 已移除，非 Claude 家族的模型鍵全清掉 ✅（即 §0.9 的「關 = 忠實還原 ＋ 原生來源化」仍然有效） |
+| 同一個開關 → **開啟** | `~/.claude/settings.json` 五個檔位全部 `deepseek-v4.1-flash`，列上訊息：`已接管：deepseek-v4.1-flash @ opencode-go（直連上游 Key 已寫入配置文件，僅本機可讀）` ✅ |
+| `claude -p "reply with exactly: TGOK"` | 回 **`TGOK`** ✅（走網關、真的用到來源模型）。附帶一句官方警告：`"deepseek-v4.1-flash" isn't described by this version's model catalog; … auto-compact keeps this session within 200k tokens` |
+| OpenCode 開關 → **開啟** | `~/.config/opencode/opencode.json` 頂層多出 **`"model": "tokengateway/deepseek-v4.1-flash"`** ✅（`provider.tokengateway` 段與模型清單照舊合併保留） |
+| `opencode run "reply with exactly: OCOK"` | 回 **`OCOK`**，它自己印出 **`> build · deepseek-v4.1-flash`** ✅（以前會用自己的預設模型去打網關，看起來像「接管沒生效」） |
+| 協定層證據（`proxy_trace`） | 同一個 `muse-spark-1.3-contributor`：`openai`→`openai-chat` 直通 400、`anthropic`→`openai-chat` `anthropic_to_chat` 400、`responses`→`openai-chat` `responses_to_chat` 400，錯誤都是 `ModelProtocolUnsupported` ✅ —— 這正是 §0.9.13 的結論 | 
+
+#### 這一輪沒做、但「照實說」要記下來的兩件事
+
+1. **Claude Code 對未知模型只假設 200k 上下文**（上面那句 `[claude-code:unrecognized_model]`）。
+   oc-go 的 `deepseek-v4.1-flash` 是 1M 級，所以它會**提早自動壓縮**。
+   兩條路：App 接管時順手寫 `CLAUDE_CODE_MAX_CONTEXT_TOKENS=<該模型的 context_window>`，
+   或在模型名後綴 `[1m]`（後者會改到送給網關的模型字串，風險較高）。**尚未實作。**
+2. `settings.json` 裡殘留 `ANTHROPIC_DEFAULT_*_MODEL_NAME = claude-opus-5` —— 那**不是本 App 寫的**
+   （App 只寫 `ANTHROPIC_*_MODEL`），是別的切換工具留下的，所以「關閉」時會照原樣留著。
+   如果之後還遇到 Claude Code 端「以為自己是 Opus」而送出的參數問題，先清這幾個鍵試試。
+
+---
+
+### 9.13 前一次建置（2026-09-30 15:27，DeepSeek Harness 歷史回填，已被 9.14 取代）
 
 使用者選了第二條路：**本機回填導入**（不改 DSH 任何設定），讓 DSH 的用量出現在用量頁。
 做法與驗證見 §0.9.12。

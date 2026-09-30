@@ -258,6 +258,18 @@ fn opencode_native(text: &str, port: u16) -> NativeOutcome {
             changes.push(format!("移除 provider.{pname}.options.apiKey（網關的本地 key）"));
         }
     }
+    // 接管時釘住的頂層 `model`（`tokengateway/<模型>`）也要拿掉，否則回到原生
+    // 來源後 `opencode run` 仍會指名一個已經不在設定裡的 provider。只動「指向
+    // 本網關」的值：使用者自己的 `model`（例如 `anthropic/...`）不是我們的東西。
+    let gw_prefix = format!("{GATEWAY_PROVIDER_ID}/");
+    let pinned = root
+        .get("model")
+        .and_then(|m| m.as_str())
+        .is_some_and(|m| m.starts_with(&gw_prefix));
+    if pinned {
+        root.as_object_mut().map(|o| o.remove("model"));
+        changes.push("移除頂層 model（接管時釘住的網關模型）".into());
+    }
     out.changes = changes;
     if out.changes.is_empty() {
         out.note = Some("設定裡沒有網關痕跡，維持原樣".into());

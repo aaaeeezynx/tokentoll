@@ -214,6 +214,12 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
                 "provider.{GATEWAY_PROVIDER_ID}.models 登記 {}",
                 req.model
             ));
+            if !req.model.trim().is_empty() {
+                plan.edits.push(format!(
+                    "model = {GATEWAY_PROVIDER_ID}/{}（接管時一併指定）",
+                    req.model
+                ));
+            }
             if let Some(cw) = req.context_window {
                 if cw > 0 {
                     plan.edits.push(format!(
@@ -236,7 +242,8 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
                 );
             }
             plan.warnings.push(format!(
-                "切換後需在 opencode 內手動選中模型 {GATEWAY_PROVIDER_ID}/{}",
+                "預設模型已釘在 {GATEWAY_PROVIDER_ID}/{}：`opencode run` 直接用這個模型，\
+                 不必再手選（要換模型就回到這裡重新接管）",
                 req.model
             ));
         }

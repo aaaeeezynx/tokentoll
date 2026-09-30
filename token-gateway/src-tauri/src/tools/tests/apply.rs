@@ -103,7 +103,25 @@ fn opencode_merges_provider_and_models() {
     );
     assert!(v["provider"]["tokengateway"]["models"]["deepseek-v4-flash"].is_object());
     assert!(v["provider"]["anthropic"].is_object(), "原有渠道必須保留");
-    assert_eq!(v["model"], "anthropic/claude", "頂層 model 不動");
+    // 接管時釘住模型：否則 `opencode run` 會用它自己的預設模型，請求不落到網關
+    assert_eq!(
+        v["model"], "tokengateway/deepseek-v4-flash",
+        "頂層 model 必須指向網關 provider"
+    );
+}
+
+
+#[test]
+fn opencode_pins_model_to_gateway_provider() {
+    // 使用者原本的 model（別的 provider）被接管覆蓋，且格式是 <provider>/<model>
+    let old = r#"{"provider": {}, "model": "anthropic/claude-sonnet-4-6"}"#;
+    let out = opencode_apply(Some(old), "http://127.0.0.1:15722/v1", "muse-spark-1.3", None, None).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["model"], "tokengateway/muse-spark-1.3");
+    // 空模型不得寫出 `tokengateway/`（否則會釘到一個不存在的模型）
+    let out2 = opencode_apply(Some(old), "http://127.0.0.1:15722/v1", "   ", None, None).unwrap();
+    let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
+    assert_eq!(v2["model"], "anthropic/claude-sonnet-4-6", "無模型時不動原值");
 }
 
 

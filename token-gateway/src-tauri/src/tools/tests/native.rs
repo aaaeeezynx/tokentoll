@@ -221,6 +221,29 @@ fn opencode_native_drops_gateway_endpoint_and_local_key() {
 
 
 #[test]
+fn opencode_native_drops_pinned_gateway_model_only() {
+    // 接管時釘住的 `tokengateway/<模型>` 要移除，使用者自己的 model 不准動。
+    let pinned = r#"{"provider": {}, "model": "tokengateway/deepseek-v4.1-flash"}"#;
+    let out = to_native("opencode", pinned, 15722);
+    let v: serde_json::Value = serde_json::from_str(&out.text).expect("仍是合法 JSON");
+    assert!(v.get("model").is_none(), "釘住的網關模型必須移除：{}", out.text);
+    assert!(
+        out.changes.iter().any(|c| c.contains("model")),
+        "要交代改了什麼：{:?}",
+        out.changes
+    );
+
+    let own = r#"{"provider": {}, "model": "anthropic/claude-sonnet-4-6"}"#;
+    let out2 = to_native("opencode", own, 15722);
+    let v2: serde_json::Value = serde_json::from_str(&out2.text).expect("仍是合法 JSON");
+    assert_eq!(
+        v2["model"], "anthropic/claude-sonnet-4-6",
+        "使用者自己的 model 不得移除"
+    );
+}
+
+
+#[test]
 fn opencode_native_reports_clean_config_as_note_not_warning() {
     // 2026-09-28 實機踩到：對一個本來就乾淨的 OpenCode 按關閉，畫面出現
     // 「⚠️ 設定裡沒有網關痕跡，維持原樣」—— 健康的設定不該被示警。
