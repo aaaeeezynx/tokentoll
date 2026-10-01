@@ -154,6 +154,9 @@ export default function ProvidersPage() {
     enabled: selId != null && autoMin > 0,
     queryFn: () => api.usageQueryRun(selId as number),
     refetchInterval: autoMin * 60_000,
+    // 視窗最小化／在背景時照跑：來源頁也是常常縮到匣裡的（對齊 cc-switch
+    // src/lib/query/queries.ts 的 useUsageQuery「后台也继续定时查询」）。
+    refetchIntervalInBackground: true,
   });
 
   // ---- 來源卡片（呈現抽到 providers/SourceCard.tsx；拖拽邏輯在 useDragSort） ----

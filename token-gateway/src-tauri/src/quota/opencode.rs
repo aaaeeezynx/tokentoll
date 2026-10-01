@@ -12,7 +12,11 @@ pub(crate) fn detect_opencode_go(base_url: &str) -> bool {
 }
 
 /// 解析 `/usage` 回包：rolling/weekly/monthly 三窗口。
-/// 零用量窗口丟棄佔位重置時間（上游會回一個無意義的 resetsAt）。
+///
+/// `resetsAt` 一律帶出來，**包括 percent 為 0 的窗口**：實測（2026-10-01 18:39）
+/// 上游在 0% 時仍回一個有意義的重置點（rolling `2026-10-01T14:07:49Z`，還在 3時28分後），
+/// OpenCode Go 自己的後台頁在 0% 也照樣顯示「Resets in …」。舊版「零用量就丟棄 resetsAt」
+/// 只會讓卡片在剛重置完的那段時間變成「—」，看起來像壞掉。
 pub(crate) fn parse_opencode_windows(body: &Value) -> Vec<QuotaWindow> {
     let mut out = vec![];
     let Some(usage) = body.get("usage") else {
@@ -31,17 +35,13 @@ pub(crate) fn parse_opencode_windows(body: &Value) -> Vec<QuotaWindow> {
         if status != "ok" {
             continue;
         }
-        let percent = clamp_percent(percent);
-        let resets_at = if percent > 0.0 {
-            w.get("resetsAt")
-                .and_then(|r| r.as_str())
-                .map(|s| s.to_string())
-        } else {
-            None
-        };
+        let resets_at = w
+            .get("resetsAt")
+            .and_then(|r| r.as_str())
+            .map(|s| s.to_string());
         out.push(QuotaWindow {
             label: label.to_string(),
-            percent,
+            percent: clamp_percent(percent),
             resets_at,
         });
     }

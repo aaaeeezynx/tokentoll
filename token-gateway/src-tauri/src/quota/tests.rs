@@ -12,7 +12,7 @@ fn detect_opencode_go_matches() {
 }
 
 #[test]
-fn opencode_windows_parsed_and_zero_reset_dropped() {
+fn opencode_windows_parsed_and_zero_percent_keeps_reset() {
     let body = json!({"usage": {
         "rolling": {"status": "ok", "percent": 12.5, "resetsAt": "2026-08-13T16:27:38.287Z"},
         "weekly": {"status": "ok", "percent": 0, "resetsAt": "2026-08-17T00:00:00.287Z"},
@@ -23,9 +23,19 @@ fn opencode_windows_parsed_and_zero_reset_dropped() {
     assert_eq!(w[0].label, "5 小時");
     assert_eq!(w[0].percent, 12.5);
     assert!(w[0].resets_at.is_some());
+    // 零用量也要帶重置時間：上游在 0% 仍回有意義的 resetsAt，後台頁也照樣顯示倒數
     assert_eq!(w[1].percent, 0.0);
-    assert!(w[1].resets_at.is_none(), "零用量窗口丟棄佔位重置時間");
+    assert_eq!(
+        w[1].resets_at.as_deref(),
+        Some("2026-08-17T00:00:00.287Z"),
+        "0% 的窗口不能丟重置時間"
+    );
     assert_eq!(w[2].label, "本月");
+    // 上游沒給 resetsAt 就顯示「—」，不要憑空補一個
+    let body = json!({"usage": {"rolling": {"status": "ok", "percent": 0}}});
+    let w = parse_opencode_windows(&body);
+    assert_eq!(w.len(), 1);
+    assert!(w[0].resets_at.is_none());
 }
 
 #[test]

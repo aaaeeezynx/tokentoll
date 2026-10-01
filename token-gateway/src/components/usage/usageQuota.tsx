@@ -12,12 +12,45 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import {
+  useEffect,
+  useState,
+} from "react";
+import { listen } from "@tauri-apps/api/event";
 
-export function fmtRemain(iso: string | null): string {
+/** 訂閱額度自動重查間隔（對齊 cc-switch `REFETCH_INTERVAL` ＝ 5 分）。 */
+const QUOTA_REFRESH_MS = 5 * 60_000;
+/** 本地心跳：倒數與「更新於」每 30 秒走一格，不必等下一次網路重查。 */
+const TICK_MS = 30_000;
+
+/** 每 TICK_MS 心跳一次，逼倒數字與「更新於」即時走動。
+ *  計時文字是在 render 時用 `Date.now()` 算出來的：沒有心跳就不會重繪，
+ * 畫面上的「重置 3時27分」會整段 freeze，看起來就像「沒有即時更新」。 */
+export function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+/** 「更新於」＝ 查詢時刻 ＋ 已經過多久：陳舊度一眼可見，不用自己對時鐘。 */
+export function fmtQueriedAt(at: number, now: number): string {
+  const clock = new Date(at).toLocaleTimeString();
+  const s = Math.max(0, Math.floor((now - at) / 1000));
+  if (s < 60) return clock;
+  if (s < 3600) return `${clock}（${Math.floor(s / 60)} 分鐘前）`;
+  if (s < 86400) return `${clock}（${Math.floor(s / 3600)} 小時前）`;
+  return `${clock}（${Math.floor(s / 86400)} 天前）`;
+}
+
+export function fmtRemain(iso: string | null, now: number = Date.now()): string {
   if (!iso) return "—";
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "—";
-  let s = Math.floor((t - Date.now()) / 1000);
+  let s = Math.floor((t - now) / 1000);
   if (s <= 0) return "已重置";
   const d = Math.floor(s / 86400);
   s %= 86400;
@@ -35,8 +68,8 @@ export function fmtRemain(iso: string | null): string {
 export const RING_BOX = 76; // 外層寬 px
 export const RING_DIAL = 68; // 錶盤直徑 px
 export const RING_TEXT = 13; // 中心百分比字號 px
-export function QuotaRing(props: { w: QuotaWindow }) {
-  const { w } = props;
+export function QuotaRing(props: { w: QuotaWindow; now: number }) {
+  const { w, now } = props;
   const pct = Math.max(0, Math.min(100, w.percent));
   const r = 15.5;
   const c = 2 * Math.PI * r;
@@ -46,7 +79,11 @@ export function QuotaRing(props: { w: QuotaWindow }) {
       className="flex shrink-0 flex-col items-center gap-1.5"
       style={{ width: RING_BOX }}
     >
-      <div className="relative" style={{ width: RING_DIAL, height: RING_DIAL }}>
+      <div
+        className="relative"
+        style={{ width: RING_DIAL, height: RING_DIAL }}
+        title="已使用百分比（上游各窗口的 percent）"
+      >
         <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
           <circle
             cx="18"
@@ -83,15 +120,15 @@ export function QuotaRing(props: { w: QuotaWindow }) {
       <div className="text-center leading-tight">
         <div className="text-[11px] text-fg/55">{w.label}</div>
         <div className="text-[10px] text-fg/30">
-          {w.resets_at ? `重置 ${fmtRemain(w.resets_at)}` : "—"}
+          {w.resets_at ? `重置 ${fmtRemain(w.resets_at, now)}` : "—"}
         </div>
       </div>
     </div>
   );
 }
 
-export function QuotaCard(props: { q: SubscriptionQuota }) {
-  const { q } = props;
+export function QuotaCard(props: { q: SubscriptionQuota; now: number }) {
+  const { q, now } = props;
   const ok = q.status === "ok" && q.windows.length > 0;
   // 名稱去掉括號說明（如「OpenCode Go（opencode-go）」→「OpenCode Go」）
   const title = q.title.replace(/[（(][^（）()]*[）)]/g, "").trim() || q.title;
@@ -105,7 +142,7 @@ export function QuotaCard(props: { q: SubscriptionQuota }) {
       {ok ? (
         <div className="flex flex-wrap items-start justify-around gap-x-2 gap-y-3">
           {q.windows.map((w) => (
-            <QuotaRing key={w.label} w={w} />
+            <QuotaRing key={w.label} w={w} now={now} />
           ))}
         </div>
       ) : (
@@ -122,9 +159,35 @@ export function QuotaSection() {
   const q = useQuery({
     queryKey: ["quota_all"],
     queryFn: api.quotaQueryAll,
-    staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
+    staleTime: QUOTA_REFRESH_MS,
+    refetchInterval: QUOTA_REFRESH_MS,
+    // 視窗最小化／在背景時一樣要照跑：這是常駐（縮到匣）的工具，最長的時間
+    // 視窗都是隱藏的，沒有這行的話 polling 會整段停擺，回到畫面只剩舊數字。
+    // 對齊 cc-switch src/lib/query/subscription.ts 的 refetchIntervalInBackground。
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    retry: 1,
   });
+  const now = useNow(!q.isPending);
+  // 視窗重新拿到焦點（尤其是**從系統匣叫回來**）時立刻重查。
+  // react-query 的焦點重取只掛在 `visibilitychange`，而 Tauri 的 hide()/show() 不保證
+  // 會送那個事件（實測：縮到匣裡 `document.visibilityState` 仍是 visible）—— 靠這裡
+  // 補上，使用者回到畫面第一眼看到的就是新數字，而不是上一次開著時的舊數字。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const again = () => void qc.invalidateQueries({ queryKey: ["quota_all"] });
+    window.addEventListener("focus", again);
+    void listen("tauri://focus", again).then((f) => {
+      if (cancelled) f();
+      else unlisten = f;
+    });
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", again);
+      unlisten?.();
+    };
+  }, [qc]);
   // 只顯示實際有訂閱/可查到額度的方案；未訂閱或無憑證的不佔位
   const list = (q.data || []).filter(
     (x) => x.status === "ok" && x.windows.length > 0,
@@ -140,7 +203,7 @@ export function QuotaSection() {
           {q.isFetching
             ? "查詢中…"
             : q.dataUpdatedAt
-              ? `更新於 ${new Date(q.dataUpdatedAt).toLocaleTimeString()}`
+              ? `更新於 ${fmtQueriedAt(q.dataUpdatedAt, now)}`
               : ""}
         </span>
         <button
@@ -157,7 +220,7 @@ export function QuotaSection() {
       ) : (
         <div className="flex min-w-0 flex-wrap items-start gap-3">
           {list.map((x) => (
-            <QuotaCard key={x.key} q={x} />
+            <QuotaCard key={x.key} q={x} now={now} />
           ))}
         </div>
       )}
