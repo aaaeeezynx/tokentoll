@@ -1,0 +1,83 @@
+/*! 版面小工具（工具 chips、RWD 收尾）。由 index.css 依序匯入。 */
+/* ====== Tool Chips Grid（工具限制 chip 佈局） ====== */
+.tool-chips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+@media (max-width: 480px) {
+  .tool-chips {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.tool-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgb(var(--app-fg-rgb) / 0.035);
+  border: 1px solid rgb(var(--app-fg-rgb) / 0.06);
+  transition: background var(--mac-duration) var(--mac-ease), border-color var(--mac-duration) var(--mac-ease);
+  cursor: default;
+}
+.tool-chip:hover {
+  background: rgb(var(--app-fg-rgb) / 0.06);
+  border-color: rgb(var(--app-fg-rgb) / 0.1);
+}
+.tool-chip-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--mac-label-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ====== Form Section Glass Card ====== */
+.form-section {
+  background: rgb(var(--app-fg-rgb) / 0.025);
+  border: 1px solid rgb(var(--app-fg-rgb) / 0.07);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ====== Key 列表分組行 ====== */
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.key-row + .key-row {
+  border-top: 1px solid rgb(var(--app-fg-rgb) / 0.055);
+}
+.key-row .key-main {
+  min-width: 0;
+  flex: 1;
+}
+.key-row .key-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mac-label);
+}
+.key-row .key-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--mac-label-3);
+}
+.key-row .key-meta code {
+  color: var(--mac-label-2);
+}
+.key-row .key-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}

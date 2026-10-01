@@ -1,0 +1,127 @@
+/*! 設計 token（顏色、動效、主題變數）。由 index.css 依序匯入。 */
+/* ====== Token Gateway — macOS 27 HIG Design Tokens ====== */
+
+:root {
+  color-scheme: dark;
+  /* ── 主題（P4.3）──────────────────────────────────────────────
+     深／淺色只靠這一組變數切換：
+     - `--app-fg-rgb` 是「前景色通道」，所有白色疊色（rgba(255,255,255,α)）
+       都改寫成 `rgb(var(--app-fg-rgb) / α)`，淺色主題自動變成黑色疊色。
+     - 表面色（body／玻璃／彈出層／分隔線）各自一個變數。
+     Tailwind 端透過 `@theme` 把 `--color-fg` 指到 `--app-fg`，
+     所以 `text-fg/60`、`bg-fg/[0.06]` 這些寫法在淺色主題會自動反轉。 */
+  --app-fg-rgb: 255 255 255;
+  --app-fg: rgb(var(--app-fg-rgb));
+  --app-bg: #0b0b0f;
+  --app-bg-1: #121216;
+  --app-bg-2: #0e0e12;
+  --app-bg-3: #0b0b0f;
+  --app-window: #141417;
+  --app-window-solid: rgba(20, 20, 23, 0.6);
+  --app-elevated: #1d1d23;
+  --app-elevated-solid: #18181e;
+  --app-pop: #1b1b21;
+  --app-pop-hover: #17171c;
+  --app-pop-active: #1e1e25;
+  --app-glass-1: rgba(28, 28, 36, 0.66);
+  --app-glass-2: rgba(18, 18, 24, 0.62);
+  --app-glass-soft: rgba(22, 22, 29, 0.48);
+  --app-glass-soft-2: rgba(26, 26, 34, 0.4);
+  --app-chip: rgba(255, 255, 255, 0.02);
+  --app-shadow: rgba(0, 0, 0, 0.4);
+  --app-shadow-soft: rgba(0, 0, 0, 0.35);
+  --app-orb-opacity: 0.3;
+  /* 全域動效（同步全頁面） */
+  --mac-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --mac-duration: 0.32s;
+  /* Window — graphite base / elevated（Dark Mode 語義） */
+  --mac-window: var(--app-window);
+  --mac-elevated: var(--app-elevated);
+  /* Label 1-4（WCAG AA 實測：16.6 / 9.8 / 6.7 / 圖標3.8；label-4 僅圖標裝飾用） */
+  --mac-label: rgb(var(--app-fg-rgb) / 0.95);
+  --mac-label-2: rgb(var(--app-fg-rgb) / 0.72);
+  --mac-label-3: rgb(var(--app-fg-rgb) / 0.58);
+  --mac-label-4: rgb(var(--app-fg-rgb) / 0.4);
+  --mac-separator: rgb(var(--app-fg-rgb) / 0.08);
+  /* Accent — macOS system blue（deep 版白字 4.78:1，給按鈕/指示塊） */
+  --mac-accent: #0a84ff;
+  --mac-accent-deep: #0070e0;
+  --mac-accent-hover: #3395ff;
+  --mac-accent-soft: rgba(10, 132, 255, 0.16);
+  --mac-accent-shadow: rgba(10, 132, 255, 0.25);
+  /* Selected 統一樣式（單一事實來源：側欄輪廓式） */
+  --mac-selected-bg: color-mix(in srgb, var(--mac-accent) 10%, transparent);
+  --mac-selected-border: color-mix(in srgb, var(--mac-accent) 45%, transparent);
+  --mac-selected-shadow: 0 0 14px -4px var(--mac-accent-shadow, rgba(10, 132, 255, 0.25));
+  /* Status — macOS system colors (dark) */
+  --mac-green: #30d158;
+  --mac-red: #ff453a;
+  --mac-amber: #ffd60a;
+  --mac-orange: #ff9f0a;
+}
+
+/* ── 淺色主題（P4.3）─────────────────────────────────────────────
+   只覆蓋變數，不動任何元件：外觀全部走 token。
+   對比照 macOS Light 的語義（label 95% / 72% / 58% / 40% 的黑）。 */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --app-fg-rgb: 28 28 30;
+  --app-bg: #f2f2f5;
+  --app-bg-1: #f7f7f9;
+  --app-bg-2: #f2f2f5;
+  --app-bg-3: #ececf0;
+  --app-window: #ffffff;
+  --app-window-solid: rgba(255, 255, 255, 0.72);
+  --app-elevated: #ffffff;
+  --app-elevated-solid: #ffffff;
+  --app-pop: #ffffff;
+  --app-pop-hover: #f0f0f4;
+  --app-pop-active: #e8e8ee;
+  --app-glass-1: rgba(255, 255, 255, 0.78);
+  --app-glass-2: rgba(246, 246, 249, 0.82);
+  --app-glass-soft: rgba(255, 255, 255, 0.62);
+  --app-glass-soft-2: rgba(240, 240, 245, 0.6);
+  --app-chip: rgba(0, 0, 0, 0.02);
+  --app-shadow: rgba(0, 0, 0, 0.12);
+  --app-shadow-soft: rgba(0, 0, 0, 0.1);
+  --app-orb-opacity: 0.16;
+  --mac-window: #ffffff;
+  --mac-elevated: #ffffff;
+  --mac-label: rgba(28, 28, 30, 0.95);
+  --mac-label-2: rgba(28, 28, 30, 0.72);
+  --mac-label-3: rgba(28, 28, 30, 0.58);
+  --mac-label-4: rgba(28, 28, 30, 0.4);
+  --mac-separator: rgba(0, 0, 0, 0.1);
+  /* 淺色底上的系統色要深一點才夠對比（macOS Light 也是這樣調） */
+  --mac-accent: #0071e3;
+  --mac-accent-deep: #0060c0;
+  --mac-accent-hover: #0a84ff;
+  --mac-green: #248a3d;
+  --mac-red: #d70015;
+  --mac-amber: #b25000;
+  --mac-orange: #c93400;
+}
+
+/* Tailwind 的自訂色：讓 `text-fg` / `bg-fg` / `border-fg`（含 /60 這種透明度）
+   直接對應到主題變數 —— 元件不必知道現在是什麼主題。 */
+@theme {
+  --color-fg: var(--app-fg);
+}
+
+html,
+body,
+#root {
+  background: linear-gradient(180deg, var(--app-bg-1) 0%, var(--app-bg-2) 60%, var(--app-bg-3) 100%);
+  min-height: 100vh;
+  color: var(--mac-label);
+  overscroll-behavior: none;
+  font-family:
+    "SF Pro Display", "SF Pro Text", "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 0;
+}
+
+html {
+  background: var(--app-bg-3);
+}

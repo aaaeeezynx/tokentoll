@@ -1,0 +1,149 @@
+/*! 用量圖表 hover（日曆格／趨勢柱／小時柱）。由 index.css 依序匯入。 */
+/* ====== 用量圖表 hover（日曆格 / 趨勢柱 / 小時柱） ====== */
+/* 日曆格：放大 + accent 光暈（transform 不動版面） */
+.day-cell {
+  transition:
+    transform 0.18s var(--mac-ease),
+    box-shadow 0.18s var(--mac-ease);
+}
+.day-cell:hover {
+  transform: scale(1.25);
+  z-index: 5;
+  box-shadow:
+    0 0 0 1.5px var(--mac-accent),
+    0 0 14px color-mix(in srgb, var(--mac-accent) 35%, transparent);
+}
+/* 柱狀：hover 柱放大發光，其餘柱淡化聚焦 */
+.chart-row .chart-bar {
+  transform-origin: bottom;
+  transform-box: fill-box;
+  transition:
+    height 0.5s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.18s var(--mac-ease),
+    opacity 0.18s var(--mac-ease),
+    box-shadow 0.18s var(--mac-ease);
+}
+.chart-row:hover .chart-bar {
+  opacity: 0.5;
+}
+.chart-row .chart-bar:hover {
+  opacity: 1;
+  transform: scaleX(1.22);
+  z-index: 5;
+  box-shadow:
+    0 0 16px color-mix(in srgb, var(--mac-accent) 32%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--mac-accent) 42%, transparent);
+}
+/* 圖表浮層提示 */
+.tip-pop {
+  animation: tip-pop 0.14s var(--mac-ease);
+}
+@keyframes tip-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sheet-out {
+  animation: sheet-out var(--mac-duration) var(--mac-ease) forwards;
+}
+@keyframes sheet-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+}
+
+/* 降低透明度偏好：回退實色（macOS 原生行為） */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-float,
+  .mac-sidebar,
+  .mac-floatbar,
+  .glass-panel,
+  .filter-bar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .glass,
+  .glass-float {
+    background: var(--app-pop);
+  }
+  .mac-sidebar,
+  .mac-floatbar {
+    background: var(--app-pop-hover);
+  }
+  .glass-panel {
+    background: var(--app-pop-active);
+  }
+  .bg-orbs {
+    display: none;
+  }
+}
+
+/* 減少動態偏好：全部靜止（HIG 可達性） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.mac-side-item {
+  color: var(--mac-label-2);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition: background var(--mac-duration) var(--mac-ease), color var(--mac-duration) var(--mac-ease), border-color var(--mac-duration) var(--mac-ease), box-shadow var(--mac-duration) var(--mac-ease);
+}
+.mac-side-item:hover {
+  background: rgb(var(--app-fg-rgb) / 0.06);
+  color: var(--mac-label);
+}
+/* 選中：輪廓式（描邊＋外發光＋accent 圖標，10% 底）— 全站統一基準 */
+.mac-side-item[data-active="true"] {
+  background: var(--mac-selected-bg);
+  border-color: var(--mac-selected-border);
+  box-shadow: var(--mac-selected-shadow);
+  color: #fff;
+}
+.mac-side-item[data-active="true"] .mac-side-icon {
+  color: var(--mac-accent);
+}
+/* 可選卡片（來源列表等）：與側欄同一語言 */
+.sel-card[data-active="true"] {
+  background: var(--mac-selected-bg);
+  border-color: var(--mac-selected-border) !important;
+  box-shadow: var(--mac-selected-shadow);
+}
+/* 下拉選項（PopSelect）：與側欄同一語言（底＋白字＋accent 勾） */
+.pop-opt {
+  border: 1px solid transparent;
+}
+.pop-opt[data-active="true"] {
+  background: var(--mac-selected-bg);
+  border-color: var(--mac-selected-border);
+  box-shadow: var(--mac-selected-shadow);
+  color: #fff;
+}
+.pop-opt[data-active="true"] .pop-check {
+  color: var(--mac-accent);
+}
+/* 強調色圓點選中：accent 描邊＋外發光（取代白 ring） */
+.accent-dot[data-active="true"] {
+  box-shadow:
+    0 0 0 2px var(--app-elevated),
+    0 0 0 4px var(--mac-accent),
+    0 0 14px -2px var(--mac-accent-shadow);
+}
