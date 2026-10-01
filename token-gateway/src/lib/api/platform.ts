@@ -56,6 +56,9 @@ export const platformApi = {
   appearanceState: (): Promise<AppearanceState> => invoke("appearance_state"),
   appearanceSetTheme: (value: string): Promise<string> =>
     invoke("appearance_set_theme", { value }),
+  /** 介面語言（zh-TW／en；切換即時生效）。 */
+  appearanceSetLang: (value: string): Promise<string> =>
+    invoke("appearance_set_lang", { value }),
   appearanceSetAutostart: (enabled: boolean): Promise<AppearanceState> =>
     invoke("appearance_set_autostart", { enabled }),
 

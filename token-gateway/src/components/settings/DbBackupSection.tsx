@@ -10,12 +10,16 @@ import { api } from "../../lib/api";
 import { useConfirm } from "../Confirm";
 import { PopSelect } from "../PopSelect";
 import { SectionHead } from "./SectionHead";
+import { useI18n } from "../../lib/i18n";
 
-/** 小時 → 人話。 */
-function intervalLabel(h: number): string {
-  if (h <= 0) return "停用";
-  if (h === 168) return "每 7 天";
-  return `每 ${h} 小時`;
+/** 小時 → 人話（走字典，所以英文介面也讀得懂）。 */
+function intervalLabel(
+  h: number,
+  t: (k: string, vars?: Record<string, string | number>) => string,
+): string {
+  if (h <= 0) return t("settings.backup.interval.off");
+  if (h === 168) return t("settings.backup.interval.days", { n: 7 });
+  return t("settings.backup.interval.hours", { n: h });
 }
 
 function fmtTime(ms: number): string {
@@ -32,6 +36,7 @@ function fmtBytes(b: number): string {
 }
 
 export function DbBackupSection() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { dialog, ask } = useConfirm();
   const [msg, setMsg] = useState("");
@@ -52,29 +57,30 @@ export function DbBackupSection() {
     mutationFn: (v: { interval?: number; retention?: number }) =>
       api.dbBackupSetSchedule(v.interval, v.retention),
     onSuccess: () => {
-      ok("已更新備份排程");
+      ok(t("settings.backup.scheduled"));
       refresh();
     },
     onError: bad,
   });
   const backupNow = useMutation({
     mutationFn: () => api.dbBackupNow(null),
-    onSuccess: (b) => ok(`已建立備份 ${b.name}（${fmtBytes(b.bytes)}）`),
+    onSuccess: (b) => ok(t("settings.backup.created", { name: b.name, size: fmtBytes(b.bytes) })),
     onError: bad,
   });
   const restore = useMutation({
     mutationFn: (name: string) => api.dbBackupRestore(name),
-    onSuccess: (o) => ok(`${o.note}；安全備份 ${o.safety_backup}`),
+    onSuccess: (o) =>
+      ok(t("settings.backup.restore.msg", { name: o.safety_backup })),
     onError: bad,
   });
   const rename = useMutation({
     mutationFn: (v: { name: string; to: string }) => api.dbBackupRename(v.name, v.to),
-    onSuccess: (b) => ok(`已改名為 ${b.name}`),
+    onSuccess: (b) => ok(t("settings.backup.renamed", { name: b.name })),
     onError: bad,
   });
   const del = useMutation({
     mutationFn: (name: string) => api.dbBackupDelete(name),
-    onSuccess: () => ok("已刪除備份"),
+    onSuccess: () => ok(t("settings.backup.deleted")),
     onError: bad,
   });
 
@@ -86,12 +92,12 @@ export function DbBackupSection() {
       <SectionHead
         icon="download"
         tile="linear-gradient(160deg, #34d399, #0a9e6e)"
-        title="資料庫備份"
-        caption="自動備份排程與還原（還原前會先自動備份當前資料庫）"
+        title={t("settings.backup.title")}
+        caption={t("settings.backup.caption")}
       />
 
       <div className="mac-frow">
-        <span className="mac-cap">自動備份</span>
+        <span className="mac-cap">{t("settings.backup.auto")}</span>
         <div className="flex flex-wrap items-center gap-2">
           <div className="w-40">
             <PopSelect
@@ -99,18 +105,18 @@ export function DbBackupSection() {
               onChange={(v) => schedule.mutate({ interval: Number(v) })}
               options={(state.data?.interval_options ?? [0, 6, 12, 24, 48, 168]).map((h) => ({
                 value: String(h),
-                label: intervalLabel(h),
+                label: intervalLabel(h, t),
               }))}
             />
           </div>
-          <span className="text-[11px] text-fg/35">保留</span>
+          <span className="text-[11px] text-fg/35">{t("settings.backup.keep")}</span>
           <div className="w-28">
             <PopSelect
               value={String(state.data?.retention ?? 10)}
               onChange={(v) => schedule.mutate({ retention: Number(v) })}
               options={(state.data?.retention_options ?? [3, 5, 10, 15, 20, 30, 50]).map((k) => ({
                 value: String(k),
-                label: `${k} 份`,
+                label: t("settings.backup.keep.n", { n: k }),
               }))}
             />
           </div>
@@ -119,25 +125,24 @@ export function DbBackupSection() {
             disabled={backupNow.isPending}
             onClick={() => backupNow.mutate()}
           >
-            {backupNow.isPending ? "備份中…" : "立即備份"}
+            {backupNow.isPending ? t("settings.backup.working") : t("settings.backup.now")}
           </button>
         </div>
       </div>
       <p className="text-[11px] text-fg/25">
-        上次備份：{fmtTime(state.data?.last_ms ?? 0)}；目錄：
-        <span className="font-mono">{state.data?.dir ?? ""}</span>
-        （超過保留份數會自動刪掉最舊的）
+        {t("settings.backup.last", {
+          time: fmtTime(state.data?.last_ms ?? 0),
+          dir: state.data?.dir ?? "",
+        })}
       </p>
 
       {msg && <p className="pt-1.5 text-[11px] text-emerald-400/80">{msg}</p>}
       {err && <p className="pt-1.5 text-[11px] break-words text-red-400">{err}</p>}
 
       {state.isPending ? (
-        <p className="pt-2 text-[13px] text-fg/30">讀取中…</p>
+        <p className="pt-2 text-[13px] text-fg/30">{t("common.loading")}</p>
       ) : backups.length === 0 ? (
-        <p className="pt-2 text-[13px] text-fg/35">
-          還沒有備份 —— 按「立即備份」建立第一份。
-        </p>
+        <p className="pt-2 text-[13px] text-fg/35">{t("settings.backup.empty")}</p>
       ) : (
         <div className="space-y-1.5 pt-2.5">
           {backups.map((b) => (
@@ -153,35 +158,35 @@ export function DbBackupSection() {
               <button
                 className="btn-ghost px-2.5 py-1 text-[11px] disabled:opacity-40"
                 disabled={restore.isPending}
-                title="還原這份備份（會先自動備份當前資料庫）"
+                title={t("settings.backup.restore.tip")}
                 onClick={() =>
-                  ask(`還原備份「${b.name}」？`, () => restore.mutate(b.name), {
+                  ask(t("settings.backup.restore.title", { name: b.name }), () => restore.mutate(b.name), {
                     message:
-                      "目前的資料會被這份備份覆蓋。系統會先自動建立一份安全備份，所以後悔還救得回來。",
-                    confirmLabel: "還原",
+                      t("settings.backup.restore.hint"),
+                    confirmLabel: t("settings.backup.restore"),
                   })
                 }
               >
-                還原
+                {t("settings.backup.restore")}
               </button>
               <button
                 className="btn-ghost px-2.5 py-1 text-[11px]"
                 onClick={() => {
-                  const to = window.prompt("新的備份名稱", b.name);
+                  const to = window.prompt(t("settings.backup.rename.ph"), b.name);
                   if (to && to !== b.name) rename.mutate({ name: b.name, to });
                 }}
               >
-                改名
+                {t("settings.backup.rename")}
               </button>
               <button
                 className="btn-ghost px-2.5 py-1 text-[11px] text-red-400/80"
                 onClick={() =>
-                  ask(`刪除備份「${b.name}」？`, () => del.mutate(b.name), {
-                    message: "刪除後無法復原（不影響目前資料庫）。",
+                  ask(t("settings.backup.delete.title", { name: b.name }), () => del.mutate(b.name), {
+                    message: t("settings.backup.delete.hint"),
                   })
                 }
               >
-                刪除
+                {t("settings.backup.delete")}
               </button>
             </div>
           ))}

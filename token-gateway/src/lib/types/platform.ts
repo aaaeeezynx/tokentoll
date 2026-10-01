@@ -30,6 +30,8 @@ export interface DeeplinkProtocolState {
 export interface AppearanceState {
   /** system | light | dark */
   theme: string;
+  /** zh-TW | en */
+  lang: string;
   autostart: boolean;
   autostart_command: string;
   exe: string;

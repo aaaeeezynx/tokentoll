@@ -261,6 +261,7 @@ pub fn run() {
             // 外觀與啟動（P4.3／P4.4）
             commands::appearance_state,
             commands::appearance_set_theme,
+            commands::appearance_set_lang,
             commands::appearance_set_autostart,
             // 視窗與托盤行為（P4.7）
             commands::window_behavior,

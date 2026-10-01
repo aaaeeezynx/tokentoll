@@ -776,6 +776,53 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.32 多語系基礎建設（P4.11，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §1.5 抄）
+
+- 四種語言：簡中／繁中／英文／日文，**切換即時生效、不用重啟**。
+- 設定在左上角的齒輪（設定頁）。
+
+#### 我們做的（`lib/i18n.tsx` ＋ `lib/i18nDict.ts`）
+
+| 部分 | 內容 |
+|---|---|
+| 語言 | **繁中／英文兩種**。簡中與繁中差在用詞、日文需要母語校對 —— 沒有把握的翻譯比沒有翻譯更糟，矩陣上標明 |
+| 字典 | `key → [繁中, English]`，**繁中是 source language**；`t()` 找不到 key 就回繁中原文，不會出現「找不到字」 |
+| 佔位 | `{name}` 形式（用 split/join 取代 `replaceAll`，因為 target 是 ES2020） |
+| 即時切換 | `I18nProvider` 持有語言狀態；設定頁的語言按鈕直接 `setLang` ＋ 通知後端 —— **不用重啟** |
+| 真相源 | 後端 `settings.lang`（唯一真相），`appearance_state` 帶回來；localStorage 只做首幀快取避免閃爍 |
+| `<html lang>` | 會跟著更新（無障礙與瀏覽器翻譯提示都用得到） |
+
+#### 這輪翻譯的範圍（誠實記錄）
+
+| 範圍 | 狀態 |
+|---|---|
+| 導覽（10 項）＋ 頂列（啟動／停止） | ✅ 100% |
+| **設定頁全部**（網關／外觀／用量匯出／資料庫備份／雲端同步／Deep Link／關於，含確認框與提示） | ✅ **100%** |
+| 其餘頁面（用量各鏡頭、上游來源、MCP、提示詞、技能、會話、Key、診斷、試算） | ⬜ 未翻譯（切英文時這些頁面仍是繁中 —— 這是覆蓋率推進中的正常狀態） |
+| 數字 | 字典 **135 個 key**；以腳本量測（`.workbuddy/tmp/i18n_cover.py`）全站尚有 **751 條**中文字串未走字典 → 覆蓋率約 **15%** |
+
+覆蓋率是**用腳本量的，不是估算**；每輪繼續往上推。
+
+#### 實機驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| 初始語言 | ✅ `<html lang="zh-TW">`，導覽全繁中（用量／上游來源／MCP／提示詞／技能／會話／本地 Key／診斷／試算／設定） |
+| **切到 English** | ✅ **不重啟**：導覽變成 Usage／Providers／MCP／Prompts／Skills／Sessions／Local Keys／Diagnostics／Calculator／Settings；設定區塊變 Gateway／Appearance／Usage export／Database backups／Cloud sync／About；主題列顯示「Theme / Follow system / Light / Dark / Current: Dark」；語言列顯示「Language / 繁體中文 / English / Interface language (applies immediately, no restart)」 |
+| 切回繁中 | ✅ 導覽與 `<html lang>` 都回來 |
+| 持久化 | ✅ 後端 `settings.lang` 寫成 `zh-TW`（資料庫是唯一真相） |
+
+#### 測試
+
+本輪的語言邏輯（字典、佔位替換、合法值）由 tsc 與實機驗證把關；
+字典 key 的完整性靠**建置時的 tsc**（`t()` 的參數型別是 `string`，
+拼錯 key 不會報錯 → 這是刻意留下的缺口，未翻譯處會回繁中原文，
+所以錯字不會讓畫面變空白，只是沒翻譯）。
+
+---
+
 ### 0.9.31 雲端同步（WebDAV，P4.10，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §1.5 抄）
@@ -2904,7 +2951,45 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.31 最新建置（2026-10-01 12:58，P4.10：雲端同步 WebDAV ＋ 清完 400 行違規）—— **你目前安裝的就是這一個**
+### 9.32 最新建置（2026-10-01 13:18，P4.11：多語系基礎建設）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P4.11（設計見 §0.9.32）。**沒有動 schema（仍 v13）**。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 13:18:41 |
+| `target\release\token-gateway.exe` | 10,292,736 bytes、sha256 `FFD8821B6B02E5BF56CC8C2F4EA483A816D89A3EC05AC57B53BD60E6448B0C47` |
+| NSIS 安裝檔 | 4,273,697 bytes、sha256 `BD4EA043A1225179DE941A184E6184661357514392DD6DEEF99A21C9B72512D3` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,292,736 bytes、sha256 `F0AC4632383F520EA55B21B1F0149BED06901CE519F4A91F33A34A3DD155306F` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **441 passed / 0 failed / 11 ignored** ✅ |
+| `cargo clippy --offline --all-targets` | exit 0 ✅（兩個既有的無害警告：`skills_set_settings` 未使用、`key_id` 欄位未讀） |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍 **13** ✅ |
+| 每個檔案 ≤400 行 | ✅ 維持合規 |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src/lib/i18n.tsx`、`src/lib/i18nDict.ts` | **新增**：`I18nProvider`、`useI18n()`、`t()`、135 個 key 的繁中／英文字典 |
+| `src-tauri/src/commands/appearance_cmd.rs` | **新增** `appearance_set_lang`；`appearance_state` 帶回 `lang` |
+| `src/App.tsx` | 導覽與頂列改用 `t()`；掛上 `I18nProvider` |
+| `src/components/Settings.tsx`、`settings/{AppearanceSection,DbBackupSection,CloudSection,DeeplinkSection}.tsx` | 全部字串改走字典（含確認框、提示、區間預設值） |
+
+#### 實機驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| 即時切換（不重啟） | ✅ 導覽與設定區塊全部變英文，主題列與語言列的說明文字也跟著翻 |
+| 切回繁中 | ✅ 完整還原 |
+| 持久化 | ✅ `settings.lang = zh-TW` 寫入資料庫 |
+| 覆蓋率 | 導覽＋設定頁 **100%**；全站 135／886 ≈ **15%**（腳本量測） |
+
+### 9.31 前一次建置（2026-10-01 12:58，P4.10：雲端同步 WebDAV，已被 9.32 取代）
 
 CC Switch 對齊計畫 P4.10（設計見 §0.9.31）。**沒有動 schema（仍 v13）**。
 

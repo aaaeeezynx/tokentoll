@@ -10,7 +10,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { ACCENTS, applyAccentVars, isAccentId, loadAccent, saveAccentLocal } from "../../lib/theme";
 import {
-  THEME_LABEL,
   applyTheme,
   isThemePref,
   loadThemePref,
@@ -21,12 +20,14 @@ import {
   type ThemePref,
 } from "../../lib/appearance";
 import { Icon } from "../icons";
+import { LANG_LABEL, LANGS, isLang, useI18n, type Lang } from "../../lib/i18n";
 import { Toggle } from "../Toggle";
 import { PopSelect } from "../PopSelect";
 import { SectionHead } from "./SectionHead";
 
 export function AppearanceSection() {
   const qc = useQueryClient();
+  const { t, lang, setLang } = useI18n();
   const [accent, setAccent] = useState<string>(loadAccent());
   const [themePref, setThemePref] = useState<ThemePref>(loadThemePref());
   const [resolved, setResolved] = useState<ResolvedTheme>(() => resolveTheme(loadThemePref()));
@@ -92,7 +93,7 @@ export function AppearanceSection() {
   const autoMut = useMutation({
     mutationFn: (v: boolean) => api.appearanceSetAutostart(v),
     onSuccess: (s) => {
-      setAutoMsg(s.autostart ? "已開啟開機自啟" : "已關閉開機自啟");
+      setAutoMsg(t(s.autostart ? "settings.appearance.autostart.on" : "settings.appearance.autostart.off"));
       void qc.invalidateQueries({ queryKey: ["appearance_state"] });
     },
     onError: (e) => setAutoMsg(String(e)),
@@ -103,9 +104,11 @@ export function AppearanceSection() {
     mutationFn: (v: string) => api.windowSetCloseAction(v),
     onSuccess: (s) =>
       setWinMsg(
-        s.close_action === "exit"
-          ? "關閉視窗時會直接結束（網關也會停）"
-          : "關閉視窗時縮到系統匣，網關繼續運作",
+        t(
+          s.close_action === "exit"
+            ? "settings.appearance.close.exit.msg"
+            : "settings.appearance.close.tray.msg",
+        ),
       ),
     onError: (e) => setWinMsg(String(e)),
   });
@@ -114,17 +117,58 @@ export function AppearanceSection() {
     onError: (e) => setWinMsg(String(e)),
   });
 
+  // 語言（P4.11）：切換即時生效（cc-switch 也是不用重啟）
+  const setLangMut = useMutation({
+    mutationFn: (l: string) => api.appearanceSetLang(l),
+    onError: (e) => setWinMsg(String(e)),
+  });
+  const pickLang = (l: Lang) => {
+    setLang(l);
+    setLangMut.mutate(l);
+  };
+
+  // 後端的語言是唯一真相（切到其他視窗／重開都一致）
+  useEffect(() => {
+    const l = appearance.data?.lang;
+    if (isLang(l) && l !== lang) setLang(l);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appearance.data?.lang]);
+
   return (
     <div className="glass p-5">
       <SectionHead
         icon="sliders"
         tile="linear-gradient(160deg, #b48cff, #7c5cff)"
-        title="外觀"
-        caption="強調色與主題即時套用全站"
+        title={t("settings.appearance.title")}
+        caption={t("settings.appearance.caption")}
       />
 
+      {/* 語言（P4.11） */}
       <div className="mac-frow">
-        <span className="mac-cap">強調色</span>
+        <span className="mac-cap">{t("settings.lang.title")}</span>
+        <div className="flex items-center gap-1.5">
+          {LANGS.map((option) => (
+            <button
+              key={option}
+              data-lang-option={option}
+              className={`rounded-lg px-3 py-1.5 text-[12px] transition-colors ${
+                lang === option
+                  ? "bg-fg/[0.14] text-fg"
+                  : "bg-fg/[0.05] text-fg/55 hover:bg-fg/[0.1]"
+              }`}
+              onClick={() => pickLang(option)}
+            >
+              {LANG_LABEL[option]}
+            </button>
+          ))}
+          <span className="pl-1 text-[11px] text-fg/30">
+            {t("settings.lang.caption")}
+          </span>
+        </div>
+      </div>
+
+      <div className="mac-frow">
+        <span className="mac-cap">{t("settings.appearance.accent")}</span>
         <div className="flex items-center gap-2.5">
           {ACCENTS.map((a) => (
             <button
@@ -146,31 +190,31 @@ export function AppearanceSection() {
 
       {/* 主題（P4.3）：跟隨系統／淺色／深色 */}
       <div className="mac-frow">
-        <span className="mac-cap">主題</span>
+        <span className="mac-cap">{t("settings.appearance.theme")}</span>
         <div className="flex items-center gap-1.5">
-          {(["system", "light", "dark"] as const).map((t) => (
+          {(["system", "light", "dark"] as const).map((option) => (
             <button
-              key={t}
-              data-theme-option={t}
+              key={option}
+              data-theme-option={option}
               className={`rounded-lg px-3 py-1.5 text-[12px] transition-colors ${
-                themePref === t
+                themePref === option
                   ? "bg-fg/[0.14] text-fg"
                   : "bg-fg/[0.05] text-fg/55 hover:bg-fg/[0.1]"
               }`}
-              onClick={() => pickTheme(t)}
+              onClick={() => pickTheme(option)}
             >
-              {THEME_LABEL[t]}
+              {t(`settings.appearance.theme.${option}`)}
             </button>
           ))}
           <span className="pl-1 text-[11px] text-fg/30" data-theme-now={resolved}>
-            目前：{resolved === "light" ? "淺色" : "深色"}
+            {t("settings.appearance.theme.now", { actual: t(resolved === "light" ? "settings.appearance.theme.light" : "settings.appearance.theme.dark") })}
           </span>
         </div>
       </div>
 
       {/* 開機自啟（P4.4）：Windows 用登錄檔 Run 機碼（免管理員） */}
       <div className="mac-frow">
-        <span className="mac-cap">開機自啟</span>
+        <span className="mac-cap">{t("settings.appearance.autostart")}</span>
         <div className="flex items-center gap-2">
           <Toggle
             checked={appearance.data?.autostart ?? false}
@@ -179,7 +223,7 @@ export function AppearanceSection() {
             disabled={appearance.isPending || autoMut.isPending}
           />
           <span className="text-xs text-fg/40">
-            登入 Windows 時自動啟動（寫 HKCU 的 Run 機碼）
+            {t("settings.appearance.autostart.hint")}
           </span>
         </div>
       </div>
@@ -192,39 +236,39 @@ export function AppearanceSection() {
 
       {/* 關閉視窗時的行為（P4.7）：cc-switch 預設縮到系統匣 */}
       <div className="mac-frow">
-        <span className="mac-cap">關閉視窗時</span>
+        <span className="mac-cap">{t("settings.appearance.close")}</span>
         <div className="flex items-center gap-2">
           <div className="w-56">
             <PopSelect
               value={winBehavior.data?.close_action ?? "tray"}
               onChange={(v) => setWinMut.mutate(v)}
               options={[
-                { value: "tray", label: "縮到系統匣（建議）" },
-                { value: "exit", label: "直接結束" },
+                { value: "tray", label: t("settings.appearance.close.tray") },
+                { value: "exit", label: t("settings.appearance.close.exit") },
               ]}
             />
           </div>
           <span className="text-[11px] text-fg/35">
-            這是本地網關 —— 縮到系統匣才不會斷掉工具的流量
+            {t("settings.appearance.close.hint")}
           </span>
         </div>
       </div>
 
       {/* 輕量模式（P4.7）：銷毀視窗、只留托盤 */}
       <div className="mac-frow">
-        <span className="mac-cap">輕量模式</span>
+        <span className="mac-cap">{t("settings.appearance.lightweight")}</span>
         <div className="flex items-center gap-2">
           <button
             className="btn-ghost px-3 py-1.5 text-xs"
             onClick={() => {
-              setWinMsg("已進入輕量模式（可從托盤「開啟主視窗」或點 Deep Link 回來）");
+              setWinMsg(t("settings.appearance.lightweight.msg"));
               winLight.mutate();
             }}
           >
-            進入輕量模式
+            {t("settings.appearance.lightweight.btn")}
           </button>
           <span className="text-[11px] text-fg/35">
-            釋放視窗記憶體，托盤與網關照常運作
+            {t("settings.appearance.lightweight.hint")}
           </span>
         </div>
       </div>

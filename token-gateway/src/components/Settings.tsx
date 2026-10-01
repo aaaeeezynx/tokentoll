@@ -12,6 +12,7 @@ import { Icon } from "./icons";
 import { RangePicker, type CustomRange } from "./RangePicker";
 import { Toggle } from "./Toggle";
 import { SectionHead } from "./settings/SectionHead";
+import { useI18n } from "../lib/i18n";
 import { AppearanceSection } from "./settings/AppearanceSection";
 import { DeeplinkSection } from "./settings/DeeplinkSection";
 import { DbBackupSection } from "./settings/DbBackupSection";
@@ -22,6 +23,7 @@ function copyText(t: string) {
 }
 
 export default function SettingsPage() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settingsGet });
   const dir = useQuery({ queryKey: ["app_data_dir"], queryFn: api.appDataDir });
@@ -43,13 +45,18 @@ export default function SettingsPage() {
 
   const check = useMutation({
     mutationFn: () => api.proxyCheckPort(Number(port)),
-    onSuccess: () => setMsg(`連接埠 ${port} 可用`),
+    onSuccess: () => setMsg(t("settings.gateway.ok", { port })),
     onError: (e) => setMsg(String(e)),
   });
   const save = useMutation({
     mutationFn: () => api.settingsSet(Number(port), autoStart),
     onSuccess: (s) => {
-      setMsg(`已儲存：連接埠 ${s.gateway_port}，開機自啟${s.auto_start_proxy ? "開" : "關"}`);
+      setMsg(
+        t("settings.gateway.saved", {
+          port: s.gateway_port,
+          auto: t(s.auto_start_proxy ? "settings.gateway.on" : "settings.gateway.off"),
+        }),
+      );
       void qc.invalidateQueries({ queryKey: ["settings"] });
       void qc.invalidateQueries({ queryKey: ["tools"] });
     },
@@ -79,9 +86,9 @@ export default function SettingsPage() {
       a.click();
       URL.revokeObjectURL(url);
       const rows = csv.trim().split("\n").length - 1;
-      setCsvMsg(`已匯出 ${rows} 筆`);
+      setCsvMsg(t("settings.export.done", { n: rows }));
     } catch (e) {
-      setCsvMsg(`匯出失敗：${String(e)}`);
+      setCsvMsg(t("settings.export.failed", { e: String(e) }));
     } finally {
       setExporting(false);
     }
@@ -94,15 +101,15 @@ export default function SettingsPage() {
         <SectionHead
           icon="switch"
           tile="linear-gradient(160deg, #3395ff, #0a64d8)"
-          title="網關"
-          caption="本機代理監聽（僅 127.0.0.1）"
+          title={t("settings.gateway.title")}
+          caption={t("settings.gateway.caption")}
         />
         {settings.isPending ? (
-          <p className="text-sm text-fg/30">載入中…</p>
+          <p className="text-sm text-fg/30">{t("common.loading")}</p>
         ) : (
           <div>
             <div className="mac-frow">
-              <span className="mac-cap">監聽連接埠</span>
+              <span className="mac-cap">{t("settings.gateway.port")}</span>
               <div className="flex items-center gap-2">
                 <input
                   className="field w-full px-3 py-1.5 text-[13px]"
@@ -113,21 +120,20 @@ export default function SettingsPage() {
                   className="btn-ghost shrink-0 px-3.5 py-1.5 text-[13px]"
                   onClick={() => check.mutate()}
                 >
-                  檢測
+                  {t("settings.gateway.check")}
                 </button>
               </div>
             </div>
             <div className="mac-frow">
-              <span className="mac-cap">自動啟動</span>
+              <span className="mac-cap">{t("settings.gateway.autostart")}</span>
               <div className="flex items-center gap-2">
                 <Toggle checked={autoStart} onChange={setAutoStart} size="sm" />
-                <span className="text-xs text-fg/40">應用程式啟動時自動啟動網關</span>
+                <span className="text-xs text-fg/40">{t("settings.gateway.autostart.hint")}</span>
               </div>
             </div>
             {msg && <p className="pt-1.5 text-xs text-fg/50">{msg}</p>}
             <p className="pt-1.5 text-[11px] text-fg/25">
-              15721 常被 cc-switch 佔用，預設 15722。網關執行時不可改連接埠（需先停止）；
-              改完後已切換工具需重新執行一次切換。
+              {t("settings.gateway.hint")}
             </p>
             <div className="flex justify-end pt-2.5">
               <button
@@ -135,7 +141,7 @@ export default function SettingsPage() {
                 disabled={save.isPending}
                 onClick={() => save.mutate()}
               >
-                儲存
+                {t("settings.gateway.save")}
               </button>
             </div>
           </div>
@@ -150,16 +156,16 @@ export default function SettingsPage() {
         <SectionHead
           icon="download"
           tile="linear-gradient(160deg, #34d399, #0a9e6e)"
-          title="用量匯出"
-          caption="請求明細 CSV（含 BOM，Excel 可直接開）"
+          title={t("settings.export.title")}
+          caption={t("settings.export.caption")}
         />
         <div className="mac-frow">
-          <span className="mac-cap">區間</span>
+          <span className="mac-cap">{t("settings.export.range")}</span>
           <RangePicker
             presets={[
-              { id: "today", label: "今日" },
-              { id: "7d", label: "最近 7 天" },
-              { id: "30d", label: "最近 30 天" },
+              { id: "today", label: t("settings.export.range.today") },
+              { id: "7d", label: t("settings.export.range.7d") },
+              { id: "30d", label: t("settings.export.range.30d") },
             ]}
             range={csvRange}
             custom={csvCustom}
@@ -174,7 +180,7 @@ export default function SettingsPage() {
             disabled={exporting}
             onClick={() => void exportCsv()}
           >
-            {exporting ? "匯出中…" : "匯出 CSV"}
+            {exporting ? t("settings.export.working") : t("settings.export.csv")}
           </button>
         </div>
         {csvMsg && <p className="pt-1.5 text-xs text-fg/50">{csvMsg}</p>}
@@ -194,14 +200,14 @@ export default function SettingsPage() {
         <SectionHead
           icon="info"
           tile="linear-gradient(160deg, #8e8e93, #48484e)"
-          title="關於"
-          caption="Token Gateway v2 · Tauri 本地網關"
+          title={t("settings.about.title")}
+          caption={t("settings.about.caption")}
         />
         <div className="mac-frow">
-          <span className="mac-cap">數據目錄</span>
+          <span className="mac-cap">{t("settings.about.datadir")}</span>
           <div className="flex items-center gap-2">
             <p className="min-w-0 flex-1 font-mono text-[11px] break-all text-fg/45">
-              {dir.isPending ? "讀取中…" : dir.isError ? "讀取失敗" : dir.data}
+              {dir.isPending ? t("common.loading") : dir.isError ? t("common.readFailed") : dir.data}
             </p>
             {!dir.isPending && !dir.isError && dir.data && (
               <button
@@ -209,7 +215,7 @@ export default function SettingsPage() {
                 onClick={() => copyText(dir.data as string)}
               >
                 <Icon name="copy" size={12} />
-                複製
+                {t("settings.about.copy")}
               </button>
             )}
           </div>

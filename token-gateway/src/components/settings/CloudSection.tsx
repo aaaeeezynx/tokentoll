@@ -11,6 +11,7 @@ import { api } from "../../lib/api";
 import { useConfirm } from "../Confirm";
 import { Toggle } from "../Toggle";
 import { SectionHead } from "./SectionHead";
+import { useI18n } from "../../lib/i18n";
 
 function fmtTime(ms: number): string {
   if (!ms) return "—";
@@ -23,6 +24,7 @@ function fmtBytes(b: number): string {
 }
 
 export function CloudSection() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const { dialog, ask } = useConfirm();
   const [msg, setMsg] = useState("");
@@ -68,7 +70,7 @@ export function CloudSection() {
         form.profile,
       ),
     onSuccess: () => {
-      ok("已儲存雲端同步設定");
+      ok(t("settings.cloud.saved"));
       setForm((f) => ({ ...f, password: "" }));
       refresh();
     },
@@ -88,9 +90,13 @@ export function CloudSection() {
     mutationFn: api.cloudRemoteInfo,
     onSuccess: (s) =>
       setInfo(
-        `遠端快照：協定 ${s.protocol}｜schema v${s.schema_version}｜App ${s.app_version}｜` +
-          `${fmtTime(s.timestamp_ms)}｜${fmtBytes(s.bytes)}` +
-          (s.incompatible ? "（⚠ 協定版本不符）" : ""),
+        t("settings.cloud.snapshot", {
+          protocol: s.protocol,
+          schema: s.schema_version,
+          app: s.app_version,
+          time: fmtTime(s.timestamp_ms),
+          size: fmtBytes(s.bytes),
+        }) + (s.incompatible ? t("settings.cloud.incompatible") : ""),
       ),
     onError: bad,
   });
@@ -104,7 +110,7 @@ export function CloudSection() {
   });
   const autoSync = useMutation({
     mutationFn: (v: boolean) => api.cloudSetAuto(v),
-    onSuccess: (s) => ok(s.auto_sync ? "已開啟自動同步" : "已關閉自動同步"),
+    onSuccess: (s) => ok(t(s.auto_sync ? "settings.cloud.auto.on" : "settings.cloud.auto.off")),
     onError: bad,
   });
 
@@ -115,26 +121,29 @@ export function CloudSection() {
       <SectionHead
         icon="upload"
         tile="linear-gradient(160deg, #5AC8FA, #0A84FF)"
-        title="雲端同步"
-        caption="用 WebDAV 在裝置之間同步設定（同時只能開一種）"
+        title={t("settings.cloud.title")}
+        caption={t("settings.cloud.caption")}
       />
 
       {(
         [
-          ["base_url", "伺服器網址（例如 https://dav.example.com/remote.php/dav/files/me）"],
-          ["username", "帳號"],
+          ["base_url", t("settings.cloud.server"), t("settings.cloud.server.ph")],
+          ["username", t("settings.cloud.user"), ""],
           [
             "password",
-            st?.has_password ? "密碼（留空＝不變更）" : "密碼／應用程式密碼",
+            t("settings.cloud.password"),
+            t(
+              st?.has_password
+                ? "settings.cloud.password.keep"
+                : "settings.cloud.password.ph",
+            ),
           ],
-          ["remote_root", "遠端根目錄（預設 token-gateway-sync）"],
-          ["profile", "設定檔名稱（預設 default）"],
+          ["remote_root", t("settings.cloud.root"), t("settings.cloud.root.ph")],
+          ["profile", t("settings.cloud.profile"), t("settings.cloud.profile.ph")],
         ] as const
-      ).map(([key, ph]) => (
+      ).map(([key, label, ph]) => (
         <div className="mac-frow" key={key}>
-          <span className="mac-cap">
-            {key === "base_url" ? "伺服器" : key === "username" ? "帳號" : key === "password" ? "密碼" : key === "remote_root" ? "遠端目錄" : "設定檔"}
-          </span>
+          <span className="mac-cap">{label}</span>
           <input
             className="field w-full px-2.5 py-1.5 text-[12px]"
             type={key === "password" ? "password" : "text"}
@@ -151,46 +160,46 @@ export function CloudSection() {
           disabled={saveCfg.isPending}
           onClick={() => saveCfg.mutate()}
         >
-          儲存設定
+          {t("settings.cloud.save")}
         </button>
         <button
           className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
           disabled={test.isPending || !st?.config.base_url}
           onClick={() => test.mutate()}
         >
-          {test.isPending ? "測試中…" : "測試連線"}
+          {test.isPending ? t("settings.cloud.testing") : t("settings.cloud.test")}
         </button>
         <button
           className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40"
           disabled={upload.isPending || !st?.config.base_url}
           onClick={() =>
-            ask("上傳本地資料庫到雲端？", () => upload.mutate(), {
-              message: "上傳會**覆蓋遠端**的舊資料。本地不受影響。",
-              confirmLabel: "上傳",
+            ask(t("settings.cloud.upload.title"), () => upload.mutate(), {
+              message: t("settings.cloud.upload.hint"),
+              confirmLabel: t("settings.cloud.upload"),
             })
           }
         >
-          {upload.isPending ? "上傳中…" : "上傳"}
+          {upload.isPending ? t("settings.cloud.uploading") : t("settings.cloud.upload")}
         </button>
         <button
           className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
           disabled={remoteInfo.isPending || !st?.config.base_url}
           onClick={() => remoteInfo.mutate()}
         >
-          看遠端快照
+          {t("settings.cloud.info")}
         </button>
         <button
           className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
           disabled={download.isPending || !st?.config.base_url}
           onClick={() =>
-            ask("從雲端下載並覆蓋本地資料庫？", () => download.mutate(), {
+            ask(t("settings.cloud.download.title"), () => download.mutate(), {
               message:
-                "下載會**覆蓋本地**（遠端優先）。下載前會先自動備份本地資料庫，所以後悔還救得回來。",
-              confirmLabel: "下載",
+                t("settings.cloud.download.hint"),
+              confirmLabel: t("settings.cloud.download"),
             })
           }
         >
-          {download.isPending ? "下載中…" : "下載"}
+          {download.isPending ? t("settings.cloud.downloading") : t("settings.cloud.download")}
         </button>
         <label className="flex items-center gap-1.5 pl-1 text-[11px] text-fg/45">
           <Toggle
@@ -199,14 +208,16 @@ export function CloudSection() {
             size="sm"
             disabled={autoSync.isPending}
           />
-          自動同步
+          {t("settings.cloud.auto")}
         </label>
       </div>
 
       <p className="pt-2 text-[11px] text-fg/30">
-        上次同步：{fmtTime(st?.last_sync_ms ?? 0)}
-        {st?.last_result ? `｜${st.last_result}` : ""}
-        {st?.pending_changes ? "｜（本地有變更，尚未上傳）" : ""}
+        {t("settings.cloud.last", {
+          time: fmtTime(st?.last_sync_ms ?? 0),
+          result: st?.last_result ?? "",
+        })}
+        {st?.pending_changes ? t("settings.cloud.pending") : ""}
       </p>
       {info && <p className="pt-1 font-mono text-[11px] break-all text-fg/50">{info}</p>}
       {msg && <p className="pt-1 text-[11px] text-emerald-400/80">{msg}</p>}

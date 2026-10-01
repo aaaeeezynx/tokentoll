@@ -30,6 +30,7 @@ import McpPage from "./components/Mcp";
 import PromptsPage from "./components/Prompts";
 import SkillsPage from "./components/Skills";
 import SessionsPage from "./components/Sessions";
+import { I18nProvider, loadLang, useI18n } from "./lib/i18n";
 import KeysPage from "./components/Keys";
 import SettingsPage from "./components/Settings";
 import DiagnosticsPage from "./components/Diagnostics";
@@ -57,21 +58,23 @@ type Tab =
   | "calc"
   | "settings";
 
+/** 導覽項目：`label` 換成字典 key，實際文字由 `t()` 決定（P4.11 多語系）。 */
 const TABS: { id: Tab; label: string; icon: IconName; iconFill: IconName }[] = [
-  { id: "usage", label: "用量", icon: "chart-bar", iconFill: "chart-bar-fill" },
-  { id: "providers", label: "上游來源", icon: "server", iconFill: "server" },
-  { id: "mcp", label: "MCP", icon: "cpu", iconFill: "cpu" },
-  { id: "prompts", label: "提示詞", icon: "pencil", iconFill: "pencil" },
-  { id: "skills", label: "技能", icon: "download", iconFill: "download" },
-  { id: "sessions", label: "會話", icon: "clock", iconFill: "clock" },
-  { id: "keys", label: "本地 Key", icon: "key", iconFill: "key-fill" },
-  { id: "diagnostics", label: "診斷", icon: "alert", iconFill: "bolt-fill" },
-  { id: "calc", label: "試算", icon: "calculator", iconFill: "calculator" },
-  { id: "settings", label: "設定", icon: "gear", iconFill: "gear-fill" },
+  { id: "usage", label: "nav.usage", icon: "chart-bar", iconFill: "chart-bar-fill" },
+  { id: "providers", label: "nav.providers", icon: "server", iconFill: "server" },
+  { id: "mcp", label: "nav.mcp", icon: "cpu", iconFill: "cpu" },
+  { id: "prompts", label: "nav.prompts", icon: "pencil", iconFill: "pencil" },
+  { id: "skills", label: "nav.skills", icon: "download", iconFill: "download" },
+  { id: "sessions", label: "nav.sessions", icon: "clock", iconFill: "clock" },
+  { id: "keys", label: "nav.keys", icon: "key", iconFill: "key-fill" },
+  { id: "diagnostics", label: "nav.diagnostics", icon: "alert", iconFill: "bolt-fill" },
+  { id: "calc", label: "nav.calc", icon: "calculator", iconFill: "calculator" },
+  { id: "settings", label: "nav.settings", icon: "gear", iconFill: "gear-fill" },
 ];
 
 /** Toolbar 右側網關控制：狀態點 + 端口 + 啟動/停止。 */
 function ProxyPill() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const port = useGatewayPort();
   const status = useQuery({
@@ -136,7 +139,7 @@ function ProxyPill() {
           onClick={() => stop.mutate()}
         >
           <Icon name="stop-fill" size={10} />
-          停止
+          {t("top.stop")}
         </button>
       ) : (
         <button
@@ -145,7 +148,7 @@ function ProxyPill() {
           onClick={() => start.mutate()}
         >
           <Icon name="play-fill" size={10} />
-          啟動
+          {t("top.start")}
         </button>
       )}
     </div>
@@ -153,8 +156,9 @@ function ProxyPill() {
 }
 
 function Shell() {
+  const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("usage");
-  const active = TABS.find((t) => t.id === tab)!;
+  const active = TABS.find((item) => item.id === tab)!;
   const [uFilter, setUFilter] = useState<UsageFilterState>({
     range: "today",
     app: "",
@@ -238,20 +242,20 @@ function Shell() {
           </div>
         </div>
         <nav className="flex w-full flex-col gap-0.5">
-          {TABS.map((t) => (
+          {TABS.map((item) => (
             <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              title={t.label}
-              data-active={tab === t.id}
+              key={item.id}
+              onClick={() => setTab(item.id)}
+              title={t(item.label)}
+              data-active={tab === item.id}
               className="mac-side-item flex items-center justify-center gap-2.5 px-2.5 py-[7px] text-[13px] font-medium md:justify-start"
             >
               <Icon
-                name={tab === t.id ? t.iconFill : t.icon}
+                name={tab === item.id ? item.iconFill : item.icon}
                 size={16}
                 className="mac-side-icon shrink-0"
               />
-              <span className="hidden md:inline">{t.label}</span>
+              <span className="hidden md:inline">{t(item.label)}</span>
             </button>
           ))}
         </nav>
@@ -313,7 +317,10 @@ function Shell() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Shell />
+      {/* 多語系（P4.11）：首幀用 localStorage 快取，之後由後端 `settings.lang` 覆蓋 */}
+      <I18nProvider initial={loadLang()}>
+        <Shell />
+      </I18nProvider>
     </QueryClientProvider>
   );
 }

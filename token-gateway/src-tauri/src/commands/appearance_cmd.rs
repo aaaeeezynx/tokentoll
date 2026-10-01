@@ -11,6 +11,8 @@ use crate::{autostart, theme};
 pub struct AppearanceState {
     /// system | light | dark
     pub theme: String,
+    /// zh-TW | en
+    pub lang: String,
     pub autostart: bool,
     /// 登錄檔裡實際的啟動命令（空＝沒註冊）
     pub autostart_command: String,
@@ -28,12 +30,29 @@ pub fn appearance_state(db: State<DbState>) -> Result<AppearanceState, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     Ok(AppearanceState {
         theme: theme_setting(&conn),
+        lang: crate::db::get_setting(&conn, "lang")
+            .filter(|v| v == "zh-TW" || v == "en")
+            .unwrap_or_else(|| "zh-TW".to_string()),
         autostart: autostart::registered_command().is_some(),
         autostart_command: autostart::registered_command().unwrap_or_default(),
         exe: std::env::current_exe()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
     })
+}
+
+/// 設定介面語言（zh-TW／en）。
+#[tauri::command]
+pub fn appearance_set_lang(db: State<DbState>, value: String) -> Result<String, String> {
+    let v = value.trim().to_ascii_lowercase();
+    let v = match v.as_str() {
+        "zh-tw" | "zh_tw" | "zh" => "zh-TW",
+        "en" | "en-us" => "en",
+        _ => return Err(format!("不支援的語言「{value}」（可用：zh-TW／en）")),
+    };
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::db::set_setting(&conn, "lang", v).map_err(|e| e.to_string())?;
+    Ok(v.to_string())
 }
 
 /// 設定主題（system／light／dark）。
@@ -52,6 +71,7 @@ pub fn appearance_set_autostart(enabled: bool) -> Result<AppearanceState, String
     autostart::set_enabled(enabled, &exe)?;
     Ok(AppearanceState {
         theme: "system".to_string(), // 由前端覆蓋；這裡只是佔位
+        lang: "zh-TW".to_string(),    // 同上
         autostart: autostart::registered_command().is_some(),
         autostart_command: autostart::registered_command().unwrap_or_default(),
         exe: exe.to_string_lossy().to_string(),

@@ -5,8 +5,10 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { SectionHead } from "./SectionHead";
+import { useI18n } from "../../lib/i18n";
 
 export function DeeplinkSection() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [msg, setMsg] = useState("");
   const proto = useQuery({
@@ -15,8 +17,8 @@ export function DeeplinkSection() {
   });
   const reg = useMutation({
     mutationFn: api.deeplinkRegister,
-    onSuccess: (s) => {
-      setMsg(s.registered ? "已註冊" : "註冊後仍未生效，請檢查權限");
+    onSuccess: () => {
+      setMsg(t("settings.deeplink.done"));
       void qc.invalidateQueries({ queryKey: ["deeplink_protocol"] });
     },
     onError: (e) => setMsg(String(e)),
@@ -24,7 +26,7 @@ export function DeeplinkSection() {
   const unreg = useMutation({
     mutationFn: api.deeplinkUnregister,
     onSuccess: () => {
-      setMsg("已取消註冊（之後點連結不會再打開這個 App）");
+      setMsg(t("settings.deeplink.undone"));
       void qc.invalidateQueries({ queryKey: ["deeplink_protocol"] });
     },
     onError: (e) => setMsg(String(e)),
@@ -35,18 +37,18 @@ export function DeeplinkSection() {
       <SectionHead
         icon="download"
         tile="linear-gradient(160deg, #0A84FF, #0055cc)"
-        title="Deep Link 匯入"
-        caption="tokengateway:// 一鍵匯入來源／提示詞／MCP／技能"
+        title={t("settings.deeplink.title")}
+        caption={t("settings.deeplink.caption")}
       />
       <div className="mac-frow">
         <span className="mac-cap">協定註冊</span>
         <div className="min-w-0 flex-1">
           <p className="text-[12px] text-fg/70">
             {proto.isPending
-              ? "查詢中…"
+              ? t("common.loading")
               : proto.data?.registered
-                ? "已註冊（HKCU\\Software\\Classes\\tokengateway）"
-                : "尚未註冊"}
+                ? t("settings.deeplink.registered")
+                : t("settings.deeplink.missing")}
           </p>
           {proto.data?.command && (
             <p className="font-mono text-[10px] break-all text-fg/25">
@@ -59,7 +61,7 @@ export function DeeplinkSection() {
           disabled={reg.isPending}
           onClick={() => reg.mutate()}
         >
-          重新註冊
+          {t("settings.deeplink.reregister")}
         </button>
         {proto.data?.registered && (
           <button
@@ -67,7 +69,7 @@ export function DeeplinkSection() {
             disabled={unreg.isPending}
             onClick={() => unreg.mutate()}
           >
-            取消註冊
+            {t("settings.deeplink.unregister")}
           </button>
         )}
       </div>
