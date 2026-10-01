@@ -31,7 +31,7 @@
 | A1 | 來源 CRUD（新增／編輯／刪除／啟用停用） | ✅ | `providers.rs`、`components/providers/*` |
 | A2 | **90+ 來源預設集**（選預設＋填 Key 就能用） | ⚠️ **38 個**（全部實測過上游位址；不含模型清單，一律現場抓） | `presets.rs`、§0.9.20 |
 | A3 | 一鍵切換（每個工具各自的來源清單） | ✅ | `SwitchDialog.tsx`、`switch_apply`／`switch_off` |
-| A4 | **系統匣快速切換** | ❌ | 系統匣只有「顯示主視窗／退出」（`lib.rs`） |
+| A4 | **系統匣快速切換** | ✅ 托盤列出每個工具的可用來源，點一下就切（30 秒重建，新增來源不必重啟）；選單事件交給前端既有的切換流程 | `tray.rs`、`TraySwitchListener.tsx`、§0.9.20 |
 | A5 | 拖曳排序 | ✅ | `provider_reorder`（含排列合法性校驗） |
 | A6 | **複製來源** | ✅ | `providers_io.rs::duplicate_provider`、§0.9.20 |
 | A7 | **匯入／匯出來源** | ✅ | `providers_io.rs`（預設不含金鑰、匯入是 skip 語意、後端寫檔）、§0.9.20 |
@@ -49,10 +49,10 @@
 | B1 | 路由總開關 | ✅ | 網關啟停（`proxy_start`／`proxy_stop`） |
 | B2 | 每工具路由開關 | ✅ | 接管／還原（`switch_apply`／`switch_off`） |
 | B3 | API 格式轉換（Anthropic／Chat／Responses／Gemini） | ⚠️ 三種可互相翻譯；**Gemini 只做原生直通**（沒有 Gemini↔其他 的翻譯器） | `proxy/matrix.rs`（`E_GEMINI_IN_ONLY`／`E_GEMINI_OUT_ONLY`） |
-| B4 | **每工具的故障轉移佇列（可排序、可看）** | ⚠️ 有自動換手＋候選佇列，但順序是**全域**來源順序，沒有每工具佇列 UI | `proxy/failover.rs`、`resolve_model_providers` |
+| B4 | **每工具的故障轉移佇列（可排序、可看）** | ✅ 佇列頁可排序、可手動拖曳調整順序、有健康狀態；解析走 `resolve_model_providers` | `proxy/queue.rs`、診斷頁佇列、§0.9.20 |
 | B5 | 斷路器 ＋ 來源健康監控 | ✅ | `proxy/health.rs`、診斷頁「來源健康狀態」 |
 | B6 | Rectifier（修上游吃不下的請求：thinking signature、圖片不支援回退） | ⚠️ 有「上游拒收欄位就剝離並記住」的那一半；**沒有** thinking signature／圖片回退 | `provider_stripped_fields`、`proxy/retry.rs` |
-| B7 | **連線檢查**（來源卡上按一下測位址可達性） | ❌ | 只有 `codex_doctor`（診斷 Codex 設定，不是來源） |
+| B7 | **連線檢查**（來源卡上按一下測位址可達性） | ✅ 來源詳情面板有「檢查連線」（正規化網址、分類結果、不帶金鑰） | `provider_check.rs`、§0.9.21 |
 | B8 | 用量統計（含「沒開路由也能從本機 session log 匯入」） | ✅ 我們更強（8 個鏡頭、CSV 匯出、歷史回填） | `usage/*`、`history/*` |
 | B9 | 額度／餘額查詢（訂閱配額、Coding Plan 週期、帳戶餘額） | ✅（`quota_query_all`、訂閱費、價格週期）＋ **每來源可設定的用量查詢**（樣板／自訂、卡片顯示） | `usage_query/`、§0.9.22 |
 | B10 | **自訂用量查詢腳本**（其他上游自己寫腳本查） | ⚠️ 有自訂查詢，但是**宣告式抽取規格**而不是 JavaScript（引擎相依與可測試性的取捨，見 §0.9.22） | `usage_query/extract.rs` |
@@ -173,4 +173,36 @@ Deep Link（`tokengateway://`）。
 | 受管工具清單要不要也對齊（10 個工具） | **先不動**：維持 7 個工具做用量統計、3 個（Claude Code／Codex／OpenCode）可接管 |
 
 因此第 4 節「明確不做」維持不變，新增受管工具一事另案處理。
+
+## 6. 收尾稽核（2026-10-01，P4 結束）
+
+### 6.1 統計
+
+| 區塊 | ✅ 完成 | ⚠️ 部分（理由寫在該列） | ❌ 未做（理由寫在該列） |
+|---|---|---|---|
+| A 來源管理 | A1、A3、A4、A5、A6、A7、A8、A11 | A2（38 個而非 90＋） | A9、A10、A12、A13 |
+| B 路由與高可用 | B1、B2、B5、B8、B9、B11 | B3（Gemini 只原生直通）、B6（只有剝離記住那半）、B10（宣告式而非 JS） | — |
+| C 擴充面板 | C1、C2、C4 | C3（不做 skills.sh／ZIP） | C5 |
+| D 系統與平台 | D2、D4、D5、D6、D12、D14、D15 | D1（WebDAV 有、S3 沒做）、D3（CLI 工具版本有、WSL 沒有）、D4（部分）、D7（只做檢查更新）、D9（覆蓋率 15%） | D8、D10、D11、D13、D16 |
+
+### 6.2 兩條硬性要求的現況（每次建置都驗）
+
+| 要求 | 現況 | 證據 |
+|---|---|---|
+| 用量頁「本機工具」篩選不得少選項 | ✅ **8 個選項**（全部本機工具 ＋ Claude Code／Codex／OpenCode／Hermes Agent／DeepSeek Harness／Cursor／Antigravity） | 每一輪的實機驗證都記錄（§9.x）；最終稽核再次確認 |
+| 歷史用量不得退化成 unknown | ✅ **0 列**。`request_logs` 裡 `source='import'` 的 2,210 列（claude 33／codex 529／dsh 48／opencode 78 個匯入路徑）**全部有具名工具** | §9.34 的稽核表。另有 408 列 `app='unknown'` 但 `source='gateway'`：那是**請求自己沒帶可辨識的工具／模型**（401／404／400／429 的失敗請求與探測），佔全部 token 的 **0.0021%**，不是歷史回填造成的，也不是本次對齊過程引入的 |
+
+### 6.3 仍然開放的缺口（不藏）
+
+| 缺口 | 為什麼留著 | 要做需要什麼 |
+|---|---|---|
+| 90+ 來源預設集（目前 38） | 每個都實測過上游位址；寧可少而準 | 持續擴充（可批次抓 models.dev／已知清單驗證） |
+| skills.sh 搜尋、ZIP 安裝 | 第三方登錄的 API 與資料品質無法驗證；離線環境沒有 zip 解析套件 | 決定要不要依賴該登錄；zip 需引相依 |
+| S3 雲端同步 | 要自簽 SigV4，且沒有可驗證的 S3 端點 | 一個測試用 S3 端點（MinIO）＋實作 |
+| 自動安裝更新 | 需要**簽章過的更新檔 ＋ 公鑰 ＋ 發佈管道** | 架好 releases 頁與簽章金鑰（檢查更新已做好，見 §0.9.33） |
+| i18n 剩 85% | 665→751 條字串散在 70 個檔案，需要逐頁翻譯與校對 | 時間；機制已就緒（§0.9.32），每輪可推一段 |
+| 各工具設定目錄可自訂（含 WSL） | 路徑解析散在多個模組，改動風險高 | 集中路徑解析層（`tools::home_for(app)`）後再開放設定 |
+| 診斷日誌等級 | 目前沒有檔案日誌（診斷資料在 DB），做出等級控制前要先有日誌系統 | 先決定是否要檔案日誌 |
+| Rectifier 的 thinking signature／圖片回退、每工具獨立故障佇列、Workspace／Memory 編輯、OAuth 中心、通用來源、專案（Projects） | 各自都需要可驗證的上游行為；其中 OAuth 中心 cc-switch 自己也標 Beta 並提醒可能違反上游條款 | 逐項另案；每一項都應先做「實測上游行為」再實作 |
+
 

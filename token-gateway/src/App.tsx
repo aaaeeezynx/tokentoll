@@ -273,7 +273,7 @@ function Shell() {
           <header className="mac-floatbar">
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 md:gap-4 md:px-5">
               <h1 className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-fg">
-                {active.label}
+                {t(active.label)}
               </h1>
               <ProxyPill />
             </div>

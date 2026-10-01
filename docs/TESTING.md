@@ -3005,7 +3005,39 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.33 最新建置（2026-10-01 13:35，P4.9：更新檢查）—— **你目前安裝的就是這一個**
+### 9.34 最終建置（2026-10-01 13:46，收尾稽核）—— **你目前安裝的就是這一個**
+
+P1～P4 全部完成後的稽核建置。修掉一個收尾時用煙霧測試抓到的 i18n 漏網
+（頁面標題仍直接用字典 key，畫面會顯示 `nav.usage`）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 13:46:44 |
+| `target\release\token-gateway.exe` | 10,338,304 bytes、sha256 `791FD456E74B51185DCDA7D39257D3D488B15A6A510CF12E4E65C7A0FAC2E24C` |
+| NSIS 安裝檔 | 4,282,059 bytes、sha256 `51981869FF5D2A7870C8B81D25730FC96314E5DC6DC90544C254B69E637F531F` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,338,304 bytes、sha256 `DFFB60ABBBC16D661F48F3572D42A869163C27F88D24860A6A433F1E4E4FD8F8` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **449 passed / 0 failed / 11 ignored** ✅ |
+| `cargo clippy --offline --all-targets` | **0 warning** ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 每個檔案 ≤400 行 | ✅ 全庫合規 |
+| 資料庫 schema | 仍 **13**（整個計畫期間沒有為了功能而改 schema；功能模組各自帶自己的表） |
+
+#### 收尾實機稽核
+
+| 項目 | 結果 |
+|---|---|
+| **十個頁面全部正常渲染** | ✅ 用量／上游來源／MCP／提示詞／技能／會話／本地 Key／診斷／試算／設定，無錯誤、無原始字典 key |
+| i18n 漏網修正 | ✅ 頁面標題從 `nav.usage` 變回「用量」 |
+| **要求二：本機工具篩選** | ✅ **8 個選項**（全部本機工具 ＋ Claude Code／Codex／OpenCode／Hermes Agent／DeepSeek Harness／Cursor／Antigravity） |
+| **要求二：歷史用量不退化成 unknown** | ✅ `source='import'` 的 **2,210 列全部有具名工具**（claude 33／codex 529／dsh 48／opencode 78 條匯入路徑）。另有 408 列 `app='unknown'` 但 `source='gateway'` —— 是**請求自己沒帶可辨識工具**（401／404／400／429 的失敗請求與探測），佔全部 token 的 **0.0021%**，非歷史回填、非本次對齊引入 |
+| **真實 CLI 往返** | ✅ `codex exec -m z-ai/glm-5.3-flash` → `FINAL-OK`（經本機網關：路由、格式轉換、記帳都正常） |
+| 網關的自我保護 | ✅ 順帶驗到直連模式的規則有效：用不在該來源清單的模型會被明確拒絕（「僅允許來源登記的模型，請求不會轉發」），不是默默失敗 |
+
+### 9.33 前一次建置（2026-10-01 13:35，P4.9：更新檢查，已被 9.34 取代）
 
 CC Switch 對齊計畫 P4.9（設計見 §0.9.33）。**沒有動 schema（仍 v13）**。
 
