@@ -24,6 +24,7 @@ pub mod proxy;
 mod skills;
 mod theme;
 mod tools;
+mod updater;
 mod trace;
 mod translate;
 mod tray;
@@ -246,6 +247,7 @@ pub fn run() {
             commands::skills_restore,
             commands::skills_backup_delete,
             commands::skills_settings,
+            commands::skills_set_settings,
             // 會話管理（P3.4，見 sessions/）
             commands::sessions_apps,
             commands::sessions_scan,
@@ -275,6 +277,10 @@ pub fn run() {
             commands::db_backup_rename,
             commands::db_backup_delete,
             commands::db_backup_set_schedule,
+            // 自動更新（P4.9，見 updater/）
+            commands::update_state,
+            commands::update_set_url,
+            commands::update_check,
             // 雲端同步（P4.10，見 cloudsync/）
             commands::cloud_state,
             commands::cloud_set_config,

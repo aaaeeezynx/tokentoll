@@ -307,3 +307,26 @@ export interface CloudSyncOutcome {
   note: string;
   snapshot: RemoteSnapshot | null;
 }
+
+// ── P4.9：更新檢查 ──
+
+export interface UpdateState {
+  current: string;
+  manifest_url: string;
+  last_check_ms: number;
+  last_result: string;
+  /** 我們不做自動安裝（需要簽章更新檔 ＋ updater 外掛） */
+  auto_install: boolean;
+}
+
+export interface UpdateCheck {
+  current: string;
+  latest: string;
+  has_update: boolean;
+  notes: string;
+  pub_date: string;
+  /** 對應這個平台的下載網址（空＝manifest 沒放這個平台） */
+  url: string;
+  signed: boolean;
+  message: string;
+}

@@ -47,6 +47,8 @@ import type {
   UsableModel,
   UsableModelInput,
   CloudState,
+  UpdateCheck,
+  UpdateState,
   CloudSyncOutcome,
   RemoteSnapshot,
 } from "../apiTypes";
@@ -89,6 +91,12 @@ export const platformApi = {
   windowEnterLightweight: (): Promise<void> =>
     invoke("window_enter_lightweight"),
   windowShowMain: (): Promise<void> => invoke("window_show_main"),
+
+  // ── P4.9 更新檢查 ──
+  updateState: (): Promise<UpdateState> => invoke("update_state"),
+  updateSetUrl: (url: string): Promise<UpdateState> =>
+    invoke("update_set_url", { url }),
+  updateCheck: (): Promise<UpdateCheck> => invoke("update_check"),
 
   // ── P4.10 雲端同步（WebDAV） ──
   cloudState: (): Promise<CloudState> => invoke("cloud_state"),

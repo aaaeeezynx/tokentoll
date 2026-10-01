@@ -17,6 +17,7 @@ import { AppearanceSection } from "./settings/AppearanceSection";
 import { DeeplinkSection } from "./settings/DeeplinkSection";
 import { DbBackupSection } from "./settings/DbBackupSection";
 import { CloudSection } from "./settings/CloudSection";
+import { UpdateSection } from "./settings/UpdateSection";
 
 function copyText(t: string) {
   void navigator.clipboard?.writeText(t);
@@ -188,6 +189,9 @@ export default function SettingsPage() {
 
       {/* ── 資料庫備份（P4.8） ── */}
       <DbBackupSection />
+
+      {/* ── 更新（P4.9） ── */}
+      <UpdateSection />
 
       {/* ── 雲端同步（P4.10） ── */}
       <CloudSection />

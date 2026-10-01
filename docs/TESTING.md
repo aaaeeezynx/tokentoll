@@ -776,6 +776,60 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.33 更新檢查（P4.9 / D7，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §1.5 的 About 頁抄）
+
+版本資訊、**release notes**、**檢查更新**、下載並安裝新版本。
+
+#### 我們做到哪裡（誠實說明，含為什麼）
+
+| 項目 | 狀態 | 理由 |
+|---|---|---|
+| 顯示目前版本 | ✅ | 編譯期 `CARGO_PKG_VERSION` |
+| **檢查更新** | ✅ | 抓一份 **Tauri v2 靜態更新 manifest**（JSON），比版本、顯示 release notes、發布日期 |
+| 下載連結 | ✅ | 有對應平台的檔案就給連結（用既有的 opener 外掛開啟瀏覽器） |
+| **自動安裝** | ❌ **不做** | Tauri 的自動安裝需要「**簽章過的更新檔 ＋ 對應公鑰**」，而 `tauri-plugin-updater` 不在這個離線環境的 crate 快取裡、也還沒有發佈管道。與其塞一個不能驗證的殼子，不如把「檢查」做完整、把「安裝」明確留給使用者 —— 矩陣上標明 |
+
+manifest 網址是**設定項**（`settings.update_manifest_url`）：沒有發佈管道之前它就是空的，
+等你有 releases 頁（例如 GitHub Releases ＋ 一個 `latest.json`）填進去就會生效。
+
+#### 設計上值得一提的幾點
+
+- **版本比較**自己寫（容忍 `v` 前綴、段數不同、**不比 pre-release**）——
+  不為了這個功能拉一個 semver 相依。
+- **平台對應**：manifest 的 key 是 Tauri 的寫法（`windows-x86_64`／`darwin-aarch64`…），
+  對不上時**大小寫不拘**再試一次；再對不上就明說「manifest 沒有這個平台的檔案」，
+  而不是給一個壞掉的連結。
+- **沒簽章要講清楚**：結果卡上直接寫「這個更新沒有簽章，無法自動安裝」。
+- manifest **缺 `version`** 時給人話（「更新資訊裡沒有 version」）而不是 serde 的
+  `missing field`（所以 `version` 有 `#[serde(default)]`）。
+
+#### 測試（7 個新測試）
+
+版本比較（大小、v 前綴、段數、pre-release、數字不是字串比較）、平台 key 命名、
+manifest 解析、**壞 manifest 給人話**（不是 JSON／缺 version／空白 version）、
+有新版時的連結與簽章旗標、同版本 → 已是最新、有新版但沒這個平台 → 明說沒有、
+沒簽章 → 訊息裡講清楚、設定存取來回。
+
+#### 實機驗證：對一個**真的** manifest 伺服器
+
+自己寫了最小靜態伺服器（`.workbuddy/tmp/update_test_server.py`）提供 `/latest.json`：
+
+| 驗證項 | 結果 |
+|---|---|
+| 區塊與設定 | ✅ 設定頁「更新」區塊：更新資訊網址 ＋ 儲存 ＋ 檢查更新 ＋「目前版本 0.1.0」 |
+| **有新版（0.99.0）** | ✅ 顯示「有新版：0.99.0」、「發布於 2026-10-01T00:00:00Z」、**release notes 三行都正確渲染**、「開啟下載頁」按鈕、「這個更新沒有簽章，無法自動安裝」 |
+| **已是最新（0.1.0）** | ✅ 把 manifest 改成同版本再檢查 → 「已是最新」 |
+| 上次檢查記錄 | ✅ 寫進 `settings.update_last_check_ms` ＋ 結果摘要，設定頁會顯示 |
+| 驗證後清理 | ✅ 停掉測試伺服器、刪掉測試資料、清空 `update_*` 設定（7 個來源、schema 13 完好） |
+
+> 順手修掉一個**真的 bug**：`skills_set_settings` 這支命令忘了註冊到
+> `generate_handler!`，所以技能頁改「儲存位置／同步方式」在執行期會找不到命令
+> （編譯與單元測試都抓不到，是 clippy 的 unused 警告揭露的）。
+
+---
+
 ### 0.9.32 多語系基礎建設（P4.11，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §1.5 抄）
@@ -2951,7 +3005,45 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.32 最新建置（2026-10-01 13:18，P4.11：多語系基礎建設）—— **你目前安裝的就是這一個**
+### 9.33 最新建置（2026-10-01 13:35，P4.9：更新檢查）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P4.9（設計見 §0.9.33）。**沒有動 schema（仍 v13）**。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 13:35:21 |
+| `target\release\token-gateway.exe` | 10,338,304 bytes、sha256 `85A866FCA1CF79A528DEC94E97CED6007DB879B214F37BF5F5E2010004026969` |
+| NSIS 安裝檔 | 4,281,073 bytes、sha256 `B390929AAA262E9B17F56DA6F58346E4E944685872CFED71D4AAABA1AF99FB97` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,338,304 bytes、sha256 `D49345BFA92911F5627A7C19F3836960752762A07904227EFFA57B750E50ED54` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **449 passed / 0 failed / 11 ignored** ✅（+7：updater） |
+| `cargo clippy --offline --all-targets` | **0 warning** ✅（順手清掉兩個既有警告，其中一個是真的 bug） |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍 **13** ✅ |
+| 每個檔案 ≤400 行 | ✅ 維持合規 |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/updater/{mod,check,tests}.rs` | **新增**：manifest 解析、版本比較、平台對應、檢查結果 |
+| `src-tauri/src/commands/updater_cmd.rs` | **新增**：`update_state`／`update_set_url`／`update_check` |
+| `src/components/settings/UpdateSection.tsx` | **新增**：更新區塊（網址、檢查、結果卡含 notes／日期／下載連結／無簽章說明） |
+| `src/lib/types/platform.ts`、`src/lib/api/platform.ts`、`src/lib/i18nDict.ts`、`src/components/Settings.tsx` | 型別／API／字典／掛載 |
+| `src-tauri/src/lib.rs`、`src-tauri/src/tools/switch.rs` | 註冊 `skills_set_settings`（漏掉的真 bug）＋ `key_id` 標註為 wire-format 保留欄位 |
+
+#### 實機驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| 檢查到新版 | ✅ 0.99.0：版本、發布日期、release notes 三行、下載連結、無簽章提示 |
+| 已是最新 | ✅ manifest 改成 0.1.0 → 「已是最新」 |
+| 記錄與清理 | ✅ 上次檢查寫入設定；測試伺服器／資料／設定全數清乾淨 |
+
+### 9.32 前一次建置（2026-10-01 13:18，P4.11：多語系基礎建設，已被 9.33 取代）
 
 CC Switch 對齊計畫 P4.11（設計見 §0.9.32）。**沒有動 schema（仍 v13）**。
 

@@ -275,6 +275,26 @@ export const DICT: Record<string, [string, string]> = {
   "settings.export.range.7d": ["最近 7 天", "Last 7 days"],
   "settings.export.range.30d": ["最近 30 天", "Last 30 days"],
 
+  // ── 設定：更新 ──
+  "settings.update.title": ["更新", "Updates"],
+  "settings.update.caption": [
+    "檢查有沒有新版本（自動安裝需要簽章更新檔，我們先做到「檢查＋下載連結」）",
+    "Check for a new version (auto-install needs a signed artifact; we do check + link)",
+  ],
+  "settings.update.url": ["更新資訊網址", "Update manifest URL"],
+  "settings.update.save": ["儲存", "Save"],
+  "settings.update.check": ["檢查更新", "Check for updates"],
+  "settings.update.checking": ["檢查中…", "Checking…"],
+  "settings.update.current": ["目前版本 {v}", "Current version {v}"],
+  "settings.update.found": ["有新版：{v}", "New version available: {v}"],
+  "settings.update.latest": ["已是最新", "You're up to date"],
+  "settings.update.date": ["發布於", "Published"],
+  "settings.update.download": ["開啟下載頁", "Open download"],
+  "settings.update.no_auto": [
+    "這個更新沒有簽章，無法自動安裝 —— 請用下載連結手動安裝。",
+    "This update is not signed, so it cannot be installed automatically — use the link.",
+  ],
+
   // ── 共用 ──
   "common.cancel": ["取消", "Cancel"],
   "common.confirm": ["確定", "Confirm"],

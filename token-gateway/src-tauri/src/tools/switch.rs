@@ -6,6 +6,9 @@
 use super::*;
 
 #[derive(Debug, Clone, Deserialize)]
+/// 前端會送 `key_id`（沿用既有 payload 形狀），但 Rust 端目前用不到它 ——
+/// 保留欄位是為了不改變 wire format，所以明確允許未使用。
+#[allow(dead_code)]
 pub struct SwitchRequest {
     pub app: String,
     /// 目標 base_url。**前端送來的值只是佔位**：`plan_switch`／`apply_switch`
