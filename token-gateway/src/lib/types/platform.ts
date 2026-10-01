@@ -262,3 +262,46 @@ export interface AppStat {
 
 export * from "../apiTypesPricing";
 export * from "../apiTypesDiagnostics";
+
+// ── P4.10：雲端同步（WebDAV） ──
+
+export interface WebdavConfig {
+  base_url: string;
+  username: string;
+  /** UI 顯示的是遮罩後的值；留空送出＝不變更 */
+  password: string;
+  remote_root: string;
+  profile: string;
+}
+
+export interface CloudState {
+  /** webdav */
+  provider: string;
+  config: WebdavConfig;
+  has_password: boolean;
+  auto_sync: boolean;
+  last_sync_ms: number;
+  last_result: string;
+  last_ok: boolean;
+  local_mtime_ms: number;
+  local_bytes: number;
+  /** 自上次上傳後本地有變動 */
+  pending_changes: boolean;
+}
+
+export interface RemoteSnapshot {
+  protocol: string;
+  schema_version: number;
+  app_version: string;
+  timestamp_ms: number;
+  bytes: number;
+  incompatible: boolean;
+}
+
+export interface CloudSyncOutcome {
+  action: string;
+  bytes: number;
+  remote: string;
+  note: string;
+  snapshot: RemoteSnapshot | null;
+}

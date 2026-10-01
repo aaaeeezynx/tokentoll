@@ -46,6 +46,9 @@ import type {
   UsageSummary,
   UsableModel,
   UsableModelInput,
+  CloudState,
+  CloudSyncOutcome,
+  RemoteSnapshot,
 } from "../apiTypes";
 
 export const platformApi = {
@@ -83,6 +86,29 @@ export const platformApi = {
   windowEnterLightweight: (): Promise<void> =>
     invoke("window_enter_lightweight"),
   windowShowMain: (): Promise<void> => invoke("window_show_main"),
+
+  // ── P4.10 雲端同步（WebDAV） ──
+  cloudState: (): Promise<CloudState> => invoke("cloud_state"),
+  cloudSetConfig: (
+    baseUrl: string,
+    username: string,
+    password: string,
+    remoteRoot: string,
+    profile: string,
+  ): Promise<CloudState> =>
+    invoke("cloud_set_config", {
+      baseUrl,
+      username,
+      password,
+      remoteRoot,
+      profile,
+    }),
+  cloudSetAuto: (enabled: boolean): Promise<CloudState> =>
+    invoke("cloud_set_auto", { enabled }),
+  cloudTest: (): Promise<string> => invoke("cloud_test"),
+  cloudRemoteInfo: (): Promise<RemoteSnapshot> => invoke("cloud_remote_info"),
+  cloudUpload: (): Promise<CloudSyncOutcome> => invoke("cloud_upload"),
+  cloudDownload: (): Promise<CloudSyncOutcome> => invoke("cloud_download"),
 
   // ── P4.1 Deep Link ──
   /** 啟動時帶進來的連結（取走後就沒有了）。 */

@@ -1,4 +1,5 @@
-pub mod commands;
+pub mod cloudsync;
+mod commands;
 pub mod error;
 mod autostart;
 mod db;
@@ -273,6 +274,14 @@ pub fn run() {
             commands::db_backup_rename,
             commands::db_backup_delete,
             commands::db_backup_set_schedule,
+            // 雲端同步（P4.10，見 cloudsync/）
+            commands::cloud_state,
+            commands::cloud_set_config,
+            commands::cloud_set_auto,
+            commands::cloud_test,
+            commands::cloud_remote_info,
+            commands::cloud_upload,
+            commands::cloud_download,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

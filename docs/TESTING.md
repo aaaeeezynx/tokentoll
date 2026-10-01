@@ -776,6 +776,52 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.31 雲端同步（WebDAV，P4.10，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §1.5 抄）
+
+- 用 **WebDAV** 或 S3 同步設定（**同時只能開一種**）。
+- 設定項：伺服器網址、帳號、密碼、**遠端根目錄**（預設 `cc-switch-sync`）、
+  **設定檔名稱**（預設 `default`）、**自動同步**。
+- 操作：**測試連線**、**上傳**（覆蓋遠端）、**下載**（覆蓋本地，
+  **下載前顯示遠端快照資訊，且下載前一定先自動備份本地資料庫**）。
+
+#### 我們做的（`cloudsync/`，沒有新增資料表）
+
+| 決定 | 理由 |
+|---|---|
+| **只做 WebDAV**，不做 S3 | S3 要自簽 SigV4，而且我們沒有可驗證的 S3 端點 —— 寧缺勿假，矩陣上標明未做 |
+| 遠端佈局 `<根>/<設定檔>/tokens.db` ＋ `manifest.json` | manifest 放協定版本、schema 版本、App 版本、時間、大小 → **下載前能先顯示給使用者看**（cc-switch 的「Remote Snapshot Info」）；協定版本不符就拒絕下載 |
+| 只用四個動詞 | `PROPFIND`（測試連線）、`MKCOL`（建目錄）、`PUT`（上傳）、`GET`（下載）；已存在回 405 視為成功 |
+| **下載前先做本地安全備份** | 沿用 `dbbackup::create`；之後用 SQLite 線上備份 API 寫回**現有連線**（與還原同一條路徑，不必重啟 App） |
+| 下載分兩步 | `fetch_remote_db`（async、不碰 DB）→ `apply_remote_db`（同步、拿鎖）—— `MutexGuard` 帶過 `.await` 會讓 async 命令不成立（編譯器會說 future 不能跨執行緒） |
+| 自動同步 | 背景執行緒每分鐘比對本地資料庫的 (mtime, 大小) 與上次上傳的，有變才上傳。**與 cc-switch 的「每次資料庫變更立刻上傳」不同**：我們沒有在每個寫入點掛鉤，改成一分鐘內的反應（文件標明） |
+| 密碼 | 存在 `settings`（與 cc-switch 存在自己資料庫裡相同）；**UI 只顯示遮罩**、輸入框是 `type=password`、驗證時不回傳明文 |
+
+#### 實機驗證：對一個**真的** WebDAV 伺服器
+
+沒有現成的 WebDAV 端點可測，所以自己寫了一個最小的（`.workbuddy/tmp/webdav_test_server.py`：
+PROPFIND／MKCOL／PUT／GET ＋ Basic 認證，只用於驗證）。驗證流程與結果：
+
+| 驗證項 | 結果 |
+|---|---|
+| 區塊與欄位 | ✅ 設定頁「雲端同步」：伺服器／帳號／密碼（`type=password`）／遠端目錄／設定檔名稱 |
+| 儲存設定 | ✅「已儲存雲端同步設定」 |
+| **測試連線** | ✅「連線成功（HTTP 404）；遠端目錄尚未建立，上傳時會自動建立」（目錄不存在也算連得上 ✓） |
+| **上傳** | ✅「已上傳（2166784 bytes，涵蓋遠端舊資料）」；伺服器 log 依序看到 `MKCOL /tg-sync-test → 201`、`MKCOL /tg-sync-test/default → 201`、`PUT tokens.db → 201 (2166784)`、`PUT manifest.json → 201 (167)` |
+| **看遠端快照** | ✅「協定 tokengateway-sync/1｜schema v13｜App 0.1.0｜2026/10/1 13:00｜2.07 MB」 |
+| **下載** | ✅「已下載並套用（schema v13）；下載前的本地資料庫已備份為 db_backup_20261001_130011」；伺服器 log 看到兩次 `GET manifest.json` ＋ `GET tokens.db → 200` |
+| **認證失敗** | ✅ 故意改錯密碼 → 「認證失敗（帳號或密碼不對；Nextcloud／堅果雲要填應用程式密碼）」 |
+| 驗證後清理 | ✅ 停掉測試伺服器、刪掉測試資料、把 `cloud_*` 設定全部清空（使用者機器不會殘留指向測試伺服器的設定）；7 個來源、schema 13 完好 |
+
+#### 測試（6 個新測試）
+
+設定正規化與拒絕（http(s) 檢查、帳號必填、路徑不可 `..`、空值用預設）、
+自動同步的觸發條件（從沒上傳過／無變化／時間變／大小變／讀不到本地）、
+密碼遮罩、設定來回（**密碼留空＝不覆蓋**）、狀態快照（待同步變更、上次結果）。
+
+---
+
 ### 0.9.30 資料庫備份管理（P4.8，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §1.5 抄）
@@ -2858,7 +2904,47 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.30 最新建置（2026-10-01 12:36，P4.8：資料庫備份管理）—— **你目前安裝的就是這一個**
+### 9.31 最新建置（2026-10-01 12:58，P4.10：雲端同步 WebDAV ＋ 清完 400 行違規）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P4.10（設計見 §0.9.31）。**沒有動 schema（仍 v13）**。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 12:58:29 |
+| `target\release\token-gateway.exe` | 10,288,640 bytes、sha256 `19172E9CC19F05D5DBA30EA34293512F0C645573656ED75A8C263766B84DBF0A` |
+| NSIS 安裝檔 | 4,264,710 bytes、sha256 `05922B920F8496177157069EF317992D7603DF948838A382A20B66A57239DC43` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,288,640 bytes、sha256 `D73E913AA72C16EB462A95CAEB527091834F0DBD13059C00DC6AB03BACC573A7` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **441 passed / 0 failed / 11 ignored** ✅（+6：雲端同步） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍 **13** ✅ |
+| 每個檔案 ≤400 行 | ✅ **全庫 304 個原始檔全部合規**（`index.css` 800→9＋5 個分檔、`apiTypes.ts` 675→10＋3 個分檔、`api.ts` 560→30＋3 個分檔、`providers_io.rs` 598→307＋3 個分檔） |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/cloudsync/{mod,store,webdav,tests}.rs` | **新增**：設定與狀態、WebDAV 四個動詞、上傳／下載（先安全備份再寫回）、下載分「抓」與「套用」兩步 |
+| `src-tauri/src/commands/cloud_cmd.rs` | **新增**：state／set_config／set_auto／test／remote_info／upload／download |
+| `src/components/settings/CloudSection.tsx` | **新增**：雲端同步區塊（含下載前的確認說明） |
+| `src/styles/*.css`、`src/lib/types/*.ts`、`src/lib/api/*.ts`、`src-tauri/src/providers_io/*.rs` | 行數合規拆分（見上表） |
+
+#### 實機驗證（對自己寫的本機 WebDAV 伺服器）
+
+| 驗證項 | 結果 |
+|---|---|
+| 測試連線 | ✅ 目錄不存在也算連得上，並說明「上傳時會自動建立」 |
+| 上傳 | ✅ MKCOL ×2 → PUT tokens.db（2,166,784 bytes）＋ manifest.json（167 bytes），伺服器 log 可查 |
+| 遠端快照 | ✅ 協定／schema／App 版本／時間／大小都顯示 |
+| 下載 | ✅ 先自動備份（`db_backup_20261001_130011`）再套用，schema v13 驗證通過 |
+| 認證失敗 | ✅ 給出「Nextcloud／堅果雲要填應用程式密碼」的可操作訊息 |
+| 清理 | ✅ 測試伺服器與資料已刪除、`cloud_*` 設定已清空 |
+
+### 9.30 前一次建置（2026-10-01 12:36，P4.8：資料庫備份管理，已被 9.31 取代）
 
 CC Switch 對齊計畫 P4.8（設計見 §0.9.30）。**沒有動 schema（仍 v13）**。
 新增相依功能：`rusqlite` 的 `backup`。
