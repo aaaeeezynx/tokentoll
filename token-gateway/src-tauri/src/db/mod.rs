@@ -42,7 +42,12 @@ pub(crate) use settings::*;
 /// skill_bindings 六張表。使用者已經寫進各工具設定檔的內容（`AGENTS.md`、
 /// `config.toml` 的 `[mcp_servers]`、`skills/` 目錄）**一律不動** —— 移除的是
 /// 這個 App 的管理能力，不是使用者的檔案。
-pub const SCHEMA_VERSION: i32 = 14;
+/// v15（2026-10-02）：**移除** Deep Link 匯入／資料庫備份／更新檢查／雲端同步
+/// 四個功能。與 v14 不同 —— 這四個功能都沒有專屬資料表，狀態一律放在通用的
+/// `settings` key-value 表裡，所以不需要 DROP TABLE，只需要把只服務它們的
+/// 17 個 key 清掉（見 [`open::purge_removed_feature_settings`]`）。
+/// 當中 `cloud_password` 是**明文的 WebDAV 密碼**，留著就是留著憑證在磁碟上。
+pub const SCHEMA_VERSION: i32 = 15;
 
 /// 網關預設連接埠（C 方案：可在設定中修改；歷史預設 15721 與 cc-switch 衝突）。
 pub const DEFAULT_GATEWAY_PORT: u16 = 15722;

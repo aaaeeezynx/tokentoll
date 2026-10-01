@@ -37,7 +37,6 @@ import UsagePage, {
 import CalcPage from "./components/Calc";
 import { Icon, type IconName } from "./components/icons";
 import { TraySwitchListener } from "./components/TraySwitchListener";
-import { DeeplinkDialog } from "./components/DeeplinkDialog";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -165,8 +164,6 @@ function Shell() {
       <AccentSync />
       {/* 系統匣切換的接收端：掛在全域，任何頁面都能收到托盤的切換（P1.6） */}
       <TraySwitchListener />
-      {/* Deep Link 匯入確認（P4.1）：啟動參數或執行中的 deeplink 事件都會跳出來 */}
-      <DeeplinkDialog />
       {/* ── 環境光暈 ── */}
       <div className="bg-orbs" aria-hidden="true">
         <div

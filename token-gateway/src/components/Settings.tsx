@@ -2,7 +2,7 @@
  * 設定頁。
  *
  * 這一頁只留「版面 ＋ 網關 ＋ 用量匯出 ＋ 關於」，其餘區塊各自住在
- * `components/settings/` 底下（外觀／Deep Link／資料庫備份）—— 這支檔案原本
+ * `components/settings/` 底下（外觀）—— 這支檔案原本
  * 因為一路加功能長到 487 行，超過專案的 400 行上限，所以把整塊功能拆出去。
  */
 import { useEffect, useState } from "react";
@@ -14,10 +14,6 @@ import { Toggle } from "./Toggle";
 import { SectionHead } from "./settings/SectionHead";
 import { useI18n } from "../lib/i18n";
 import { AppearanceSection } from "./settings/AppearanceSection";
-import { DeeplinkSection } from "./settings/DeeplinkSection";
-import { DbBackupSection } from "./settings/DbBackupSection";
-import { CloudSection } from "./settings/CloudSection";
-import { UpdateSection } from "./settings/UpdateSection";
 
 function copyText(t: string) {
   void navigator.clipboard?.writeText(t);
@@ -186,18 +182,6 @@ export default function SettingsPage() {
         </div>
         {csvMsg && <p className="pt-1.5 text-xs text-fg/50">{csvMsg}</p>}
       </div>
-
-      {/* ── 資料庫備份（P4.8） ── */}
-      <DbBackupSection />
-
-      {/* ── 更新（P4.9） ── */}
-      <UpdateSection />
-
-      {/* ── 雲端同步（P4.10） ── */}
-      <CloudSection />
-
-      {/* ── Deep Link 協定（P4.1） ── */}
-      <DeeplinkSection />
 
       {/* ── 關於 ── */}
       <div className="glass p-5">

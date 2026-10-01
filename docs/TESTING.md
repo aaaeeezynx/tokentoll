@@ -861,6 +861,93 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.37 移除 Deep Link 匯入／資料庫備份／更新／雲端同步（2026-10-02）
+
+依使用者指示移除這四項。規模：**Rust 23 檔刪除**（模組 19 檔 ＋ 命令 4 檔）、
+**前端 5 個元件檔刪除**、約 12 個檔案清理引用、約 80 條 i18n 字典刪除。
+
+#### 動工前先回答：會不會刪到使用者的資料？
+
+| 問題 | 結論 |
+|---|---|
+| 這四個功能有專屬資料表嗎？ | **沒有。** 狀態一律塞在通用的 `settings` key-value 表，所以沒有 `DROP TABLE` 可做（與 v14 相反） |
+| 會動到核心資料嗎？ | 不會。`providers`／`request_logs`／`local_keys`／`provider_models` 一列不碰 |
+| 有憑證外洩的風險嗎？ | **有。** `cloud_password` 是**明文的 WebDAV 密碼** —— 功能拿掉但憑證留在 app.db 裡就是資訊留存，所以一定要清 |
+
+#### 資料庫：schema v14 → v15（清 settings 的 17 個孤兒 key）
+
+新增 `open::purge_removed_feature_settings`：冪等的
+`DELETE FROM settings WHERE key IN (…)`，只點名 17 個 key（`cloud_*` 12 個、
+`db_backup_*` 2 個、`update_*` 3 個）。**刻意不是 `DELETE FROM settings`** ——
+那會把 theme／lang／accent／gateway_port／close_action 等天天在用的設定一起刪掉。
+老庫有就清、沒有就命中 0 列不報錯，對新庫也安全。
+
+**動工前先備份**：`_backup/manual-v14-before-removing-4-features-20261002-025749.db`
+（2,183,168 bytes，以 Python 的 `sqlite3` backup API 產生，WAL 一致 —— 當下 App
+正在執行、主檔 2.07 MB 但 WAL 有 3.77 MB，檔案複製會漏資料）。
+備份當下：`schema_version` 14、`providers` 7／`request_logs` 5,874／
+`local_keys` 2／`provider_models` 26。
+
+> 實機查證：這台機器的 `settings` 只有 7 列，全是無關設定（accent、auto_start_proxy、
+> close_action、gateway_port、lang、seed_version、theme）—— **那 17 個待清 key
+> 一個都不存在**，因為從沒設定過雲端同步／備份排程／更新網址。清理語句仍保留
+> （保護其他機器與未來設定）。
+
+#### 施工前的安全界線（不誤刪同名東西）
+
+| 看起來像、但**不能動** | 為什麼 |
+|---|---|
+| **`tools/backup.rs`** | 這是「接管工具設定」的 baseline 備份（寫進 `backups/<app>/`），跟「資料庫備份」完全無關 —— 名字像，功能不同 |
+| `fsutil.rs` 的 `rotate_backups`／`backup_text`／`unique_backup_name` | 被 `tools/backup.rs` 使用 |
+| `window.rs` 輕量模式 | 被 `tray.rs` 與 `commands/window_cmd.rs` 共用；deeplink 只是其中一個呼叫者 |
+| `db::DEFAULT_GATEWAY_PORT` | deeplink 用它判斷「已有實例」，但 `db/` 與 `commands/settings.rs` 也用 |
+| `reqwest` | proxy／quota／price_extract／provider_check 都還在用 |
+
+#### 連帶要改的地方
+
+| 位置 | 改什麼 |
+|---|---|
+| `lib.rs` | 4 個 `mod`、`deeplink_startup()` 整支函式、setup 裡的 `manage(DeeplinkState)`／`spawn_watcher`／`spawn_scheduler`、**22 個 `generate_handler!` 註冊** |
+| `commands/mod.rs` | 4 個 `mod` ＋ 4 個 `pub use` |
+| `Cargo.toml` | 刪 `base64 = "0.22"` —— v14 移除 mcp/prompt/skill 後就已經沒人用了，是死相依 |
+| `Settings.tsx` | 4 個 import ＋ 4 個 JSX；檔頭註解同步 |
+| `App.tsx` | `DeeplinkDialog` import ＋ 全域掛載（原本掛在 `TraySwitchListener` 旁邊） |
+| `api/platform.ts` | **22 個 `invoke`** ＋ 12 個 type import |
+| `types/platform.ts` | `Deeplink*` 3 個、`DbBackup*` 3 個、`WebdavConfig`、`Cloud*` 3 個、`Update*` 2 個（`LocalKey`／`AppSettings`／`Usage*` 全部保留） |
+| `i18nDict.ts` | `settings.backup.*` 26 條、`settings.cloud.*` 34 條、`settings.update.*` 15 條、`settings.deeplink.*` 8 條 |
+
+> `i18nDict.ts` 施工中踩過兩個坑，兩次都是「刪一大段順手刪到／漏掉鄰居」：
+> 1. 刪 `settings.update.*` 那段時把 `settings.export.range.today`／`.7d` 一起帶走了
+>    （`.30d` 留在原位所以看起來沒少）。已補回。
+> 2. 刪 `settings.deeplink.*` 時拿 `settings.cloud.auto.off` 當錨點，結果**整段
+>    `settings.cloud.*`（34 條）整個沒刪掉** —— 因為 `tsc` 抓不到（字典 key 是
+>    字串不是型別，多一條不會報錯），是收尾 grep 原始 key 才發現的。
+>
+> **教訓**：刪字典之後一定要用 grep 對**原始 key 前綴**再掃一次，
+> 不能只看編譯過不過。
+
+#### 閘門
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | ✅ **318 passed / 0 failed / 8 ignored**（原 351／0／8；淨減 33 = 移除 34 個模組自帶測試 − 新增 1 條 v15 斷言） |
+| `cargo clippy --offline --all-targets -- -D warnings` | ✅ 0 warning |
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `cargo build --release --offline` | ✅ exit 0 |
+| `pnpm tauri build` | ⚠️ **本輪無法執行** —— 不是程式問題：sandbox 擋掉 Node 的 `child_process.exec`（named pipe），Vite 在 `optimizeSafeRealPathSync` 階段 `spawn EPERM`，連 tailwindcss oxide 的原生模組都載不起來。需在沙箱外跑一次補驗 |
+
+新增測試 `db::tests::removal::v14_feature_settings_are_purged_and_live_settings_survive`：
+兩個方向都釘住 —— 17 個 key 消失，且 `theme`／`lang`／`accent`／`close_action`／
+`gateway_port` 的**值一字未變**。
+
+#### 實機驗證
+
+- `reg delete HKCU\Software\Classes\tokengateway /f` —— 解除 `tokengateway://` 協定註冊，
+  否則之後點連結還是會開啟這個 App，只是參數被忽略。
+- 待補：真實庫升到 v15、`settings` 僅剩 7 列、四項區塊從設定頁消失、側邊欄不變。
+
+---
+
 ### 0.9.36 真相：不是計算錯，是「已用 vs 剩餘」被讀反了（2026-10-01）
 
 #### 回報
@@ -1190,9 +1277,9 @@ manifest 解析、**壞 manifest 給人話**（不是 JSON／缺 version／空�
 | 範圍 | 狀態 |
 |---|---|
 | 導覽（10 項）＋ 頂列（啟動／停止） | ✅ 100% |
-| **設定頁全部**（網關／外觀／用量匯出／資料庫備份／雲端同步／Deep Link／關於，含確認框與提示） | ✅ **100%** |
+| **設定頁全部**（網關／外觀／用量匯出／關於，含確認框與提示） | ✅ **100%**（2026-10-02 移除資料庫備份／雲端同步／Deep Link 三個區塊後仍維持） |
 | 其餘頁面（用量各鏡頭、上游來源、MCP、提示詞、技能、會話、Key、診斷、試算） | ⬜ 未翻譯（切英文時這些頁面仍是繁中 —— 這是覆蓋率推進中的正常狀態） |
-| 數字 | 字典 **135 個 key**；以腳本量測（`.workbuddy/tmp/i18n_cover.py`）全站尚有 **751 條**中文字串未走字典 → 覆蓋率約 **15%** |
+| 數字 | 字典 **65 個 key**（2026-10-02 移除四個功能後由 145 條降下來）；以腳本量測（`.workbuddy/tmp/i18n_cover.py`）全站尚有 **751 條**中文字串未走字典 → 覆蓋率約 **15%** |
 
 覆蓋率是**用腳本量的，不是估算**；每輪繼續往上推。
 

@@ -1,29 +1,4 @@
-/** 平台面型別（Deep Link、外觀與啟動、視窗行為、資料庫備份）。 */
-
-// ── P4.1：Deep Link 一鍵匯入（對標 cc-switch 的 ccswitch:// 協定） ──
-
-export interface DeeplinkPreview {
-  /** 目前只有 provider（prompt／mcp／skill 已於 2026-10-02 移除） */
-  kind: string;
-  title: string;
-  /** [欄位名, 值]（機密值已遮罩） */
-  fields: [string, string][];
-  warnings: string[];
-  effects: string[];
-}
-
-export interface DeeplinkApplied {
-  kind: string;
-  created: string[];
-  skipped: string[];
-  note: string;
-}
-
-export interface DeeplinkProtocolState {
-  scheme: string;
-  registered: boolean;
-  command: string;
-}
+/** 平台面型別（外觀與啟動、視窗行為、資料庫備份）。 */
 
 // ── P4.3／P4.4：外觀與開機自啟 ──
 
@@ -48,30 +23,6 @@ export interface WindowBehavior {
 }
 
 // ── P4.8：資料庫備份管理 ──
-
-export interface DbBackupInfo {
-  name: string;
-  path: string;
-  created_ms: number;
-  bytes: number;
-}
-
-export interface DbBackupState {
-  dir: string;
-  interval_hours: number;
-  retention: number;
-  interval_options: number[];
-  retention_options: number[];
-  backups: DbBackupInfo[];
-  last_ms: number;
-}
-
-export interface DbRestoreOutcome {
-  restored: string;
-  /** 還原前自動建立的安全備份 */
-  safety_backup: string;
-  note: string;
-}
 
 export interface AppSettings {
   gateway_port: number;
@@ -264,69 +215,3 @@ export interface AppStat {
 
 export * from "../apiTypesPricing";
 export * from "../apiTypesDiagnostics";
-
-// ── P4.10：雲端同步（WebDAV） ──
-
-export interface WebdavConfig {
-  base_url: string;
-  username: string;
-  /** UI 顯示的是遮罩後的值；留空送出＝不變更 */
-  password: string;
-  remote_root: string;
-  profile: string;
-}
-
-export interface CloudState {
-  /** webdav */
-  provider: string;
-  config: WebdavConfig;
-  has_password: boolean;
-  auto_sync: boolean;
-  last_sync_ms: number;
-  last_result: string;
-  last_ok: boolean;
-  local_mtime_ms: number;
-  local_bytes: number;
-  /** 自上次上傳後本地有變動 */
-  pending_changes: boolean;
-}
-
-export interface RemoteSnapshot {
-  protocol: string;
-  schema_version: number;
-  app_version: string;
-  timestamp_ms: number;
-  bytes: number;
-  incompatible: boolean;
-}
-
-export interface CloudSyncOutcome {
-  action: string;
-  bytes: number;
-  remote: string;
-  note: string;
-  snapshot: RemoteSnapshot | null;
-}
-
-// ── P4.9：更新檢查 ──
-
-export interface UpdateState {
-  current: string;
-  manifest_url: string;
-  last_check_ms: number;
-  last_result: string;
-  /** 我們不做自動安裝（需要簽章更新檔 ＋ updater 外掛） */
-  auto_install: boolean;
-}
-
-export interface UpdateCheck {
-  current: string;
-  latest: string;
-  has_update: boolean;
-  notes: string;
-  pub_date: string;
-  /** 對應這個平台的下載網址（空＝manifest 沒放這個平台） */
-  url: string;
-  signed: boolean;
-  message: string;
-}

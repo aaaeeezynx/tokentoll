@@ -233,6 +233,10 @@ pub(crate) fn open_and_ensure(path: &Path) -> Result<Connection, String> {
         conn.execute(&format!("DROP TABLE IF EXISTS {t}"), [])
             .map_err(|e| e.to_string())?;
     }
+    // v14 → v15（2026-10-02）：Deep Link 匯入／資料庫備份／更新檢查／雲端同步
+    // 四個功能已移除。與 v14 不同 —— 這四個都沒有專屬資料表，所以不需要 DROP；
+    // 但它們的狀態放在通用的 `settings` 表裡，不清就會變成沒人讀的孤兒列。
+    purge_removed_feature_settings(&conn).map_err(|e| e.to_string())?;
     // 列齊了再建索引（整批 SCHEMA 先於 ALTER，老庫在此之前無此列）
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_logs_import ON request_logs(import_path)",
@@ -296,4 +300,52 @@ fn purge_orphans(conn: &Connection) -> rusqlite::Result<usize> {
         )?;
     }
     Ok(total)
+}
+
+/// 清掉只服務「已移除的四個功能」的 `settings` 列，回傳清掉的列數。
+///
+/// 來由（2026-10-02）：Deep Link 匯入／資料庫備份／更新檢查／雲端同步移除。
+/// 這四個功能**沒有專屬資料表**，全部狀態都塞在通用的 `settings` key-value 表，
+/// 所以沒有東西可以 DROP —— 留下的就是沒人再讀的孤兒列。
+///
+/// 真正非清不可的理由是 `cloud_password`：**明文的 WebDAV 密碼**。功能拿掉了
+/// 但憑證還躺在 app.db 裡，是實質的資訊留存，不只是垃圾資料。
+///
+/// 冪等：老庫有就清、沒有就什麼都不做（`key IN (...)` 命中 0 列不報錯），
+/// 對新庫也安全。**只點名這 17 個 key** —— `settings` 裡還有 gateway_port、
+/// theme、lang、accent、close_action 等在用的設定，用 `DELETE FROM settings`
+/// 會把它們一起刪掉。
+fn purge_removed_feature_settings(conn: &Connection) -> rusqlite::Result<usize> {
+    let keys = [
+        // 雲端同步（P4.10）
+        "cloud_provider",
+        "cloud_base_url",
+        "cloud_username",
+        "cloud_password",
+        "cloud_remote_root",
+        "cloud_profile",
+        "cloud_auto_sync",
+        "cloud_last_sync_ms",
+        "cloud_last_result",
+        "cloud_last_ok",
+        "cloud_last_mtime",
+        "cloud_last_bytes",
+        // 資料庫備份（P4.8）
+        "db_backup_interval",
+        "db_backup_keep",
+        // 更新檢查（P4.9）
+        "update_manifest_url",
+        "update_last_check_ms",
+        "update_last_result",
+    ];
+    let list = keys
+        .iter()
+        .map(|k| format!("'{k}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let purged = conn.execute(&format!("DELETE FROM settings WHERE key IN ({list})"), [])?;
+    if purged > 0 {
+        eprintln!("gateway: 清掉 {purged} 列已移除功能的設定（雲端同步／備份／更新）");
+    }
+    Ok(purged)
 }

@@ -29,6 +29,13 @@ use std::path::Path;
         .unwrap_or(0)
     }
 
+    /// `settings` 裡有沒有這個 key（v15 清孤兒列的測試要用）。
+    fn has_setting(conn: &Connection, key: &str) -> bool {
+        conn.query_row("SELECT 1 FROM settings WHERE key=?1", [key], |r| r
+            .get::<_, i64>(0))
+            .is_ok()
+    }
+
     fn open(path: &Path) -> Connection {
         open_and_ensure(path).expect("open_and_ensure")
     }

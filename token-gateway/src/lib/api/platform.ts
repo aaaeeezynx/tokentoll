@@ -1,4 +1,4 @@
-/** 平台面 API（外觀與啟動、資料庫備份、視窗行為、Deep Link）。 */
+/** 平台面 API（外觀與啟動、視窗行為）。 */
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppStat,
@@ -20,14 +20,8 @@ import type {
   ProviderPricing,
   ProviderPricingInput,
   ProviderStat,
-  DbBackupInfo,
-  DbBackupState,
-  DbRestoreOutcome,
   WindowBehavior,
   AppearanceState,
-  DeeplinkApplied,
-  DeeplinkPreview,
-  DeeplinkProtocolState,
   SubscriptionFees,
   SubscriptionQuota,
   SwitchPlan,
@@ -42,11 +36,6 @@ import type {
   UsageSummary,
   UsableModel,
   UsableModelInput,
-  CloudState,
-  UpdateCheck,
-  UpdateState,
-  CloudSyncOutcome,
-  RemoteSnapshot,
 } from "../apiTypes";
 
 export const platformApi = {
@@ -60,25 +49,6 @@ export const platformApi = {
   appearanceSetAutostart: (enabled: boolean): Promise<AppearanceState> =>
     invoke("appearance_set_autostart", { enabled }),
 
-  // ── P4.8 資料庫備份管理 ──
-  dbBackupState: (): Promise<DbBackupState> => invoke("db_backup_state"),
-  dbBackupNow: (name?: string | null): Promise<DbBackupInfo> =>
-    invoke("db_backup_now", { name: name ?? null }),
-  dbBackupRestore: (name: string): Promise<DbRestoreOutcome> =>
-    invoke("db_backup_restore", { name }),
-  dbBackupRename: (name: string, newName: string): Promise<DbBackupInfo> =>
-    invoke("db_backup_rename", { name, newName }),
-  dbBackupDelete: (name: string): Promise<void> =>
-    invoke("db_backup_delete", { name }),
-  dbBackupSetSchedule: (
-    intervalHours?: number,
-    retention?: number,
-  ): Promise<DbBackupState> =>
-    invoke("db_backup_set_schedule", {
-      intervalHours: intervalHours ?? null,
-      retention: retention ?? null,
-    }),
-
   // ── P4.7 視窗與托盤行為 ──
   windowBehavior: (): Promise<WindowBehavior> => invoke("window_behavior"),
   windowSetCloseAction: (action: string): Promise<WindowBehavior> =>
@@ -87,50 +57,6 @@ export const platformApi = {
   windowEnterLightweight: (): Promise<void> =>
     invoke("window_enter_lightweight"),
   windowShowMain: (): Promise<void> => invoke("window_show_main"),
-
-  // ── P4.9 更新檢查 ──
-  updateState: (): Promise<UpdateState> => invoke("update_state"),
-  updateSetUrl: (url: string): Promise<UpdateState> =>
-    invoke("update_set_url", { url }),
-  updateCheck: (): Promise<UpdateCheck> => invoke("update_check"),
-
-  // ── P4.10 雲端同步（WebDAV） ──
-  cloudState: (): Promise<CloudState> => invoke("cloud_state"),
-  cloudSetConfig: (
-    baseUrl: string,
-    username: string,
-    password: string,
-    remoteRoot: string,
-    profile: string,
-  ): Promise<CloudState> =>
-    invoke("cloud_set_config", {
-      baseUrl,
-      username,
-      password,
-      remoteRoot,
-      profile,
-    }),
-  cloudSetAuto: (enabled: boolean): Promise<CloudState> =>
-    invoke("cloud_set_auto", { enabled }),
-  cloudTest: (): Promise<string> => invoke("cloud_test"),
-  cloudRemoteInfo: (): Promise<RemoteSnapshot> => invoke("cloud_remote_info"),
-  cloudUpload: (): Promise<CloudSyncOutcome> => invoke("cloud_upload"),
-  cloudDownload: (): Promise<CloudSyncOutcome> => invoke("cloud_download"),
-
-  // ── P4.1 Deep Link ──
-  /** 啟動時帶進來的連結（取走後就沒有了）。 */
-  deeplinkTakePending: (): Promise<string | null> =>
-    invoke("deeplink_take_pending"),
-  deeplinkPreview: (url: string): Promise<DeeplinkPreview> =>
-    invoke("deeplink_preview", { url }),
-  deeplinkApply: (url: string): Promise<DeeplinkApplied> =>
-    invoke("deeplink_apply", { url }),
-  deeplinkProtocolState: (): Promise<DeeplinkProtocolState> =>
-    invoke("deeplink_protocol_state"),
-  deeplinkRegister: (): Promise<DeeplinkProtocolState> =>
-    invoke("deeplink_register"),
-  deeplinkUnregister: (): Promise<DeeplinkProtocolState> =>
-    invoke("deeplink_unregister"),
 
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),

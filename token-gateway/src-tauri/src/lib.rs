@@ -1,10 +1,7 @@
-pub mod cloudsync;
 mod commands;
 pub mod error;
 mod autostart;
 mod db;
-mod dbbackup;
-mod deeplink;
 #[allow(dead_code)]
 mod fsutil;
 mod history;
@@ -20,7 +17,6 @@ mod quota;
 pub mod proxy;
 mod theme;
 mod tools;
-mod updater;
 mod trace;
 mod translate;
 mod tray;
@@ -31,31 +27,6 @@ mod window;
 use tauri::menu::{Menu, MenuItem};
 use tauri::Manager;
 
-/// Deep Link 的啟動處理。
-///
-/// - 命令列有連結、而且**已經有實例在跑**（閘道埠被佔用）→ 把連結寫進收件匣、
-///   結束這個新行程（避免兩個行程搶同一個埠與資料庫）。
-/// - 否則：確保 `tokengateway://` 已註冊（HKCU，免管理員），並把連結回傳給前端。
-fn deeplink_startup(app: &tauri::AppHandle) -> Option<String> {
-    let args: Vec<String> = std::env::args().collect();
-    let link = deeplink::find_link(&args);
-    if let Some(url) = &link {
-        if deeplink::protocol::another_instance_running() {
-            let dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::env::temp_dir());
-            let _ = deeplink::protocol::write_inbox(&dir, url);
-            std::process::exit(0);
-        }
-    }
-    // 註冊協定（失敗不影響啟動 —— 例如被群組原則擋掉）
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = deeplink::protocol::ensure_registered(&exe);
-    }
-    link
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -65,14 +36,6 @@ pub fn run() {
             let state = db::init_db(app.handle()).expect("failed to init database");
             app.manage(state);
             app.manage(proxy::ProxyState::default());
-
-            // Deep Link（P4.1）：解析啟動參數 → 已經有實例在跑就轉交後結束；
-            // 否則留在 pending 讓前端掛載時取走，並註冊 tokengateway:// 協定。
-            let startup_link = deeplink_startup(app.handle());
-            app.manage(deeplink::DeeplinkState(std::sync::Mutex::new(startup_link)));
-            deeplink::protocol::spawn_watcher(app.handle())?;
-            // 自動備份排程（P4.8）：每 5 分鐘檢查一次「該不該備份」
-            dbbackup::spawn_scheduler(app.handle().clone());
 
             let show = MenuItem::with_id(app, "show", "開啟主視窗", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -209,13 +172,6 @@ pub fn run() {
             commands::usage_query_apply_template,
             commands::usage_query_run,
             commands::usage_query_run_all,
-            // Deep Link（P4.1，見 deeplink/）
-            commands::deeplink_take_pending,
-            commands::deeplink_preview,
-            commands::deeplink_apply,
-            commands::deeplink_protocol_state,
-            commands::deeplink_register,
-            commands::deeplink_unregister,
             // 外觀與啟動（P4.3／P4.4）
             commands::appearance_state,
             commands::appearance_set_theme,
@@ -226,25 +182,6 @@ pub fn run() {
             commands::window_set_close_action,
             commands::window_enter_lightweight,
             commands::window_show_main,
-            // 資料庫備份管理（P4.8）
-            commands::db_backup_state,
-            commands::db_backup_now,
-            commands::db_backup_restore,
-            commands::db_backup_rename,
-            commands::db_backup_delete,
-            commands::db_backup_set_schedule,
-            // 自動更新（P4.9，見 updater/）
-            commands::update_state,
-            commands::update_set_url,
-            commands::update_check,
-            // 雲端同步（P4.10，見 cloudsync/）
-            commands::cloud_state,
-            commands::cloud_set_config,
-            commands::cloud_set_auto,
-            commands::cloud_test,
-            commands::cloud_remote_info,
-            commands::cloud_upload,
-            commands::cloud_download,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

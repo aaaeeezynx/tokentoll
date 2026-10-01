@@ -40,9 +40,6 @@ sha2 = "0.10"
 # Skills（P3.3）：GitHub 的 tarball 是 .tar.gz，需要 gunzip（tar 的解析自己寫，
 # 只需要讀 header，見 skills/tarball.rs；離線快取裡有 flate2）。
 flate2 = "1"
-# Deep Link（P4.1）：`config`／`content` 參數是 Base64（再 URL-escape），
-# 離線快取裡有 base64。
-base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
