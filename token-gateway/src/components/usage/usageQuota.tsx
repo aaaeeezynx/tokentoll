@@ -64,6 +64,12 @@ export function fmtRemain(iso: string | null, now: number = Date.now()): string 
   return `${s}秒`;
 }
 
+/** 百分比顯示：小於 10 留一位小數（圓環中央與「剩 X%」共用同一條規則）。 */
+export function pctText(v: number): string {
+  const n = Number.isFinite(v) ? v : 0;
+  return `${n < 10 ? n.toFixed(1) : Math.round(n)}%`;
+}
+
 /** Apple 健康風圓環：進度弧 + 中心百分比，下方窗口名與重置倒計時。顏色跟隨系統強調色。 */
 /** 訂閱圓環統一尺寸：所有方案、所有窗口共用同一組數字，視覺保證一致。 */
 export const RING_BOX = 76; // 外層寬 px
@@ -112,10 +118,20 @@ export function QuotaRing(props: { w: QuotaWindow; now: number }) {
           />
         </svg>
         <div
-          className="absolute inset-0 flex items-center justify-center font-semibold tabular-nums"
-          style={{ color: col, fontSize: RING_TEXT }}
+          className="absolute inset-0 flex flex-col items-center justify-center leading-none"
         >
-          {w.percent < 10 ? w.percent.toFixed(1) : Math.round(w.percent)}%
+          <span
+            className="font-semibold tabular-nums"
+            style={{ color: col, fontSize: RING_TEXT }}
+          >
+            {pctText(pct)}
+          </span>
+          {/* 同時把「剩餘」寫出來：官方後台（opencode.ai console）標的是 **% left**，
+              只寫一邊就會被讀成另一邊 —— 例如後台 100 % left 對上這裡的 0.0%，
+              看起來像「100% 用滿 vs 0%」的巨大落差，其實是同一件事。 */}
+          <span className="mt-0.5 text-[9px] tabular-nums text-fg/40">
+            剩 {pctText(100 - pct)}
+          </span>
         </div>
       </div>
       <div className="text-center leading-tight">
@@ -170,6 +186,12 @@ export function QuotaSection() {
     retry: 1,
   });
   const now = useNow(!q.isPending);
+  // 任何窗口的重置時刻已經過去 → 畫面上的倒數已經在顯示「已重置」，這份資料**一定**
+  // 不再準確（剛重置的窗口用量歸零、重置時間也換了）。這種情況不必等下一次輪詢，
+  // 直接重查，讓使用者看到的是新窗口而不是「已重置」。
+  const rolled = (q.data || []).some((x) =>
+    x.windows.some((w) => w.resets_at != null && Date.parse(w.resets_at) <= now),
+  );
   // 心跳當 watchdog：**不管輪詢為什麼停掉**（計時器被系統凍結、焦點／visibility 事件
   // 沒送到、react-query 的 interval 被清掉），只要資料比兩個週期還舊就強制重查一次。
   // 這是「卡片卡在幾小時前的數字」的保底：最壞情況也只會舊約 10 分鐘。
@@ -177,11 +199,11 @@ export function QuotaSection() {
   const forcedAt = useRef(0);
   useEffect(() => {
     if (q.isPending || q.isFetching || !q.dataUpdatedAt) return;
-    if (now - q.dataUpdatedAt < QUOTA_REFRESH_MS * 2) return;
+    if (!rolled && now - q.dataUpdatedAt < QUOTA_REFRESH_MS * 2) return;
     if (now - forcedAt.current < QUOTA_REFRESH_MS) return;
     forcedAt.current = now;
     void qc.invalidateQueries({ queryKey: ["quota_all"] });
-  }, [now, q.dataUpdatedAt, q.isPending, q.isFetching, qc]);
+  }, [now, rolled, q.dataUpdatedAt, q.isPending, q.isFetching, qc]);
   // 視窗重新拿到焦點（尤其是**從系統匣叫回來**）時立刻重查。
   // react-query 的焦點重取只掛在 `visibilitychange`，而 Tauri 的 hide()/show() 不保證
   // 會送那個事件（實測：縮到匣裡 `document.visibilityState` 仍是 visible）—— 靠這裡
@@ -216,10 +238,10 @@ export function QuotaSection() {
           訂閱額度
         </span>
         <span
-          className="shrink-0 text-[11px] text-fg/25"
-          title="圓環裡的數字是「已使用」百分比。opencode.ai 等後台頁顯示的是「剩餘」百分比，兩者相加剛好 100%（例如後台 97% left ＝ 這裡 3%）。"
+          className="shrink-0 text-[11px] text-fg/40"
+          title="圓環大字＝已使用百分比，底下小字＝剩餘百分比。opencode.ai 的 console 標的是「% left（剩餘）」，所以那邊的 100 % left 就等於這裡的 已用 0%／剩 100%；65 % left 等於 已用 35%。"
         >
-          圓環＝已用 %
+          圓環＝已用 %｜小字＝剩餘 %
         </span>
         <span
           className={`min-w-0 flex-1 truncate text-[11px] ${
