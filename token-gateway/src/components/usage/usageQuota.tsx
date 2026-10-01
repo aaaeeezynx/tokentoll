@@ -14,6 +14,7 @@ import {
 } from "@tanstack/react-query";
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -169,6 +170,18 @@ export function QuotaSection() {
     retry: 1,
   });
   const now = useNow(!q.isPending);
+  // 心跳當 watchdog：**不管輪詢為什麼停掉**（計時器被系統凍結、焦點／visibility 事件
+  // 沒送到、react-query 的 interval 被清掉），只要資料比兩個週期還舊就強制重查一次。
+  // 這是「卡片卡在幾小時前的數字」的保底：最壞情況也只會舊約 10 分鐘。
+  // 冷卻一個週期，避免上游一直失敗時每 30 秒打一次。
+  const forcedAt = useRef(0);
+  useEffect(() => {
+    if (q.isPending || q.isFetching || !q.dataUpdatedAt) return;
+    if (now - q.dataUpdatedAt < QUOTA_REFRESH_MS * 2) return;
+    if (now - forcedAt.current < QUOTA_REFRESH_MS) return;
+    forcedAt.current = now;
+    void qc.invalidateQueries({ queryKey: ["quota_all"] });
+  }, [now, q.dataUpdatedAt, q.isPending, q.isFetching, qc]);
   // 視窗重新拿到焦點（尤其是**從系統匣叫回來**）時立刻重查。
   // react-query 的焦點重取只掛在 `visibilitychange`，而 Tauri 的 hide()/show() 不保證
   // 會送那個事件（實測：縮到匣裡 `document.visibilityState` 仍是 visible）—— 靠這裡
@@ -192,6 +205,9 @@ export function QuotaSection() {
   const list = (q.data || []).filter(
     (x) => x.status === "ok" && x.windows.length > 0,
   );
+  // 過期就別再若無其事地顯示：琥珀色 ＋「可能已過期」，讓「看起來像現在」的假象消失
+  const age = q.dataUpdatedAt ? now - q.dataUpdatedAt : 0;
+  const expired = age > QUOTA_REFRESH_MS * 1.5;
   if (!q.isPending && list.length === 0) return null;
   return (
     <div className="glass min-w-0 p-4 md:p-5">
@@ -199,11 +215,26 @@ export function QuotaSection() {
         <span className="text-sm font-semibold tracking-tight text-fg/80">
           訂閱額度
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-fg/25">
+        <span
+          className="shrink-0 text-[11px] text-fg/25"
+          title="圓環裡的數字是「已使用」百分比。opencode.ai 等後台頁顯示的是「剩餘」百分比，兩者相加剛好 100%（例如後台 97% left ＝ 這裡 3%）。"
+        >
+          圓環＝已用 %
+        </span>
+        <span
+          className={`min-w-0 flex-1 truncate text-[11px] ${
+            expired ? "text-amber-300/80" : "text-fg/25"
+          }`}
+          title={
+            expired
+              ? "這份額度資料已經超過一個輪詢週期沒更新，數字可能不是最新的"
+              : undefined
+          }
+        >
           {q.isFetching
             ? "查詢中…"
             : q.dataUpdatedAt
-              ? `更新於 ${fmtQueriedAt(q.dataUpdatedAt, now)}`
+              ? `更新於 ${fmtQueriedAt(q.dataUpdatedAt, now)}${expired ? " · 可能已過期" : ""}`
               : ""}
         </span>
         <button
