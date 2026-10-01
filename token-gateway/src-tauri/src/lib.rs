@@ -2,6 +2,7 @@ pub mod commands;
 pub mod error;
 mod autostart;
 mod db;
+mod dbbackup;
 mod deeplink;
 #[allow(dead_code)]
 mod fsutil;
@@ -72,6 +73,8 @@ pub fn run() {
             let startup_link = deeplink_startup(app.handle());
             app.manage(deeplink::DeeplinkState(std::sync::Mutex::new(startup_link)));
             deeplink::protocol::spawn_watcher(app.handle())?;
+            // 自動備份排程（P4.8）：每 5 分鐘檢查一次「該不該備份」
+            dbbackup::spawn_scheduler(app.handle().clone());
 
             let show = MenuItem::with_id(app, "show", "開啟主視窗", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -263,6 +266,13 @@ pub fn run() {
             commands::window_set_close_action,
             commands::window_enter_lightweight,
             commands::window_show_main,
+            // 資料庫備份管理（P4.8）
+            commands::db_backup_state,
+            commands::db_backup_now,
+            commands::db_backup_restore,
+            commands::db_backup_rename,
+            commands::db_backup_delete,
+            commands::db_backup_set_schedule,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

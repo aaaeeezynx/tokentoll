@@ -30,7 +30,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 use toml_edit::{Array, DocumentMut, Item, Table};
 
-use super::{HeaderPair, McpInput, McpServer};
+use super::{HeaderPair, McpServer};
+
+mod readers;
+
+pub(crate) use readers::read_servers;
 
 /// MCP 備份保留份數（比接管的 1 份寬鬆：這裡動的是伺服器清單，不是連線設定）。
 pub(crate) const MCP_BACKUP_KEEP: usize = 5;
@@ -395,181 +399,8 @@ pub(crate) fn write_servers_at(
 }
 
 // ------------------------------------------------------------ 讀檔（匯入） ---
+// 讀取既有伺服器的實作在 `apply/readers.rs`（原本整支 498 行，超過 400 行上限）；
+// `read_servers` 由上面的 `pub(crate) use` 轉出，呼叫端不受影響。
 
-/// 從某個工具的設定檔讀出所有 MCP 伺服器（匯入用）。
-///
-/// 讀不懂（檔案壞掉）時回 `Err`，由呼叫端回報「這個工具匯入失敗、原因為何」——
-/// cc-switch 的匯入報告也是這樣（部分成功時會列出失敗的 app 與原因）。
-pub(crate) fn read_servers(app: &str, text: Option<&str>) -> Result<Vec<McpInput>, String> {
-    let Some(text) = text else {
-        return Ok(vec![]);
-    };
-    if text.trim().is_empty() {
-        return Ok(vec![]);
-    }
-    match app {
-        "claude" => {
-            let root: Value =
-                serde_json::from_str(text).map_err(|e| format!("不是合法 JSON（{e}）"))?;
-            let map = root.get("mcpServers").and_then(|v| v.as_object());
-            Ok(map.map(json_servers).unwrap_or_default())
-        }
-        "opencode" => {
-            let root: Value =
-                serde_json::from_str(text).map_err(|e| format!("不是合法 JSON（{e}）"))?;
-            let Some(map) = root.get("mcp").and_then(|v| v.as_object()) else {
-                return Ok(vec![]);
-            };
-            let mut out = vec![];
-            for (slug, v) in map {
-                let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("local");
-                let input = if ty == "remote" {
-                    McpInput {
-                        slug: slug.clone(),
-                        name: slug.clone(),
-                        transport: "http".into(),
-                        url: v.get("url").and_then(|u| u.as_str()).unwrap_or("").into(),
-                        headers: json_pairs(v.get("headers")),
-                        ..Default::default()
-                    }
-                } else {
-                    let cmd = v.get("command").and_then(|c| c.as_array());
-                    let mut parts: Vec<String> = cmd
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let command = if parts.is_empty() {
-                        String::new()
-                    } else {
-                        parts.remove(0)
-                    };
-                    McpInput {
-                        slug: slug.clone(),
-                        name: slug.clone(),
-                        transport: "stdio".into(),
-                        command,
-                        args: parts,
-                        env: json_pairs(v.get("environment")),
-                        ..Default::default()
-                    }
-                };
-                out.push(input);
-            }
-            Ok(out)
-        }
-        "codex" => {
-            let doc: DocumentMut = text
-                .parse()
-                .map_err(|e| format!("不是合法 TOML（{e}）"))?;
-            let Some(table) = doc.get("mcp_servers").and_then(|i| i.as_table()) else {
-                return Ok(vec![]);
-            };
-            let mut out = vec![];
-            for (slug, item) in table.iter() {
-                // `[mcp_servers.X.env]` 是 X 的子表格，不會在這裡單獨出現
-                let Some(t) = item.as_table() else { continue };
-                let command = t.get("command").and_then(|c| c.as_str()).unwrap_or("");
-                let url = t.get("url").and_then(|u| u.as_str()).unwrap_or("");
-                if command.is_empty() && url.is_empty() {
-                    continue; // 不是伺服器（例如只有 env 的殘段）
-                }
-                let args: Vec<String> = t
-                    .get("args")
-                    .and_then(|a| a.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let env = t
-                    .get("env")
-                    .and_then(|e| e.as_table())
-                    .map(|e| {
-                        e.iter()
-                            .filter_map(|(k, v)| {
-                                v.as_str().map(|s| HeaderPair {
-                                    name: k.to_string(),
-                                    value: s.to_string(),
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                out.push(McpInput {
-                    slug: slug.to_string(),
-                    name: slug.to_string(),
-                    transport: if command.is_empty() { "http" } else { "stdio" }.into(),
-                    command: command.to_string(),
-                    args,
-                    url: url.to_string(),
-                    env,
-                    ..Default::default()
-                });
-            }
-            Ok(out)
-        }
-        _ => Err(format!("MCP 不支援的工具：{app}")),
-    }
-}
-
-fn json_servers(map: &Map<String, Value>) -> Vec<McpInput> {
-    let mut out = vec![];
-    for (slug, v) in map {
-        let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if ty == "http" || ty == "sse" {
-            out.push(McpInput {
-                slug: slug.clone(),
-                name: slug.clone(),
-                transport: ty.to_string(),
-                url: v.get("url").and_then(|u| u.as_str()).unwrap_or("").into(),
-                headers: json_pairs(v.get("headers")),
-                ..Default::default()
-            });
-            continue;
-        }
-        let command = v.get("command").and_then(|c| c.as_str()).unwrap_or("");
-        if command.is_empty() {
-            continue;
-        }
-        let args: Vec<String> = v
-            .get("args")
-            .and_then(|a| a.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        out.push(McpInput {
-            slug: slug.clone(),
-            name: slug.clone(),
-            transport: "stdio".into(),
-            command: command.to_string(),
-            args,
-            env: json_pairs(v.get("env")),
-            ..Default::default()
-        });
-    }
-    out
-}
-
-fn json_pairs(v: Option<&Value>) -> Vec<HeaderPair> {
-    v.and_then(|x| x.as_object())
-        .map(|m| {
-            m.iter()
-                .map(|(k, v)| HeaderPair {
-                    name: k.clone(),
-                    value: v.as_str().unwrap_or_default().to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// 便利函式：把 `Value::Null` 轉成「沒有內容」的字串（測試用）。
 #[cfg(test)]
 mod tests;

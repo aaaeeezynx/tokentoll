@@ -547,6 +547,32 @@ export interface WindowBehavior {
   autostart: boolean;
 }
 
+// ── P4.8：資料庫備份管理 ──
+
+export interface DbBackupInfo {
+  name: string;
+  path: string;
+  created_ms: number;
+  bytes: number;
+}
+
+export interface DbBackupState {
+  dir: string;
+  interval_hours: number;
+  retention: number;
+  interval_options: number[];
+  retention_options: number[];
+  backups: DbBackupInfo[];
+  last_ms: number;
+}
+
+export interface DbRestoreOutcome {
+  restored: string;
+  /** 還原前自動建立的安全備份 */
+  safety_backup: string;
+  note: string;
+}
+
 export interface AppSettings {
   gateway_port: number;
   auto_start_proxy: boolean;

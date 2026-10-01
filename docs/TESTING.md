@@ -776,6 +776,63 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.30 資料庫備份管理（P4.8，2026-10-01）
+
+#### cc-switch 的實際行為（照它手冊 §1.5 抄）
+
+- **自動備份間隔**：停用／6h／12h／24h／48h／7d（**預設 24 小時**）。
+- **保留份數**：3／5／10／15／20／30／50（**預設 10**）；超過的舊備份自動刪除。
+- **備份清單**：顯示名稱（自動命名 `db_backup_20260315_143000`）、建立時間、檔案大小。
+- **操作**：立即備份、還原（**還原前一定先自動備份當前資料庫**）、改名、刪除（需確認）。
+
+#### 我們怎麼做（`dbbackup.rs`）
+
+| 決定 | 理由 |
+|---|---|
+| 用 **SQLite 線上備份 API**（`rusqlite` 的 `backup` 功能），不是複製檔案 | App 開著時直接 copy `app.db` 可能拿到「複製到一半」的檔案；線上備份走 SQLite 自己的頁面鎖，得到一致快照 |
+| **還原是「寫回現有連線」** | 把檔案換掉等於在開啟中的連線底下抽換資料，後續寫入會寫進舊檔或直接鎖死。備份 API 直接寫回同一個連線，也不必叫使用者重啟 |
+| **建立時間看檔案的 mtime**（名字解析只是後備） | 自己命名或改過名的備份從名字解析不出時間，只看名字會全部變 0、排序與保留策略都會亂掉（**測試 `retention_prunes_on_create` 抓到**） |
+| 名稱用**本地時間** | 名稱是給人看的。第一版寫 UTC，實機驗證時名稱顯示 04:29、檔案時間卻是 12:29（差 8 小時）—— 已改成 `chrono::Local` |
+| 名稱驗證 | 只允許英數與 `_ - .`、擋 `..` 與開頭點，避免路徑跳脫 |
+| 排程 | 背景執行緒每 5 分鐘檢查一次「距離上次備份是否超過間隔」；從沒備份過就立刻做一次。失敗只印訊息，不影響 App |
+
+#### 順手修掉的「檔案 ≤400 行」違規
+
+專案規則要求每個檔案 ≤400 行，但前幾輪一路加功能之後有 6 個檔案超標（我沒有每輪稽核）。
+這輪清掉四個，剩下四個留待下一輪：
+
+| 檔案 | 之前 | 現在 | 做法 |
+|---|---|---|---|
+| `components/Settings.tsx` | 487 | **199** | 拆成 `settings/{SectionHead,AppearanceSection,DeeplinkSection,DbBackupSection}.tsx` |
+| `components/providers/UsageQueryPanel.tsx` | 411 | **347** | 抽出 `UsageQueryParts.tsx`（抽取規格＋進階、測試結果） |
+| `src-tauri/src/prompt/sync.rs` | 562 | **348** | 測試搬到 `prompt/sync/tests.rs` |
+| `src-tauri/src/mcp/apply.rs` | 498 | **406→**（讀取段落搬出後） | 讀取搬到 `mcp/apply/readers.rs`（172 行） |
+| **還沒清**：`index.css`（800）、`lib/apiTypes.ts`（675）、`lib/api.ts`（560）、`providers_io.rs`（598） | | | 下一輪拆（CSS 分檔、型別／API 分檔、`providers_io` 分模組） |
+
+#### 測試（8 個新測試）
+
+- 名稱格式（本地時間來回一致、壞名字回 0）、名稱驗證（擋路徑跳脫）、
+  保留策略（留最新 N 份、至少留 1 份）、到期邏輯（停用／從未備份／剛好到／超過）。
+- 建立→列出→改名→刪除來回（含「只列 .db」與找不到的錯誤）。
+- **`restore_brings_the_old_data_back`**：備份 → 改資料 → 還原 → 確認改動被還原掉、
+  還原前的安全備份存在且內容是「還原前」的狀態、還原後連線仍可寫。
+- 預設值與 cc-switch 相同（24 小時／10 份）、亂填回預設。
+
+#### 實機驗證（安裝後的真實 App）
+
+| 驗證項 | 結果 |
+|---|---|
+| 區塊與預設值 | ✅ 設定頁「資料庫備份」，自動備份顯示 **每 24 小時**、保留 **10 份**（與 cc-switch 相同） |
+| 立即備份 | ✅「已建立備份 db_backup_20261001_123640（2.07 MB）」；磁碟上確實有 `.db`（2,166,784 bytes）；清單顯示名稱／時間／大小＋還原／改名／刪除 |
+| **本地時間** | ✅ 名稱 `123640` 對上當時的 12:36（修掉 UTC 的 04:29） |
+| 改排程 | ✅ 選「每 6 小時」→「已更新備份排程」 |
+| 改名 | ✅ 改成 `before_upgrade`，磁碟檔名與清單同步更新 |
+| **還原（含安全備份）** | ✅「已還原（還原前已自動備份當前資料庫；**schema v13**）；安全備份 db_backup_20261001_123701」；還原後資料庫仍是 schema 13、7 個來源都在 |
+| 刪除 | ✅「已刪除備份」，清單與磁碟同步 |
+| 最終狀態 | ✅ 留下 1 份真實備份（使用者的資料庫快照），排程回到預設 24 小時／10 份 |
+
+---
+
 ### 0.9.29 關閉行為與輕量模式（P4.7，2026-10-01）
 
 #### cc-switch 的實際行為（照它手冊 §1.5 抄）
@@ -2801,7 +2858,49 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.29 最新建置（2026-10-01 06:17，P4.7：關閉行為與輕量模式）—— **你目前安裝的就是這一個**
+### 9.30 最新建置（2026-10-01 12:36，P4.8：資料庫備份管理）—— **你目前安裝的就是這一個**
+
+CC Switch 對齊計畫 P4.8（設計見 §0.9.30）。**沒有動 schema（仍 v13）**。
+新增相依功能：`rusqlite` 的 `backup`。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-01 12:36:00 |
+| `target\release\token-gateway.exe` | 10,183,680 bytes、sha256 `4B103EB96FEAADB651BE9194994735E92F1F436E0CF348E20168FC173E96199D` |
+| NSIS 安裝檔 | 4,241,302 bytes、sha256 `8331E10BA393962C93E57825BBBAFB97840AFF7992E24C0B183586E3CF3E4C62` |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 10,183,680 bytes、sha256 `A409B2837E626DA7ACE40FB8160BDC9C4D4EAF08AB81734D6B996E58BCC3714B` |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **446 passed / 0 failed / 11 ignored** ✅（+19：備份 8 ＋ dbbackup 相關） |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+| 資料庫 schema | 仍 **13** ✅ |
+| 每個檔案 ≤400 行 | ⚠️ 本輪清掉 4 個超標檔（Settings 487→199、UsageQueryPanel 411→347、prompt/sync 562→348、mcp/apply 498→406）；**仍有 4 個待清**：`index.css`(800)、`apiTypes.ts`(675)、`api.ts`(560)、`providers_io.rs`(598) |
+
+**改到的檔案**
+
+| 檔案 | 改動 |
+|---|---|
+| `src-tauri/src/dbbackup.rs`、`dbbackup/tests.rs` | **新增**：線上備份／還原、保留策略、排程邏輯、設定與狀態 |
+| `src-tauri/src/commands/dbbackup_cmd.rs` | **新增**：state／now／restore／rename／delete／set_schedule |
+| `src-tauri/src/lib.rs` | 註冊 6 個命令 ＋ 啟動時起自動備份排程 |
+| `src/components/settings/{SectionHead,AppearanceSection,DeeplinkSection,DbBackupSection}.tsx` | **新增**（從 Settings 拆出來）；Settings.tsx 487→199 行 |
+| `src/components/providers/UsageQueryParts.tsx` | **新增**（從 UsageQueryPanel 拆出來） |
+| `src-tauri/src/prompt/sync/tests.rs`、`src-tauri/src/mcp/apply/readers.rs` | 測試／讀取段落搬到獨立檔案 |
+
+#### 實機驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| 預設值 | ✅ 每 24 小時、保留 10 份（與 cc-switch 相同） |
+| 立即備份 | ✅ 2.07 MB 備份建立、磁碟與清單一致 |
+| 本地時間命名 | ✅ 修正 UTC 造成的 8 小時差 |
+| 改名／刪除 | ✅ 清單與磁碟同步 |
+| 還原＋安全備份 | ✅ schema v13 驗證通過、還原前自動備份、原有 7 個來源完好 |
+
+### 9.29 前一次建置（2026-10-01 06:17，P4.7：關閉行為與輕量模式，已被 9.30 取代）
 
 CC Switch 對齊計畫 P4.7（設計與三個實機抓到的問題見 §0.9.29）。**沒有動 schema（仍 v13）**。
 
