@@ -11,10 +11,6 @@ export const DICT: Record<string, [string, string]> = {
   // ── 導覽 ──
   "nav.usage": ["用量", "Usage"],
   "nav.providers": ["上游來源", "Providers"],
-  "nav.mcp": ["MCP", "MCP"],
-  "nav.prompts": ["提示詞", "Prompts"],
-  "nav.skills": ["技能", "Skills"],
-  "nav.sessions": ["會話", "Sessions"],
   "nav.keys": ["本地 Key", "Local Keys"],
   "nav.diagnostics": ["診斷", "Diagnostics"],
   "nav.calc": ["試算", "Calculator"],
@@ -198,8 +194,8 @@ export const DICT: Record<string, [string, string]> = {
   // ── 設定：Deep Link ──
   "settings.deeplink.title": ["Deep Link 匯入", "Deep link import"],
   "settings.deeplink.caption": [
-    "tokengateway:// 一鍵匯入來源／提示詞／MCP／技能",
-    "One-click import of providers, prompts, MCP and skills",
+    "tokengateway:// 一鍵匯入上游來源",
+    "One-click import of providers",
   ],
   "settings.deeplink.registered": [
     "已註冊（HKCU\\Software\\Classes\\tokengateway）",

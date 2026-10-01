@@ -37,7 +37,12 @@ pub(crate) use settings::*;
 /// 同樣是純新增表）。
 /// v12（2026-10-01）：新增 prompt_presets（P3.2 提示詞預設集，純新增表）。
 /// v13（2026-10-01）：新增 skill_repos / skills / skill_bindings（P3.3 技能管理）。
-pub const SCHEMA_VERSION: i32 = 13;
+/// v14（2026-10-02）：**移除** MCP／提示詞／技能三個功能，連帶 DROP 掉
+/// mcp_servers / mcp_bindings / prompt_presets / skill_repos / skills /
+/// skill_bindings 六張表。使用者已經寫進各工具設定檔的內容（`AGENTS.md`、
+/// `config.toml` 的 `[mcp_servers]`、`skills/` 目錄）**一律不動** —— 移除的是
+/// 這個 App 的管理能力，不是使用者的檔案。
+pub const SCHEMA_VERSION: i32 = 14;
 
 /// 網關預設連接埠（C 方案：可在設定中修改；歷史預設 15721 與 cc-switch 衝突）。
 pub const DEFAULT_GATEWAY_PORT: u16 = 15722;

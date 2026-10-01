@@ -776,6 +776,91 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.37 移除 MCP／提示詞／技能／會話四個功能（2026-10-02）
+
+#### 使用者要求
+
+> 移除 MCP、提示詞、技能、會話這幾個功能。
+
+**範圍只限這四項**（用量／上游來源／本地 Key／診斷／試算／設定六頁、接管、tray、
+雲端同步、DB 備份、`resource=provider` 的 Deep Link 全部不動）。
+
+#### 動手前先問清楚「會不會刪到我的 Codex 檔」
+
+使用者的第一個問題是「會不會連我 codex 的 AGENTS.md 一起刪除」。先把「誰會寫
+使用者的檔案」整條路查出來才回答：
+
+| 使用者的檔案 | 誰會寫它 | 移除後 |
+|---|---|---|
+| `~/.codex/AGENTS.md` | **只有 `prompt/` 模組**（`prompt/sync.rs::path_for`，共 3 條路徑：claude→`CLAUDE.md`、codex→`AGENTS.md`、opencode→`AGENTS.md`） | 模組刪掉 → **之後沒有任何程式碼會碰它** |
+| `~/.codex/config.toml` 的 `[mcp_servers]` | `mcp/apply.rs` | 不再管理；接管功能仍會保留它（`tools/tests/codex.rs` 有斷言在盯） |
+| 各工具 `skills/` 目錄 | `skills/sync.rs` | 連結與母本都留著 |
+| `~/.codex/config.toml` 的 `model`／`model_provider` | **`tools/`（接管／還原）** ← 不同功能，不在移除清單 | 照舊會寫 |
+
+**關鍵**：grep 過整個 `tools/`，它**從頭到尾沒有寫過任何 `.md` 檔**（寫入只有
+`config.toml`、`settings.json`、`opencode.json`、`auth.json`）。`AGENTS.md` 是提示詞
+功能的專屬領地，模組一刪就沒人管它。而且本 App 沒有任何「卸載／清理」機制，
+移除 = 刪我們自己的程式碼，不會去刪使用者的檔案。
+
+**「直接移除」實際刪掉的只有這個 App 自己的 `app.db`**：六張表（`mcp_servers`、
+`mcp_bindings`、`prompt_presets`、`skill_repos`、`skills`、`skill_bindings`）。
+使用者的檔案一個都不動。
+
+#### 規模
+
+| 類別 | 檔案 | 行數 |
+|---|---|---|
+| Rust 模組 `mcp/` `prompt/` `skills/` `sessions/` | 20 | 5,822 |
+| Rust 命令 `commands/{mcp,prompt,skills,sessions}_cmd.rs` | 4 | 641 |
+| 前端頁面 ＋ 子元件 | 8 | 2,098 |
+| **合計** | **32** | **約 8,561** |
+
+原始碼檔數 317 → **285**。
+
+#### 連帶要改的地方（不改會編不過）
+
+| 位置 | 改什麼 |
+|---|---|
+| `lib.rs` | 4 個 `mod` ＋ `generate_handler!` 裡 **40 個命令** |
+| `commands/mod.rs` | 4 個 `mod` ＋ 4 個 `pub use` |
+| **`deeplink/parse.rs`** | 唯一的跨模組耦合：移除 `parse_prompt/parse_mcp/parse_skill`、`ImportRequest` 的三個變體、`crate::mcp::McpInput`／`crate::skills::validate_repo` 的引用、`b64_decode`（只服務被移除的資源，留著會變 dead code） |
+| `deeplink/apply.rs` | `apply_prompt/apply_mcp/apply_skill` ＋ 3 個測試 |
+| `deeplink/parse/tests.rs` | cc-switch 的 MCP／prompt／skill 範例測試 → 改成**反向斷言** |
+| `deeplink/mod.rs` | 測試裡的範例連結從 `resource=skill` 換成 provider |
+| `DeeplinkDialog.tsx`、`types/platform.ts` | 資源聯集改註解；匯入後只 invalidate `providers` |
+| `api/panels.ts`、`api/platform.ts`、`types/extensions.ts` | 約 40 個 `invoke` 與型別 |
+| `App.tsx` | 4 個 import ＋ 4 個 `TABS` ＋ 4 個 render 分支；`Tab` 型別 |
+| `i18nDict.ts` | `nav.mcp/prompts/skills/sessions` ＋ 「一鍵匯入來源／提示詞／MCP／技能」那句 |
+
+#### 資料庫：schema v13 → v14（DROP 六張表）
+
+`SCHEMA` 不再建立這六張表；`open_and_ensure` 加一段冪等的
+`DROP TABLE IF EXISTS`，新舊庫都安全（舊庫清掉殘留、新庫本來就沒有）。
+`idx_prompt_app` 隨表一起消失。
+
+**動工前先備份**：`<app_data>/db-backups/manual-v13-before-removing-4-features-20261002-015259.db`
+（2,179,072 bytes，以 `sqlite3` 的 backup API 產生，WAL 一致）。
+備份當下的內容：`prompt_presets` 1 列、`skill_repos` 1 列、其餘四張 0 列。
+
+#### 施工前的安全界線（不誤刪同名東西）
+
+| 看起來像、但**不能動** | 為什麼 |
+|---|---|
+| `tools/tests/codex.rs` 裡的 `[mcp_servers]` | 那是「接管時必須保留使用者無關段落」的測試 |
+| `history/` 的「會話」 | 歷史回填掃描到的 session 數（OpenCode／DSH），與會話頁無關 |
+| `apiTypesPricing.ts` 的 `sessions: number` | 同上（歷史回填的統計欄位） |
+| `providers_io`（匯出／匯入／複製） | 只碰 providers／models／pricing，本來就不受影響 |
+| `tools::TAKEOVER_APPS` | 移除方向是「這三個模組不再用它」，接管本身不動 |
+
+#### Deep Link 的舊連結（選項 C：直接移除）
+
+`resource=mcp|prompt|skill` 的解析整段拿掉，不再保留相容層；舊連結會拿到
+`不支援的 resource：mcp（目前只支援 provider）` —— 明確失敗而不是靜默忽略。
+`parse/tests.rs` 新增 `removed_resources_are_rejected_with_a_readable_reason`
+把三種資源都釘住（原因要包含資源名與「只支援 provider」）。
+
+---
+
 ### 0.9.36 真相：不是計算錯，是「已用 vs 剩餘」被讀反了（2026-10-01）
 
 #### 回報
@@ -3257,7 +3342,60 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.37 建置（2026-10-01 22:23，訂閱額度：同時顯示已用／剩餘）—— **你目前安裝的就是這一個**
+### 9.38 建置（2026-10-02 02:13，移除 MCP／提示詞／技能／會話）—— **你目前安裝的就是這一個**
+
+依 §0.9.37 的計畫移除四個功能（A：DROP 六張表＝schema v14；B：不動使用者檔案；
+C：舊 deeplink 直接拒絕；D：只動這四項）。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-02 02:13:08 |
+| `target\release\token-gateway.exe` | 9,722,368 bytes、sha256 `9FA6264D2BBC815A31F7241C7112177F72714FF9356066883ACE4A3AA3DC4626` |
+| NSIS 安裝檔 | 4,073,354 bytes、sha256 `9B1E85574EC1BC4FAA0495AD8797DB8CFF0C81F22D534FB589C61A0D825B212C` |
+| MSI | 7,643,136 bytes（2026-10-02 02:12:53） |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,722,368 bytes、sha256 `D681C764CE5CBC797C00BF58031BA3B88483CCEBFD6D7AFE876C47115C653B8D` |
+| 前端資源指紋 | `index-CAZNryZ3.js`（631,110 bytes） |
+
+**體積變化**（移除約 8,561 行、32 檔）：
+
+| 產物 | 之前（9.36） | 之後 | 差 |
+|---|---|---|---|
+| `token-gateway.exe` | 10,340,864 | 9,722,368 | **−618,496 bytes（−604 KB）** |
+| NSIS 安裝檔 | 4,288,016 | 4,073,354 | **−214,662 bytes（−210 KB）** |
+| 前端 bundle | — | 631,110 | — |
+| 原始碼檔數 | 317 | **285** | −32 |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **351 passed / 0 failed / 8 ignored** ✅（原 449／0／11） |
+| `cargo clippy --offline --all-targets` | **0 warning** ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build`（含 tsc） | exit 0 ✅ |
+
+> 測試數 449 → 351（−98）：移除的模組自帶 95 個測試，deeplink 的 mcp／prompt／skill
+> 案例再少 3 個；`ignored` 11 → 8 是因為那 3 個 `#[ignore]` 的 live 測試（MCP 實機、
+> GitHub 技能掃描）也在被移除的模組裡。新增 1 條（舊資源要被明確拒絕）。
+
+#### 實機驗證（安裝後、CDP 讀真實畫面）
+
+| 驗證項 | 結果 |
+|---|---|
+| **schema 升級到 v14**（真實使用者庫） | ✅ `max(schema_version)=14`；六張表全部消失 |
+| **使用者資料一列不少** | ✅ providers 7／request_logs 5,859／local_keys 2（與移除前一致） |
+| 側邊欄 | ✅ 正好六項：用量／上游來源／本地 Key／診斷／試算／設定；MCP／提示詞／技能／會話 皆不存在 |
+| 六個頁面 | ✅ 全部正常渲染、標題正確、**無原始字典 key** |
+| **舊 deeplink 連結** | ✅ 用系統呼叫真的觸發 `tokengateway://v1/import?resource=mcp&…` → 對話框顯示「**不支援的 resource：mcp（目前只支援 provider）**」，且確認鈕不可按 |
+| 設定頁文案 | ✅ 「tokengateway:// 一鍵匯入**上游來源**」（範例連結也是 `resource=provider`） |
+| **使用者的檔案完全沒被動** | ✅ `~/.codex/AGENTS.md` 4,139 bytes、sha256 `B67E238D938BB91662D2C93E8053162A8EC6AF9BD0284FD04E476D89A4128F03`（與移除前**逐位元相同**） |
+| **Codex 的 MCP 設定照舊可用** | ✅ `~/.codex/config.toml` 仍有 `[mcp_servers]`、`[mcp_servers.node_repl]`、`[mcp_servers.node_repl.env]` |
+| 技能目錄 | ✅ `~/.codex/skills` 仍是 4 項（使用者自己的技能） |
+| 施工前備份 | ✅ `<app_data>/db-backups/manual-v13-before-removing-4-features-20261002-015259.db`（2,179,072 bytes） |
+
+> 已知未處理（與本次移除無關，施工前就是如此）：`proxy.rs` 405 行、`tools/native.rs` 418 行、
+> `tools/switch.rs` 418 行三支超過 400 行上限。先前的稽核用 PowerShell 的
+> `Measure-Object -Line` 計數會少算，改用逐檔 `splitlines()` 才看得出來。
+
+### 9.37 前一次建置（2026-10-01 22:23，訂閱額度同時顯示已用／剩餘，已被 9.38 取代）
 
 延續 §0.9.36 的查證結果（官網標「% left」、App 標「已用」，兩者其實是補數）。
 本輪把兩個數字一起寫在圓環裡，並補上「窗口一重置就立刻重查」。**沒有動 schema（仍 v13）**。

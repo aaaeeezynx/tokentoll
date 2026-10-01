@@ -28,10 +28,6 @@ import type {
   DeeplinkApplied,
   DeeplinkPreview,
   DeeplinkProtocolState,
-  SessionApp,
-  SessionDeleteOutcome,
-  SessionMessage,
-  SessionSummary,
   SubscriptionFees,
   SubscriptionQuota,
   SwitchPlan,
@@ -136,21 +132,6 @@ export const platformApi = {
   deeplinkUnregister: (): Promise<DeeplinkProtocolState> =>
     invoke("deeplink_unregister"),
 
-  // ── P3.4 會話管理 ──
-  sessionsApps: (): Promise<SessionApp[]> => invoke("sessions_apps"),
-  /** 掃描會話（apps 空＝全部）。 */
-  sessionsScan: (apps?: string[]): Promise<SessionSummary[]> =>
-    invoke("sessions_scan", { apps: apps ?? null }),
-  sessionsRead: (
-    app: string,
-    sessionId: string,
-    path: string,
-  ): Promise<SessionMessage[]> =>
-    invoke("sessions_read", { app, sessionId, path }),
-  /** 刪除會話（只允許該工具會話目錄底下的檔案）。 */
-  sessionsDelete: (
-    targets: [string, string][],
-  ): Promise<SessionDeleteOutcome> => invoke("sessions_delete", { targets }),
   toolsDetect: (port: number): Promise<ToolStatus[]> =>
     invoke("tools_detect", { port }),
   toolVersions: (): Promise<ToolVersion[]> => invoke("tool_versions"),

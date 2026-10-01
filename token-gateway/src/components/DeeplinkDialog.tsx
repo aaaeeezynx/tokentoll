@@ -78,16 +78,8 @@ export function DeeplinkDialog() {
           (out.skipped.length > 0 ? `｜已存在略過：${out.skipped.join("、")}` : ""),
       );
       setErr("");
-      // 匯入可能動到四個地方，全部刷新
-      for (const key of [
-        "providers",
-        "prompts_list",
-        "mcp_list",
-        "skills_list",
-        "skills_repos",
-      ]) {
-        void qc.invalidateQueries({ queryKey: [key] });
-      }
+      // 匯入目前只會動到來源（prompt／mcp／skill 已於 2026-10-02 移除）
+      void qc.invalidateQueries({ queryKey: ["providers"] });
     } catch (e) {
       setErr(String(e));
     } finally {

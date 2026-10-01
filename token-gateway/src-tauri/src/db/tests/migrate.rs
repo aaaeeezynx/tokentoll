@@ -243,15 +243,20 @@ use rusqlite::Connection;
                 "provider_stripped_fields",
                 "provider_model_protocol",
                 "provider_usage_query",
+                "proxy_trace",
+            ] {
+                assert!(has_table(&c, t), "v{target} 升級後缺少表 {t}");
+            }
+            // v14 起六張舊表必須被清掉（MCP／提示詞／技能已移除）
+            for t in [
                 "mcp_servers",
                 "mcp_bindings",
                 "prompt_presets",
                 "skill_repos",
                 "skills",
                 "skill_bindings",
-                "proxy_trace",
             ] {
-                assert!(has_table(&c, t), "v{target} 升級後缺少表 {t}");
+                assert!(!has_table(&c, t), "v{target} 升級後仍留著 {t}");
             }
         }
     }
@@ -372,3 +377,4 @@ use rusqlite::Connection;
             .unwrap();
         assert_eq!(keys, 1, "local_keys 不可被當成孤兒清掉（那是刻意的設計）");
     }
+

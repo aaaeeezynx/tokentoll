@@ -215,6 +215,24 @@ pub(crate) fn open_and_ensure(path: &Path) -> Result<Connection, String> {
         )
         .map_err(|e| e.to_string())?;
     }
+    // v13 → v14（2026-10-02）：MCP／提示詞／技能三個功能已移除，連帶把只服務它們的
+    // 六張表清掉。SCHEMA 已不再建立這些表，所以對新舊庫都安全：舊庫把殘留的表 DROP，
+    // 新庫本來就沒有（`IF EXISTS`）。
+    //
+    // **只動這個 App 自己的庫**：使用者已經寫進各工具設定檔的內容（`AGENTS.md`、
+    // `config.toml` 的 `[mcp_servers]`、各工具 `skills/` 目錄與母本）完全不碰 ——
+    // 移除的是本 App 的管理能力，不是使用者的檔案。
+    for t in [
+        "mcp_servers",
+        "mcp_bindings",
+        "prompt_presets",
+        "skill_repos",
+        "skills",
+        "skill_bindings",
+    ] {
+        conn.execute(&format!("DROP TABLE IF EXISTS {t}"), [])
+            .map_err(|e| e.to_string())?;
+    }
     // 列齊了再建索引（整批 SCHEMA 先於 ALTER，老庫在此之前無此列）
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_logs_import ON request_logs(import_path)",

@@ -44,20 +44,20 @@ mod tests {
         let argv = vec![
             "C:/app/token-gateway.exe".to_string(),
             "--flag".to_string(),
-            "tokengateway://v1/import?resource=skill&repo=a/b".to_string(),
+            "tokengateway://v1/import?resource=provider&app=claude&name=x".to_string(),
         ];
         assert_eq!(
             find_link(&argv).unwrap(),
-            "tokengateway://v1/import?resource=skill&repo=a/b"
+            "tokengateway://v1/import?resource=provider&app=claude&name=x"
         );
         assert!(find_link(&["x".to_string()]).is_none());
         // 別的 scheme 不算
-        assert!(find_link(&["ccswitch://v1/import?resource=skill".to_string()]).is_none());
+        assert!(find_link(&["ccswitch://v1/import?resource=provider".to_string()]).is_none());
     }
 
     #[test]
     fn scheme_constant_matches_the_parser() {
         assert_eq!(SCHEME, "tokengateway");
-        assert!(parse("tokengateway://v1/import?resource=skill&repo=a/b").is_ok());
+        assert!(parse("tokengateway://v1/import?resource=provider&app=claude&name=x").is_ok());
     }
 }

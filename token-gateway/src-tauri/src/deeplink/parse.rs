@@ -3,18 +3,18 @@
 //! ## 格式（照 cc-switch 手冊 §5.3）
 //!
 //! ```text
-//! tokengateway://v1/import?resource={provider|mcp|prompt|skill}&…
+//! tokengateway://v1/import?resource=provider&…
 //! ```
 //!
 //! | resource | 必要參數 | 選用 |
 //! |---|---|---|
 //! | provider | `app`, `name` | `endpoint`（可逗號分隔多個）、`apiKey`、`model`、`notes`、`enabled` |
-//! | prompt | `app`, `name`, `content`（Base64） | `description`、`enabled` |
-//! | mcp | `apps`（逗號分隔）、`config`（Base64 的 `{"mcpServers":{…}}`） | `enabled` |
-//! | skill | `repo`（`owner/name`） | `directory`、`branch` |
 //!
 //! 我們的協定名是 `tokengateway://`（不是 `ccswitch://`）；參數名稱與語意照抄，
 //! 讓既有的分享連結只要換 scheme 就能用。
+//!
+//! **只支援 `provider`**：`mcp` / `prompt` / `skill` 三種資源連同對應功能已於
+//! 2026-10-02 移除，舊連結會拿到「不支援的 resource」而不是靜默失敗。
 //!
 //! ## 安全（cc-switch 也做同一套）
 //!
@@ -30,9 +30,6 @@ use crate::tools::TAKEOVER_APPS;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportRequest {
     Provider(ProviderImport),
-    Prompt(PromptImport),
-    Mcp(McpImport),
-    Skill(SkillImport),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -45,32 +42,6 @@ pub struct ProviderImport {
     pub model: String,
     pub notes: String,
     pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct PromptImport {
-    pub app: String,
-    pub name: String,
-    pub content: String,
-    pub description: String,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct McpImport {
-    pub apps: Vec<String>,
-    pub enabled: bool,
-    /// (server id, 我們的正規化輸入)
-    pub servers: Vec<(String, crate::mcp::McpInput)>,
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct SkillImport {
-    pub repo: String,
-    pub directory: String,
-    pub branch: String,
-    /// 技能名稱（沒有就從 directory 推）
-    pub name: String,
 }
 
 /// 給前端顯示的預覽（**不含完整金鑰**）。
@@ -105,10 +76,9 @@ pub fn parse(url: &str) -> Result<ImportRequest, String> {
     let resource = get("resource").ok_or_else(|| "缺少 resource 參數".to_string())?;
     match resource.as_str() {
         "provider" => parse_provider(&get),
-        "prompt" => parse_prompt(&get),
-        "mcp" => parse_mcp(&get),
-        "skill" => parse_skill(&get),
-        other => Err(format!("不支援的 resource：{other}")),
+        // mcp / prompt / skill 的功能已移除（2026-10-02）；這裡刻意只回一句人話，
+        // 不做相容層 —— 舊連結會明確失敗，而不是靜默忽略。
+        other => Err(format!("不支援的 resource：{other}（目前只支援 provider）")),
     }
 }
 
@@ -156,21 +126,6 @@ pub(crate) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).to_string()
 }
 
-/// Base64（含 URL-safe 與缺 padding 的容忍 —— 分享連結常常被截掉 `=`）。
-pub(crate) fn b64_decode(s: &str) -> Result<String, String> {
-    use base64::Engine;
-    let cleaned: String = s.trim().replace('-', "+").replace('_', "/");
-    let padded = match cleaned.len() % 4 {
-        2 => format!("{cleaned}=="),
-        3 => format!("{cleaned}="),
-        _ => cleaned,
-    };
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(padded.as_bytes())
-        .map_err(|e| format!("Base64 解碼失敗：{e}"))?;
-    String::from_utf8(bytes).map_err(|e| format!("不是有效的 UTF-8：{e}"))
-}
-
 /// app 參數的白名單（我們只支援能接管的三個）。
 fn check_app(app: &str) -> Result<String, String> {
     let a = app.trim().to_ascii_lowercase();
@@ -209,83 +164,6 @@ fn parse_provider(get: &dyn Fn(&str) -> Option<String>) -> Result<ImportRequest,
         model: get("model").unwrap_or_default(),
         notes: get("notes").unwrap_or_default(),
         enabled: get("enabled").map(|v| v != "false" && v != "0").unwrap_or(true),
-    }))
-}
-
-fn parse_prompt(get: &dyn Fn(&str) -> Option<String>) -> Result<ImportRequest, String> {
-    let app = check_app(&get("app").ok_or("prompt 缺少 app")?)?;
-    let name = get("name").unwrap_or_default().trim().to_string();
-    if name.is_empty() {
-        return Err("prompt 缺少 name".to_string());
-    }
-    let content = b64_decode(&get("content").ok_or("prompt 缺少 content（Base64）")?)?;
-    Ok(ImportRequest::Prompt(PromptImport {
-        app,
-        name,
-        content,
-        description: get("description").unwrap_or_default(),
-        enabled: get("enabled").map(|v| v != "false" && v != "0").unwrap_or(false),
-    }))
-}
-
-fn parse_mcp(get: &dyn Fn(&str) -> Option<String>) -> Result<ImportRequest, String> {
-    let apps: Vec<String> = get("apps")
-        .ok_or("mcp 缺少 apps")?
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .map(|s| check_app(&s))
-        .collect::<Result<Vec<_>, _>>()?;
-    if apps.is_empty() {
-        return Err("mcp 的 apps 是空的".to_string());
-    }
-    let raw = b64_decode(&get("config").ok_or("mcp 缺少 config（Base64）")?)?;
-    let json: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|e| format!("config 不是合法 JSON：{e}"))?;
-    let map = json
-        .get("mcpServers")
-        .and_then(|v| v.as_object())
-        .ok_or("config 裡沒有 mcpServers 物件")?;
-    let mut servers = vec![];
-    for (id, v) in map {
-        let input = super::super::mcp::input_from_json(id, v)
-            .map_err(|e| format!("伺服器「{id}」不合法：{e}"))?;
-        servers.push((id.clone(), input));
-    }
-    if servers.is_empty() {
-        return Err("config 裡沒有任何伺服器".to_string());
-    }
-    Ok(ImportRequest::Mcp(McpImport {
-        apps,
-        enabled: get("enabled").map(|v| v != "false" && v != "0").unwrap_or(true),
-        servers,
-    }))
-}
-
-fn parse_skill(get: &dyn Fn(&str) -> Option<String>) -> Result<ImportRequest, String> {
-    let repo = get("repo").ok_or("skill 缺少 repo（owner/name）")?;
-    let (owner, name) = repo
-        .split_once('/')
-        .ok_or_else(|| format!("repo 格式應為 owner/name：{repo}"))?;
-    let (owner, name) = crate::skills::validate_repo(owner, name, "main", "")
-        .map(|(o, n, _, _)| (o, n))?;
-    let directory = get("directory").unwrap_or_default();
-    let fallback = directory
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or("")
-        .to_string();
-    let name_param = get("name").unwrap_or_default();
-    Ok(ImportRequest::Skill(SkillImport {
-        repo: format!("{owner}/{name}"),
-        directory,
-        branch: get("branch").unwrap_or_else(|| "main".into()),
-        name: if name_param.trim().is_empty() {
-            fallback
-        } else {
-            name_param.trim().to_string()
-        },
     }))
 }
 
@@ -347,83 +225,11 @@ pub fn preview(req: &ImportRequest) -> DeeplinkPreview {
                 ],
             }
         }
-        ImportRequest::Prompt(p) => DeeplinkPreview {
-            kind: "prompt".into(),
-            title: format!("匯入提示詞「{}」", p.name),
-            fields: vec![
-                ("工具".into(), p.app.clone()),
-                ("名稱".into(), p.name.clone()),
-                ("內容".into(), format!("{} 字元", p.content.chars().count())),
-                ("內容預覽".into(), first_lines(&p.content, 3)),
-                ("啟用".into(), yes_no(p.enabled)),
-            ],
-            warnings: if p.enabled {
-                vec!["這個連結要求直接啟用 —— 啟用會**覆寫**該工具的提示詞檔".to_string()]
-            } else {
-                vec![]
-            },
-            effects: vec![
-                "在「提示詞」新增一個預設集（預設不啟用）".into(),
-                "啟用要你自己在提示詞頁按（會先備份現有檔案）".into(),
-            ],
-        },
-        ImportRequest::Mcp(m) => {
-            let ids: Vec<String> = m.servers.iter().map(|(id, _)| id.clone()).collect();
-            let mut fields = vec![
-                ("同步到".into(), m.apps.join("、")),
-                ("伺服器".into(), ids.join("、")),
-                ("啟用".into(), yes_no(m.enabled)),
-            ];
-            for (id, input) in &m.servers {
-                let detail = if input.transport == "stdio" {
-                    format!("{} {}", input.command, input.args.join(" "))
-                } else {
-                    format!("{} {}", input.transport, input.url)
-                };
-                fields.push((format!("· {id}"), detail.trim().to_string()));
-            }
-            DeeplinkPreview {
-                kind: "mcp".into(),
-                title: format!("匯入 {} 個 MCP 伺服器", m.servers.len()),
-                fields,
-                warnings: vec![
-                    "MCP 伺服器會在你的電腦上執行指令 —— 只匯入你信任的來源".to_string(),
-                ],
-                effects: vec![
-                    format!("在「MCP」新增 {} 個伺服器", m.servers.len()),
-                    format!("並同步到 {}", m.apps.join("、")),
-                ],
-            }
-        }
-        ImportRequest::Skill(s) => DeeplinkPreview {
-            kind: "skill".into(),
-            title: format!("匯入技能「{}」", s.name),
-            fields: vec![
-                ("儲存庫".into(), s.repo.clone()),
-                ("分支".into(), s.branch.clone()),
-                ("目錄".into(), if s.directory.is_empty() { "（根目錄）".into() } else { s.directory.clone() }),
-            ],
-            warnings: vec!["會從 GitHub 下載這個技能（需要網路）".to_string()],
-            effects: vec![
-                "在「技能」新增一個來源儲存庫並安裝這個技能".into(),
-                "安裝後可逐工具選擇要同步到哪些工具".into(),
-            ],
-        },
     }
 }
 
 fn yes_no(b: bool) -> String {
     if b { "是".into() } else { "否".into() }
-}
-
-fn first_lines(s: &str, n: usize) -> String {
-    let joined = s
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .take(n)
-        .collect::<Vec<_>>()
-        .join(" / ");
-    crate::usage_query::truncate(&joined, 160)
 }
 
 #[cfg(test)]

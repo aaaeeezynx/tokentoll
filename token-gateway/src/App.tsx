@@ -26,10 +26,6 @@ function AccentSync() {
   return null;
 }
 import ProvidersPage from "./components/Providers";
-import McpPage from "./components/Mcp";
-import PromptsPage from "./components/Prompts";
-import SkillsPage from "./components/Skills";
-import SessionsPage from "./components/Sessions";
 import { I18nProvider, loadLang, useI18n } from "./lib/i18n";
 import KeysPage from "./components/Keys";
 import SettingsPage from "./components/Settings";
@@ -49,10 +45,6 @@ const queryClient = new QueryClient();
 type Tab =
   | "usage"
   | "providers"
-  | "mcp"
-  | "prompts"
-  | "skills"
-  | "sessions"
   | "keys"
   | "diagnostics"
   | "calc"
@@ -62,10 +54,6 @@ type Tab =
 const TABS: { id: Tab; label: string; icon: IconName; iconFill: IconName }[] = [
   { id: "usage", label: "nav.usage", icon: "chart-bar", iconFill: "chart-bar-fill" },
   { id: "providers", label: "nav.providers", icon: "server", iconFill: "server" },
-  { id: "mcp", label: "nav.mcp", icon: "cpu", iconFill: "cpu" },
-  { id: "prompts", label: "nav.prompts", icon: "pencil", iconFill: "pencil" },
-  { id: "skills", label: "nav.skills", icon: "download", iconFill: "download" },
-  { id: "sessions", label: "nav.sessions", icon: "clock", iconFill: "clock" },
   { id: "keys", label: "nav.keys", icon: "key", iconFill: "key-fill" },
   { id: "diagnostics", label: "nav.diagnostics", icon: "alert", iconFill: "bolt-fill" },
   { id: "calc", label: "nav.calc", icon: "calculator", iconFill: "calculator" },
@@ -300,10 +288,6 @@ function Shell() {
             )}
             {tab === "calc" && <CalcPage />}
             {tab === "providers" && <ProvidersPage />}
-            {tab === "mcp" && <McpPage />}
-            {tab === "prompts" && <PromptsPage />}
-            {tab === "skills" && <SkillsPage />}
-            {tab === "sessions" && <SessionsPage />}
             {tab === "keys" && <KeysPage />}
             {tab === "diagnostics" && <DiagnosticsPage />}
             {tab === "settings" && <SettingsPage />}

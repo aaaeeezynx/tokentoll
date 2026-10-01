@@ -41,4 +41,5 @@ use std::path::Path;
 mod fresh;
 mod legacy;
 mod migrate;
+mod removal;
 mod seed;

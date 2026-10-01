@@ -9,19 +9,15 @@ mod deeplink;
 mod fsutil;
 mod history;
 mod keys;
-mod mcp;
 mod models;
 mod price_extract;
 mod presets;
-mod prompt;
 mod provider_check;
 mod providers;
 mod providers_io;
-mod sessions;
 mod quota;
 #[doc(hidden)]
 pub mod proxy;
-mod skills;
 mod theme;
 mod tools;
 mod updater;
@@ -213,46 +209,6 @@ pub fn run() {
             commands::usage_query_apply_template,
             commands::usage_query_run,
             commands::usage_query_run_all,
-            // MCP 管理（P3.1，見 mcp/）
-            commands::mcp_list,
-            commands::mcp_presets,
-            commands::mcp_upsert,
-            commands::mcp_delete,
-            commands::mcp_set_binding,
-            commands::mcp_set_app_all,
-            commands::mcp_sync,
-            commands::mcp_import,
-            // 提示詞預設集（P3.2，見 prompt/）
-            commands::prompt_apps,
-            commands::prompt_state,
-            commands::prompt_list,
-            commands::prompt_save,
-            commands::prompt_activate,
-            commands::prompt_deactivate,
-            commands::prompt_delete,
-            commands::prompt_sync,
-            commands::prompt_live,
-            // 技能管理（P3.3，見 skills/）
-            commands::skills_repos,
-            commands::skills_repo_add,
-            commands::skills_repo_delete,
-            commands::skills_discover,
-            commands::skills_install,
-            commands::skills_list,
-            commands::skills_set_binding,
-            commands::skills_update,
-            commands::skills_update_all,
-            commands::skills_uninstall,
-            commands::skills_backups,
-            commands::skills_restore,
-            commands::skills_backup_delete,
-            commands::skills_settings,
-            commands::skills_set_settings,
-            // 會話管理（P3.4，見 sessions/）
-            commands::sessions_apps,
-            commands::sessions_scan,
-            commands::sessions_read,
-            commands::sessions_delete,
             // Deep Link（P4.1，見 deeplink/）
             commands::deeplink_take_pending,
             commands::deeplink_preview,

@@ -29,14 +29,19 @@ use super::*;
             "provider_stripped_fields",
             "provider_model_protocol",
             "provider_usage_query",
+            "proxy_trace",
+        ] {
+            assert!(has_table(&c, t), "缺少表 {t}");
+        }
+        // v14 起這六張表不再建立（MCP／提示詞／技能三個功能已移除）
+        for t in [
             "mcp_servers",
             "mcp_bindings",
             "prompt_presets",
             "skill_repos",
             "skills",
             "skill_bindings",
-            "proxy_trace",
         ] {
-            assert!(has_table(&c, t), "缺少表 {t}");
+            assert!(!has_table(&c, t), "v14 不該再建立 {t}");
         }
     }

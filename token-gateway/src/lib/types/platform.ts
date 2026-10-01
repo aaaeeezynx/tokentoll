@@ -3,7 +3,7 @@
 // ── P4.1：Deep Link 一鍵匯入（對標 cc-switch 的 ccswitch:// 協定） ──
 
 export interface DeeplinkPreview {
-  /** provider | prompt | mcp | skill */
+  /** 目前只有 provider（prompt／mcp／skill 已於 2026-10-02 移除） */
   kind: string;
   title: string;
   /** [欄位名, 值]（機密值已遮罩） */
