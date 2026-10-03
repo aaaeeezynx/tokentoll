@@ -776,6 +776,88 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.38 App 主 Icon 換裝：v7「橫向等長列」（2026-10-02）
+
+#### 使用者要求
+
+> 02 橫向等長列 所有项目中的 icon替換爲這個icon
+
+#### 選定歷程（前後七輪提案）
+
+| 輪次 | 產出 | 結果 |
+|---|---|---|
+| R1 五概念 | 閘門／分流／量表／字母 T／鑰匙孔 | 未採用 |
+| R2 用量計算 | 用量圓環／量表／額度長條／計算機／三環 | 未採用（03 額度長條成為後續主線） |
+| R3 長條衍生一 | % 徽章／趨勢箭頭／分段柱／走勢折線／滾動環 | 未採用 |
+| R4 長條衍生二 | 進度柱／倒影／格線／時鐘／圓環 | 01 進度柱成為下一輪主線 |
+| R5 霧面重設計 | 進度元素五版 ＋ 霧面外殼 | 05 滿載對比成為下一輪主線 |
+| R6 精緻化三版 | 液位量筒／凹槽卡尺／滿載滴落 | 使用者判「精緻度不夠」 |
+| R7 減法精緻化 | 等高量柱／**橫向等長列**／錯落精修 | ✅ **選定 02** |
+
+R6 → R7 的關鍵差異：R6 走「加法」（管壁、新月線、刻度、水滴），結果更像細節堆料；
+R7 改成「**減法 ＋ 儀表級對齊**」——全圖只剩一種細節語彙（液面線），靠比例、對齊與材質取勝。
+
+#### 定案規格
+
+| 項目 | 值 |
+|---|---|
+| 外殼 | macOS 級超橢圓 **n=4**（45° 對角曲率半徑 ≈ 0.47a ≈ Apple 22.4% 圓角率），四角透明 |
+| 主色 | 強調色藍 `#3395ff → #0a84ff → #0070e0`（＝ `src/lib/theme.ts` 的 `ACCENTS[0]`） |
+| 質感 | Liquid Glass **霧面**：12% 乳白霧罩、0.88 內縮玻璃板（羽化邊）、左上大範圍柔光暈（blur 280）、寬柔頂部受光、底部內陰影、**霧面顆粒 sigma 14/12**（絲滑噴砂）、環境柔影 |
+| 字形 | 三條**等長**橫軌上下堆疊，左起填充 100%／65%／48%；填右端一條「液面線」（比軌道高 15px 的細亮線）；刻意不加基線 |
+| 母稿（入庫） | `token-gateway/icon-base-1024.png`（1024×1024 RGBA） |
+| 設計歷程 | `logo-previews/`（本機保留，已列入 `.gitignore`） |
+
+#### 換裝範圍
+
+| 位置 | 動作 |
+|---|---|
+| `src-tauri/icons/*.png`（17 檔：32／64／128／128@2x／icon.png／Square*Logo／StoreLogo） | `pnpm exec tauri icon icon-base-1024.png` 重產 |
+| `src-tauri/icons/icon.ico`（內含 16／24／32／48／64／256 六個尺寸） | 同上 |
+| `src-tauri/icons/icon.icns` | 同上 |
+| `src-tauri/icons/android/**`（14 檔）、`ios/**`（16 檔） | 同上 |
+| web favicon | 新增 `public/favicon.png`（64×64），`index.html` 改指向它 |
+| 兩個品牌 placeholder | 刪除 `public/vite.svg`、`public/tauri.svg`（全 repo 已無任何引用） |
+| 工作列／視窗／系統匣 | **不需要另外改**：`tray.rs` 用 `app.default_window_icon()`；Windows 的視窗圖示來自 Tauri 編進 exe 的 bundle icon |
+
+#### 產出驗證（逐像素）
+
+| 檔案 | 尺寸 | 實心像素 | 藍佔比 | 左上角 alpha |
+|---|---|---|---|---|
+| `32x32.png` | 32×32 | 760 | 97.2% | 0 |
+| `64x64.png` | 64×64 | 3,164 | 96.3% | 0 |
+| `128x128.png` | 128×128 | 12,889 | 95.6% | 0 |
+| `128x128@2x.png` | 256×256 | 51,675 | 95.0% | 0 |
+| `icon.png` | 512×512 | 206,953 | 94.8% | 0 |
+| `icon.ico`（最大格） | 256×256 | 51,675 | 95.0% | 0 |
+| `icon.icns`（1024 格） | 1024×1024 | 829,291 | 94.7% | 0 |
+| `StoreLogo.png` | 50×50 | 1,958 | 96.9% | 0 |
+
+**圓角曲率鎖定**：共同取樣點 `(920,920)` α=15（形狀外）、`(908,908)` α=252（形狀內），
+與已確認 n=4 的母稿逐點相同 → 轉出的每個尺寸都是同一曲率族，沒有在縮放時被改成圓角矩形。
+
+#### 「角落 alpha」是這次換裝最直接的鑑別特徵
+
+舊 icon 是前幾輪「HIG 分層式」路線的成品：**全幅不透明**（512×512 的 262,144 px 全是實心、藍佔比 90.6%）。
+新圖是使用者明確要求的 macOS 圓角 squircle，**四角透明**（實心 206,953 px、藍佔比 94.8%）。
+所以「角落是不是 0」可以一眼分辨新舊，不必靠肉眼比對。
+
+#### 一個副作用：圖檔變大
+
+霧面顆粒是高頻雜訊，PNG 壓縮效率會差很多：
+
+| 檔案 | 舊 | 新 | 倍率 |
+|---|---|---|---|
+| `icon.icns` | 64,718 | 1,730,496 | 26.7× |
+| `icon.png` | 13,257 | 238,061 | 18.0× |
+| `128x128@2x.png` | 6,586 | 53,371 | 8.1× |
+| `icon.ico` | 12,713 | 67,091 | 5.3× |
+
+顆粒是使用者指定的霧面質感，不打算拿掉；若日後想縮小，只要在產 icon 前對母稿做輕度降噪或色彩量化即可，
+母稿與生成流程都不用改。
+
+---
+
 ### 0.9.37 移除 MCP／提示詞／技能／會話四個功能（2026-10-02）
 
 #### 使用者要求
@@ -3429,7 +3511,111 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.38 建置（2026-10-02 02:13，移除 MCP／提示詞／技能／會話）—— **你目前安裝的就是這一個**
+### 9.39 建置（2026-10-03 17:26，App 主 Icon 換裝）—— **你目前安裝的就是這一個**
+
+依 §0.9.38 的定案（R7「02 橫向等長列」）換裝全專案 icon。**沒有動 schema（仍 v15）、
+沒有動任何功能程式碼**，本輪改動只有：icon 資產、`index.html` 的 favicon 指向、
+`tauri.conf.json` 的 NSIS 圖示設定、以及文件。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-03 17:26:25 |
+| `target\release\token-gateway.exe` | 9,513,984 bytes、sha256 `070C059920DA65974E98DB934C188DF47F03C4EBFB5E81BA022C9DDB7609D4EE` |
+| NSIS 安裝檔 | 4,090,542 bytes、sha256 `69C49BC6BF2629836A63079E5D520F2B574E24DC41434745B3C40BC6FCCF9455` |
+| MSI | 7,688,192 bytes（2026-10-03 17:26:11） |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,513,984 bytes、sha256 `D9C5B05E9C6460FF1FC17B325293A84995851DAB5BF5DC36545513BCDB950432` |
+| 前端資源指紋 | `index-Bjce9vjq.js`（605.62 kB）、`index-uFaTH7y6.css`（57.56 kB） |
+| 母稿（入庫） | `token-gateway/icon-base-1024.png` |
+
+> 安裝後 exe 的 sha256 與 `target\release` 的不同是**正常的**：Tauri 會對要打包的 exe
+> 再補一次 bundle type 資訊（日誌裡的 `Patching … with bundle type information: nsis`），
+> 大小相同、內容差在 PE 的一小段。前幾輪的紀錄也是這樣。
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **318 passed / 0 failed / 8 ignored** ✅ |
+| `cargo clippy --offline --all-targets` | **0 warning** ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build` | exit 0 ✅（前端 36.28s ＋ release 編譯 5m47s） |
+
+#### 抓到一個「換了圖卻沒生效」的坑（本輪最有價值的發現）
+
+第一次建置完，**exe 裡的 icon 還是舊的**——把新 exe 的 256px icon 與舊安裝版逐位元比對，
+結果 `ImageChops.difference(...).getbbox() is None`（完全相同）。
+
+追下去看到 build script 的輸出目錄：
+
+| 檔案 | 時間戳 | 意義 |
+|---|---|---|
+| `target\release\build\token-gateway-*\out\resource.rc` | **2026-09-28 01:17** | 這次建置**沒有重跑** build script |
+| `icons/icon.ico` | 2026-10-03 17:06 | 圖早就換好了 |
+
+`resource.rc` 只是**引用** `icons/icon.ico` 的**路徑**，圖示的位元組在 build script 執行時
+就已經編進 `resource.lib` 了。因為 rc 檔內容沒變（路徑字串一樣）＋ crate 原始碼沒變，
+Cargo 就跳過 build script → link 進去的是 9/28 編好的舊 lib。
+
+**修法**：`cargo clean -p token-gateway` 清掉這個 crate 的產物後重建。
+（代價：`cargo clean -p` 實際上把 target 裡大部分東西一起清了 23.4 GiB，
+導致這次 release 編譯要 5m47s；下次換 icon 記得先預期這件事。）
+
+#### 順手修好：NSIS 安裝檔用的是 NSIS 預設圖示
+
+`bundle.icon` 只管應用程式本身的圖示，**不影響安裝檔**。所以安裝程式在檔案總管裡
+一直顯示 NSIS 的預設圖示。補上設定後安裝檔也換成新圖示：
+
+```json
+"bundle": {
+  "windows": {
+    "nsis": {
+      "installerIcon": "icons/icon.ico",
+      "uninstallerIcon": "icons/icon.ico"
+    }
+  }
+}
+```
+
+> 一度寫成 `installerHeaderIcon` 而被 schema 擋下：Tauri 2.11 的 `NsisConfig` 只有
+> `template`／`headerImage`／`sidebarImage`／`installerIcon`／`uninstallerIcon`／
+> `uninstallerHeaderImage`／`installMode`／`languages`／`compression`／`startMenuFolder`／
+> `installerHooks`，**沒有** `installerHeaderIcon`。錯誤訊息是
+> `is not valid under any of the schemas listed in the 'anyOf' keyword`。
+
+#### 實機驗證（安裝後，逐項都是從真實檔案／視窗讀出來的）
+
+| 驗證項 | 方法 | 結果 |
+|---|---|---|
+| 安裝後 exe 內嵌 icon | `PrivateExtractIcons` 256px | ✅ 256×256、實心 51,675、藍 **95.0%**、左上角 alpha **0** |
+| 安裝後 exe 內嵌 icon（16px） | 同上 | ✅ 16×16、實心 184、藍 100% |
+| NSIS 安裝檔內嵌 icon | 同上 | ✅ 與 exe／master **同一個簽章**（51,675／95.0%／0） |
+| MSI 的圖示設定 | 讀 `wix\x64\main.wxs` | ✅ 第 49–50 行 `<Icon Id="ProductIcon" SourceFile="…resource.ico">` ＋ `ARPPRODUCTICON=ProductIcon`，第 149 行捷徑 `Icon="ProductIcon"` |
+| **主視窗圖示（真實 HWND）** | 列舉 `Tauri Window` 並 `WM_GETICON` | ✅ 32×32、實心 760、藍 97.2%、角落透明 → 與 `icons/32x32.png` 完全一致 |
+| **系統列圖示（16px 實際尺寸）** | 從 exe 抽 16px | ✅ 16×16、實心 184、藍 100% |
+| 開始功能表捷徑 | 檔案時間戳 | ✅ `…\Start Menu\Programs\token-gateway.lnk` 更新為 2026-10-03 17:27:18 |
+| 安裝前後 exe | 大小／時間戳 | ✅ 9,722,368（10/02 02:12）→ **9,513,984（10/03 17:26）** |
+| NSIS 靜默安裝 | `Start-Process /S -Wait` | ✅ exit code 0 |
+
+#### 實機 GUI 回歸（CDP 讀真實畫面，確認換 icon 沒動到功能）
+
+| 驗證項 | 結果 |
+|---|---|
+| 側邊欄 | ✅ 正好六項：用量／上游來源／本地 Key／診斷／試算／設定 |
+| 逐頁點擊切換 | ✅ 六頁全部渲染、標題與導覽一致（內文長度 288～8,470 字） |
+| i18n 洩漏 | ✅ 六頁的原始字典 key 數量皆為 **0** |
+| 用量頁資料 | ✅ 總請求 115、真實消耗 tokens 175,114,942、快取命中率 49.8%，網關 `127.0.0.1:15722` 正常 |
+
+#### 檢查過的實機 icon 一覽（全部同一個簽章）
+
+| 來源 | 尺寸 | 實心像素 | 藍佔比 | 角落 alpha |
+|---|---|---|---|---|
+| `icons/128x128@2x.png`（基準） | 256×256 | 51,675 | 95.0% | 0 |
+| 建置產物 exe | 256×256 | 51,675 | 95.0% | 0 |
+| NSIS 安裝檔 | 256×256 | 51,675 | 95.0% | 0 |
+| 安裝後 exe | 256×256 | 51,675 | 95.0% | 0 |
+| 安裝後 exe（16px） | 16×16 | 184 | 100% | 2（縮圖反鋸齒） |
+| 主視窗 HWND | 32×32 | 760 | 97.2% | 0 |
+| `icons/32x32.png`（基準） | 32×32 | 760 | 97.2% | 0 |
+
+### 9.38 前一次建置（2026-10-02 02:13，移除 MCP／提示詞／技能／會話，已被 9.39 取代）
 
 依 §0.9.37 的計畫移除四個功能（A：DROP 六張表＝schema v14；B：不動使用者檔案；
 C：舊 deeplink 直接拒絕；D：只動這四項）。

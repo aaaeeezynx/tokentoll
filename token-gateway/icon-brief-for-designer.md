@@ -69,6 +69,9 @@ src-tauri/icons/128x128@2x.png
 
 命名/流程：設計師只需給 **1024 母稿 + 預覽圖**，工程用 `pnpm tauri icon icon-base-1024.png` 自動生成全尺寸覆蓋 `src-tauri/icons/`。
 
+> **2026-10-02 已定案**：母稿入庫為 `token-gateway/icon-base-1024.png`，設計歷程見 §9。
+> 也就是說「需求書」這件事已經走完，本文件現在同時是需求書與定案紀錄。
+
 ## 7. 驗收 Checklist
 
 - [ ] 16px（工作列小圖）下輪廓清晰、無糊邊
@@ -80,5 +83,28 @@ src-tauri/icons/128x128@2x.png
 ## 8. 工程交接備註（設計師可忽略）
 
 - App 名：`Token Gateway`，identifier `com.tokencounter.gateway`
-- 換圖步驟：替換母稿 → `pnpm tauri icon` → `pnpm build` → 裝 `bundle/msi` 看工作列實機效果
-- 現有 icon 均為 Tauri 預設佔位圖，可直接覆蓋，無需保留
+- 換圖步驟：替換母稿 → `pnpm exec tauri icon icon-base-1024.png` → `pnpm exec tauri build` → 裝 `bundle/nsis` 看工作列實機效果
+- 舊 icon（HIG 分層式、全幅不透明）已於 2026-10-02 被 macOS 圓角霧面版取代，見 §9
+
+## 9. 定案紀錄（2026-10-02）
+
+七輪提案後選定 **R7 的「02 橫向等長列」**（同輪另有「等高量柱」「錯落精修」兩版）。
+
+| 項目 | 值 |
+|---|---|
+| 母稿（入庫） | `token-gateway/icon-base-1024.png`（1024×1024 RGBA） |
+| 設計歷程（本機） | `logo-previews/`（已列入 `.gitignore`，只保留最終入選版進 repo） |
+| 外殼 | macOS 級超橢圓 **n=4**（≈ Apple 22.4% 圓角率），四角透明 |
+| 主色 | `#3395ff → #0a84ff → #0070e0`（＝ App 的藍色 Accent） |
+| 質感 | Liquid Glass 霧面：乳白霧罩 ＋ 內縮玻璃板 ＋ 柔光暈 ＋ 霧面顆粒（sigma 14/12）＋ 環境柔影 |
+| 字形 | 三條等長橫軌（左起填充 100%／65%／48%）＋ 填右端液面線 |
+
+重新產生全套 icon（會覆蓋 `src-tauri/icons/` 底下 17 個主檔 ＋ `android/` ＋ `ios/`）：
+
+```powershell
+cd token-gateway
+pnpm exec tauri icon icon-base-1024.png
+```
+
+驗收時最快的判別方式：**四角必須完全透明**（舊版是全幅不透明），且藍佔比 ≈ 95%；
+完整逐尺寸數據與實機驗證見 `docs/TESTING.md` §0.9.38 與 §9.39。

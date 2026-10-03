@@ -19,6 +19,7 @@
 
 # ── 設計資產歷史版本（只保留最終入選版；入選版在 src-tauri/icons/）──
 /icon-lab/
+/logo-previews/
 /token-gateway/src-tauri/icons/concepts/
 
 # ── 日誌與暫存 ─────────────────────────────────────────────────
