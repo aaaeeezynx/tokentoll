@@ -9,9 +9,9 @@ pub(crate) fn import_providers(
     conn: &Connection,
     file: &ExportFile,
 ) -> Result<ImportReport, String> {
-    if file.kind != "token-gateway/providers" {
+    if !EXPORT_KINDS.contains(&file.kind.as_str()) {
         return Err(format!(
-            "這不是來源匯出檔（kind={}，應為 token-gateway/providers）",
+            "這不是來源匯出檔（kind={}，應為 {EXPORT_KIND}）",
             file.kind
         ));
     }

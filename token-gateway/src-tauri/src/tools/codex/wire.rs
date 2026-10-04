@@ -61,7 +61,7 @@ pub(crate) fn gateway_section(
     auth: CodexAuth<'_>,
 ) -> toml_edit::Table {
     let mut tbl = toml_edit::Table::new();
-    tbl["name"] = toml_edit::value("Token Gateway");
+    tbl["name"] = toml_edit::value("Token Toll");
     tbl["base_url"] = toml_edit::value(base_url);
     match auth.direct_key {
         // 直連上游：Bearer 即上游 Key，明文寫入（用戶顯式選擇，見警告）
@@ -151,10 +151,11 @@ pub fn codex_apply(
         .as_table_mut()
         .ok_or("model_providers 不是表，無法接管")?;
     // 先刪後插：冪等，多次接管不疊段
-    let mut managed: Vec<String> = vec![
-        CODEX_SHARED_PROVIDER_ID.to_string(),
-        GATEWAY_PROVIDER_ID.to_string(),
-    ];
+    // 品牌改名相容：新舊渠道 ID 都要建立（舊會話按舊段名引用供應商）。
+    let mut managed: Vec<String> = vec![CODEX_SHARED_PROVIDER_ID.to_string()];
+    for id in GATEWAY_PROVIDER_IDS {
+        managed.push(id.to_string());
+    }
     for a in aliases {
         let id = a.trim();
         if id.is_empty() || managed.iter().any(|m| m == id) {
@@ -167,7 +168,8 @@ pub fn codex_apply(
             continue;
         }
         managed.push(id.to_string());
-        if managed.len() >= CODEX_ALIAS_CAP + 2 {
+        // +3 = 共享段 + 新舊兩個渠道 ID（見 consts::GATEWAY_PROVIDER_IDS）
+        if managed.len() >= CODEX_ALIAS_CAP + 3 {
             break;
         }
     }

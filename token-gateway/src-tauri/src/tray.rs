@@ -195,7 +195,7 @@ pub fn spawn(app: &AppHandle, menu: Menu<tauri::Wry>) -> tauri::Result<()> {
         .expect("missing default window icon");
     tauri::tray::TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .tooltip("Token Gateway · 本地網關")
+        .tooltip("Token Toll · 本地網關")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| {

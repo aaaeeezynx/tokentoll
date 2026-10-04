@@ -111,8 +111,8 @@ export const DICT: Record<string, [string, string]> = {
   // ── 設定：關於 ──
   "settings.about.title": ["關於", "About"],
   "settings.about.caption": [
-    "Token Gateway v2 · Tauri 本地網關",
-    "Token Gateway v2 · local gateway for Tauri apps",
+    "Token Toll v2 · 本機 AI 用量收費站",
+    "Token Toll v2 · local AI toll booth",
   ],
   "settings.about.datadir": ["數據目錄", "Data folder"],
   "settings.about.copy": ["複製", "Copy"],

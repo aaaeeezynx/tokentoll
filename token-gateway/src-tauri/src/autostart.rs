@@ -2,7 +2,11 @@
 //!
 //! Windows 上用**登錄檔的 Run 機碼**（cc-switch 手冊也是這樣寫的）：
 //! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 底下的字串值
-//! `TokenGateway` = `"C:\…\token-gateway.exe"`。
+//! `TokenGateway` = `"C:\…\tokentoll.exe"`。
+//!
+//! 值名稱 `TokenGateway` **刻意不隨品牌改名**：它已經寫進使用者的登錄檔，
+//! 改了會讓既有的自啟設定變成孤兒（使用者得重新開啟自啟），而使用者看不到
+//! 這個名稱，沒有改的效益。
 //!
 //! 選 HKCU 而不是 HKLM：**不需要系統管理員**，而且與「這個 App 是每個使用者
 //! 自己的工具」的定位一致（與 Deep Link 的協定註冊同一條原則）。

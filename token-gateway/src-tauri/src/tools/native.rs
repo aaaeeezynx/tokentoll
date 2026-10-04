@@ -126,15 +126,31 @@ fn codex_native(text: &str) -> NativeOutcome {
     // 載入失敗、表現成「無法登入」。還原是最適合清掉它的時機（回到官方時本來
     // 就不需要任何 provider 段）。
     if let Some(mp) = doc.get_mut("model_providers").and_then(|m| m.as_table_mut()) {
-        let mut removed: Vec<&str> = vec![];
+        let mut removed: Vec<String> = vec![];
         for id in super::codex::CODEX_RESERVED_PROVIDER_IDS {
             if mp.remove(id).is_some() {
-                removed.push(id);
+                removed.push(id.to_string());
+            }
+        }
+        // 網關自己建立的渠道段（含改名前的舊名）也要清掉，否則回到原生來源後
+        // 會留下指向本網關的孤兒段。
+        //
+        // **只刪「還指向本網關」的段**：使用者可能已經把同名段改成自己的直連
+        // 設定（例如 `[model_providers.tokengateway]` 指向 NVIDIA），那是他的
+        // 東西，還原不該順手刪掉。判準與 `custom` 段一致 —— 看 base_url。
+        for id in super::consts::GATEWAY_PROVIDER_IDS {
+            let points_at_gateway = mp
+                .get(id)
+                .and_then(|s| s.get("base_url"))
+                .and_then(|u| u.as_str())
+                .is_some_and(|u| u.starts_with(&format!("http://{}:", GATEWAY_HOST)));
+            if points_at_gateway && mp.remove(id).is_some() {
+                removed.push(id.to_string());
             }
         }
         if !removed.is_empty() {
             out.changes.push(format!(
-                "移除 Codex 內建 provider 段 {}（Codex 不允許覆寫內建 id；留著會讓整份設定載入失敗）",
+                "移除 provider 段 {}（Codex 內建 id 不可覆寫；指向本網關的孤兒段也一併清掉）",
                 removed.join("、")
             ));
         }
@@ -266,14 +282,18 @@ fn opencode_native(text: &str, port: u16) -> NativeOutcome {
             changes.push(format!("移除 provider.{pname}.options.apiKey（網關的本地 key）"));
         }
     }
-    // 接管時釘住的頂層 `model`（`tokengateway/<模型>`）也要拿掉，否則回到原生
-    // 來源後 `opencode run` 仍會指名一個已經不在設定裡的 provider。只動「指向
-    // 本網關」的值：使用者自己的 `model`（例如 `anthropic/...`）不是我們的東西。
-    let gw_prefix = format!("{GATEWAY_PROVIDER_ID}/");
+    // 接管時釘住的頂層 `model`（`tokentoll/<模型>`，改名前的 `tokengateway/<模型>`）
+    // 也要拿掉，否則回到原生來源後 `opencode run` 仍會指名一個已經不在設定裡的
+    // provider。只動「指向本網關」的值：使用者自己的 `model`（例如 `anthropic/...`）
+    // 不是我們的東西。
     let pinned = root
         .get("model")
         .and_then(|m| m.as_str())
-        .is_some_and(|m| m.starts_with(&gw_prefix));
+        .is_some_and(|m| {
+            GATEWAY_PROVIDER_IDS
+                .iter()
+                .any(|id| m.starts_with(&format!("{id}/")))
+        });
     if pinned {
         root.as_object_mut().map(|o| o.remove("model"));
         changes.push("移除頂層 model（接管時釘住的網關模型）".into());

@@ -15,7 +15,7 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
     match std::fs::read_to_string(&cfg_path) {
         Err(_) => out.push("⚠️ config.toml 不存在：接管將新建".to_string()),
         Ok(t) => {
-            for id in [CODEX_SHARED_PROVIDER_ID, GATEWAY_PROVIDER_ID] {
+            for id in [CODEX_SHARED_PROVIDER_ID].into_iter().chain(GATEWAY_PROVIDER_IDS) {
                 let header = format!("[model_providers.{id}]");
                 let n = t.lines().filter(|l| l.trim() == header).count();
                 if n > 1 {
@@ -27,8 +27,9 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
             match dedupe_codex_sections(&t).parse::<toml_edit::DocumentMut>() {
                 Err(e) => out.push(format!("❌ config.toml 解析失敗：{e}")),
                 Ok(doc) => {
-                    // 有 provider 段寫 `env_key = TOKEN_GATEWAY_KEY` 才需要環境變數；
-                    // 直連模式寫的是 `experimental_bearer_token`，不需要。
+                    // 有 provider 段寫 `env_key = TOKEN_TOLL_KEY`（或改名前的
+                    // TOKEN_GATEWAY_KEY）才需要環境變數；直連模式寫的是
+                    // `experimental_bearer_token`，不需要。
                     env_key_used = Some(
                         doc.get("model_providers")
                             .and_then(|m| m.as_table())
@@ -37,7 +38,7 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
                                     sec.as_table()
                                         .and_then(|s| s.get("env_key"))
                                         .and_then(|v| v.as_str())
-                                        == Some(GATEWAY_ENV_KEY)
+                                        .is_some_and(|k| GATEWAY_ENV_KEYS.contains(&k))
                                 })
                             })
                             .unwrap_or(false),
@@ -47,7 +48,7 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
                     {
                         out.push("⚠️ model_provider 不是 custom：接管將切到共享段名".to_string());
                     }
-                    for id in [CODEX_SHARED_PROVIDER_ID, GATEWAY_PROVIDER_ID] {
+                    for id in GATEWAY_PROVIDER_IDS {
                         match doc
                             .get("model_providers")
                             .and_then(|m| m.get(id))
@@ -97,11 +98,17 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
             }
         }
     }
-    if std::env::var(GATEWAY_ENV_KEY)
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false)
-    {
-        out.push(format!("✅ {GATEWAY_ENV_KEY} 已在環境變數"));
+    // 新舊名都認（品牌改名相容，見 consts 的 GATEWAY_ENV_KEYS）。
+    let env_hit = GATEWAY_ENV_KEYS
+        .iter()
+        .find(|k| {
+            std::env::var(k)
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+        })
+        .copied();
+    if let Some(hit) = env_hit {
+        out.push(format!("✅ {hit} 已在環境變數"));
     } else if env_key_used == Some(false) {
         // **設定檔根本沒用到它**，所以沒設不是問題。以前這裡無條件報 ❌，
         // 於是「直連模式（上游 Key 明文寫進 config.toml）」的使用者每次體檢
@@ -113,7 +120,8 @@ pub fn codex_doctor_at(codex_home: &Path, port: u16) -> Vec<String> {
     } else {
         out.push(format!(
             "❌ {GATEWAY_ENV_KEY} 未設定：設定檔的 provider 段用 env_key 指向它，\
-             Codex 行程繼承不到 Key 會 401，請先設為用戶環境變數"
+             Codex 行程繼承不到 Key 會 401，請先設為用戶環境變數\
+             （舊名 {GATEWAY_ENV_KEY_LEGACY} 亦相容）"
         ));
     }
     // cc-switch 代理殘留（15721）會與接管預期衝突

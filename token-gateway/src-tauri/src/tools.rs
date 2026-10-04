@@ -39,8 +39,11 @@ pub(crate) use {
     consts::CODEX_INLINE_MODELS_CAP,
     consts::CODEX_SHARED_PROVIDER_ID,
     consts::GATEWAY_ENV_KEY,
+    consts::GATEWAY_ENV_KEY_LEGACY,
+    consts::GATEWAY_ENV_KEYS,
     consts::GATEWAY_HOST,
     consts::GATEWAY_PROVIDER_ID,
+    consts::GATEWAY_PROVIDER_IDS,
     consts::TAKEOVER_APPS,
 
     // ---- util ----

@@ -216,13 +216,13 @@ function Shell() {
           </span>
           <div className="hidden md:block">
             <div className="text-[13px] font-semibold tracking-tight text-fg">
-              Token Gateway
+              Token Toll
             </div>
             <div
               className="text-[10px]"
               style={{ color: "var(--mac-label-4)" }}
             >
-              本地 AI 網關
+              本機 AI 用量收費站
             </div>
           </div>
         </div>

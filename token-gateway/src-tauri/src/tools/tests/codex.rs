@@ -48,7 +48,14 @@ fn codex_preserves_comments_and_sections() {
     .unwrap();
     assert!(out.contains("# cc-switch managed"), "註釋必須保留：{out}");
     assert!(out.contains("[model_providers.custom]"), "共享段必須存在");
-    assert!(out.contains("[model_providers.tokengateway]"), "別名段必須創建：{out}");
+    assert!(
+        out.contains("[model_providers.tokentoll]"),
+        "新渠道段必須創建：{out}"
+    );
+    assert!(
+        out.contains("[model_providers.tokengateway]"),
+        "舊渠道段也必須創建（改名相容，舊會話按段名引用）：{out}"
+    );
     // 共享段名方案：model_provider = custom（cc-switch 同款，舊會話可繼續）
     assert!(out.contains("model_provider = \"custom\""), "{out}");
     // custom 段內容由接管覆寫為網關（舊的 15721 直連內容被替換）
@@ -58,10 +65,14 @@ fn codex_preserves_comments_and_sections() {
         Some("http://127.0.0.1:15722/v1")
     );
     assert_eq!(
+        v["model_providers"]["tokentoll"]["base_url"].as_str(),
+        Some("http://127.0.0.1:15722/v1")
+    );
+    assert_eq!(
         v["model_providers"]["tokengateway"]["base_url"].as_str(),
         Some("http://127.0.0.1:15722/v1")
     );
-    assert!(out.contains("env_key = \"TOKEN_GATEWAY_KEY\""), "{out}");
+    assert!(out.contains("env_key = \"TOKEN_TOLL_KEY\""), "{out}");
     assert!(out.contains("wire_api = \"responses\""), "{out}");
     assert!(out.contains("model = \"gpt-5.5\""), "{out}");
     assert!(out.contains("[mcp_servers]"), "無關段必須保留");
@@ -297,7 +308,7 @@ fn codex_direct_writes_bearer_no_envkey() {
     }
     // 非直連保持 env_key
     let out2 = codex_apply(old, "http://x", "m", None, None, &[], &[], CodexAuth::default()).unwrap();
-    assert!(out2.contains("env_key = \"TOKEN_GATEWAY_KEY\""), "{out2}");
+    assert!(out2.contains("env_key = \"TOKEN_TOLL_KEY\""), "{out2}");
 }
 
 
@@ -359,14 +370,16 @@ fn doctor_env_key_warning_depends_on_config_usage() {
     )
     .unwrap();
     let report = codex_doctor_at(dir.path(), 15722);
-    let env_set = std::env::var("TOKEN_GATEWAY_KEY")
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false);
+    // 品牌改名後體檢會報「實際命中的那個名字」（新名優先、舊名相容），
+    // 所以這裡兩個名字都算合格。
+    let env_hit = ["TOKEN_TOLL_KEY", "TOKEN_GATEWAY_KEY"]
+        .iter()
+        .any(|k| std::env::var(k).map(|v| !v.trim().is_empty()).unwrap_or(false));
     assert!(
-        report
-            .iter()
-            .any(|l| l.contains("TOKEN_GATEWAY_KEY") && (l.contains("❌") || l.contains("✅"))),
-        "env_key 模式必須對環境變數給出明確結論（env_set={env_set}）：{report:?}"
+        report.iter().any(|l| (l.contains("TOKEN_TOLL_KEY")
+            || l.contains("TOKEN_GATEWAY_KEY"))
+            && (l.contains("❌") || l.contains("✅"))),
+        "env_key 模式必須對環境變數給出明確結論（env_set={env_hit}）：{report:?}"
     );
     assert!(
         !report.iter().any(|l| l.contains("不需要")),

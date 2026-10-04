@@ -146,7 +146,7 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             let auth_desc = if req.direct_upstream {
                 "experimental_bearer_token = 上游 Key 明文"
             } else {
-                "env_key = TOKEN_GATEWAY_KEY"
+                "env_key = TOKEN_TOLL_KEY"
             };
             // 協議形狀：**一律** `CODEX_WIRE_API`，與 [`codex_apply`] 共用
             // 同一個常數（先前兩邊各算一次，預覽因此顯示過 `chat` 而實際
@@ -154,18 +154,26 @@ pub fn plan_switch(req: &SwitchRequest, port: u16) -> Result<SwitchPlan, String>
             let wire_api = CODEX_WIRE_API;
             if aliases.is_empty() {
                 plan.edits.push(format!(
-                    "[model_providers.{CODEX_SHARED_PROVIDER_ID}] 與 [model_providers.{GATEWAY_PROVIDER_ID}] base_url = {} / {auth_desc} / wire_api = {wire_api}",
+                    "[model_providers.{{{}}}] base_url = {} / {auth_desc} / wire_api = {wire_api}",
+                    std::iter::once(CODEX_SHARED_PROVIDER_ID)
+                        .chain(GATEWAY_PROVIDER_IDS)
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     req.base_url
                 ));
             } else {
                 plan.edits.push(format!(
-                    "[model_providers.{{custom, tokengateway{}}}] 共 {} 段 base_url = {} / {auth_desc} / wire_api = {wire_api}",
+                    "[model_providers.{{{}{}}}] 共 {} 段 base_url = {} / {auth_desc} / wire_api = {wire_api}",
+                    std::iter::once(CODEX_SHARED_PROVIDER_ID)
+                        .chain(GATEWAY_PROVIDER_IDS)
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     if aliases.is_empty() {
                         String::new()
                     } else {
                         format!(", {}", aliases.join(", "))
                     },
-                    aliases.len() + 2,
+                    aliases.len() + 3,
                     req.base_url
                 ));
             }

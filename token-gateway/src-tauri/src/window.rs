@@ -62,7 +62,7 @@ pub fn is_lightweight(app: &AppHandle) -> bool {
 /// 建立主視窗（與 `tauri.conf.json` 的設定一致：1100×720、最小 600×480）。
 fn build_main(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("Token Gateway")
+        .title("Token Toll")
         .inner_size(1100.0, 720.0)
         .min_inner_size(600.0, 480.0)
         .build()

@@ -776,6 +776,101 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.41 品牌更名：Token Gateway → Token Toll（2026-10-04）
+
+#### 使用者要求
+
+> 帮我想个合适的专案名称，我要发布到 GitHub 上
+> 可以 依照你的建议全部一次改完
+
+命名經過：`Token Toll`（收費站）——toll = 通行費／收費站，車輛過收費站要計費、
+token 過閘道要計量，語意一次講完閘門＋計量＋收費；`Token`＋`Toll` 雙 T 頭韻好記，
+且與 OpenAI／Anthropic／Cursor 無混淆風險。
+
+#### 改名範圍（三類，逐項裁決）
+
+**A 類：顯示名（安全，直接改）**
+
+| 位置 | 舊 | 新 |
+|---|---|---|
+| `tauri.conf.json` `productName`／視窗標題 | `token-gateway`／`Token Gateway` | `Token Toll` |
+| `window.rs` 視窗標題 | `Token Gateway` | `Token Toll` |
+| `tray.rs` tooltip | `Token Gateway · 本地網關` | `Token Toll · 本地網關` |
+| `App.tsx` 側欄品牌＋副標 | `Token Gateway`／`本地 AI 網關` | `Token Toll`／`本機 AI 用量收費站` |
+| `i18nDict.ts` 關於頁 ×2 | `Token Gateway v2 · Tauri 本地網關` | `Token Toll v2 · 本機 AI 用量收費站` |
+| `Cargo.toml` name／description／authors／default-run | `token-gateway`／`A Tauri App`／`you` | `tokentoll`／真實描述／`luluna` |
+| `Cargo.toml` `[lib] name` | `token_gateway_lib` | `tokentoll_lib` |
+| `package.json` name | `token-gateway` | `tokentoll` |
+| `tools/codex/wire.rs`、`tools/apply.rs` 的 provider 顯示名 | `Token Gateway` | `Token Toll` |
+
+**C 類：User-Agent 與檔案命名（無相容問題）**
+
+| 位置 | 舊 | 新 |
+|---|---|---|
+| `quota/{claude,opencode}.rs` | `token-gateway/0.1 quota` | `tokentoll/0.1 quota` |
+| `usage_query/run.rs` | `token-gateway/usage-query` | `tokentoll/usage-query` |
+| `provider_check.rs` | `token-gateway/connectivity-check` | `tokentoll/connectivity-check` |
+| 匯出檔名前綴 | `token-gateway-providers-*.json` | `tokentoll-providers-*.json` |
+
+**B 類：識別碼（你選擇「全部改，且新舊並存」）**
+
+這類已經寫進使用者的系統與工具設定，硬切會造成中斷，所以一律**寫新名、讀時新舊都認**：
+
+| 識別碼 | 新名 | 舊名（相容保留） | 相容作法 |
+|---|---|---|---|
+| 渠道 ID | `GATEWAY_PROVIDER_ID = "tokentoll"` | `tokengateway` | 接管時**兩個段都建立**並指向網關（舊會話按段名引用供應商）；還原時兩個都清 |
+| 環境變數 | `TOKEN_TOLL_KEY` | `TOKEN_GATEWAY_KEY` | `GATEWAY_ENV_KEYS` 讀取時依序嘗試；寫入用新名；體檢報實際命中的那個 |
+| 匯出格式 | `EXPORT_KIND = "tokentoll/providers"` | `token-gateway/providers` | `EXPORT_KINDS` 匯入時新舊都接受 |
+| 釘住的模型前綴 | `tokentoll/<模型>` | `tokengateway/<模型>` | 還原時兩個前綴都視為「網關釘住」而移除 |
+| 去重清單 | — | — | `custom` 與新舊渠道 ID 一起從歷史會話 provider 清單去重 |
+
+**刻意不改**（改了會造成不可逆的使用者可見破壞）：
+
+| 項目 | 理由 |
+|---|---|
+| `identifier: com.tokencounter.gateway` | 決定資料目錄。改了 → 現有 6,137 筆請求、7 個來源、2 把 Key **全部看不到**（檔案還在舊路徑，App 讀新目錄）。bundle ID 不隨品牌改是業界慣例 |
+| 登錄檔值名 `TokenGateway`（`autostart.rs`） | 已寫進使用者登錄檔，改了會讓既有自啟變成孤兒，而使用者看不到這個名稱 |
+| `TOKEN_GATEWAY_MIGRATE_DB`（測試專用 env） | 只在 `db/tests/migrate.rs` 的人工遷移測試用，不影響使用者 |
+
+#### 過程中修掉一個真實的還原缺陷（不是改名造成的，是改名讓它暴露）
+
+`codex_native()` 原本的還原邏輯如果是「無條件刪除網關渠道段」，會誤刪
+**使用者已改成自己直連設定**的同名段。測試 `opencode_native_drops_gateway_endpoint_and_local_key`
+的模擬輸入正好是這個情境（`[model_providers.tokengateway]` 指向 NVIDIA），
+改名後該段被新邏輯刪掉 → 測試失敗，因而發現。
+
+**修正**：只刪「**還指向本網關**」的段（`base_url` 以 `http://127.0.0.1:` 開頭），
+判準與既有的 `custom` 段一致。使用者的直連設定從此不會被順手刪掉。
+
+> 這是本輪唯一的行為邏輯變更；其餘都是字串替換。
+
+#### 改名的代價（給未來的自己）
+
+| 影響 | 說明 |
+|---|---|
+| 安裝路徑 | `%LOCALAPPDATA%\token-gateway\` → `%LOCALAPPDATA%\Token Toll\` |
+| 開始功能表 | 捷徑改名，**舊捷徑會殘留**，需手動移除 |
+| 開機自啟 | 登錄檔指向舊 exe 路徑 → **需重新開啟自啟** |
+| 執行檔 | `token-gateway.exe` → `Token Toll.exe`（Tauri 用 productName 命名） |
+| 使用者資料 | **不受影響**（identifier 未變，DB 與備份原地不動） |
+
+改名前完整備份：`.workbuddy/rename-backup-20261004-173213/`（47 檔、16.6 MB，
+含整個 `%APPDATA%\com.tokencounter.gateway`、`~/.codex/config.toml`、
+自啟登錄檔匯出、目前 exe 資訊）。
+
+#### 閘門
+
+| 項目 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **318 passed / 0 failed / 8 ignored** ✅（與改名前的數字一致） |
+| `cargo clippy --offline --all-targets` | **0 warning** ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+
+改名過程中一度有 10 個測試失敗，全部是**斷言舊名稱**或**行為已變更**；
+逐一更新預期值後回到 318 綠燈（沒有任何測試被刪除或跳過）。
+
+---
+
 ### 0.9.40 冗餘檔案盤點與清理（2026-10-04）
 
 #### 使用者要求
@@ -3665,7 +3760,58 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.40 建置（2026-10-04 16:29，側邊欄「診斷」選中圖示修正）—— **你目前安裝的就是這一個**
+### 9.41 建置（2026-10-04 17:56，品牌更名 Token Gateway → Token Toll）
+
+依 §0.9.41 更名：顯示名全部改為 Token Toll；識別碼（渠道 ID／環境變數／匯出格式）
+改新名但**讀取端新舊都認**；`identifier` 與登錄檔值名刻意保持不變。
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-04 17:56 |
+| `target\release\tokentoll.exe` | 9,323,520 bytes、sha256 `910E4D1C899349295FE2E3D677CCDA4BF0E906A48D759AACB3DB7808FEC0EFD9` |
+| NSIS 安裝檔 | 4,086,584 bytes、sha256 `838F270D672B3E6D2998EA8EA9C3173914669E1AEBCF110FD2CF180854F14195` |
+| MSI | 7,688,192 bytes |
+| 安裝後 `%LOCALAPPDATA%\Token Toll\tokentoll.exe` | 9,515,520 bytes |
+| 前端資源指紋 | `index-Bjce9vjq.js`（改名只動字串，bundle 名稱不變） |
+
+| 閘門 | 結果 |
+|---|---|
+| `cargo test --offline --lib` | **318 passed / 0 failed / 8 ignored** ✅ |
+| `cargo clippy --offline --all-targets` | **0 warning** ✅ |
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `pnpm exec tauri build` | exit 0 ✅（release 4m50s） |
+
+#### 安裝與遷移驗證
+
+| 驗證項 | 結果 |
+|---|---|
+| NSIS 靜默安裝 | ✅ exit code 0 |
+| 新安裝路徑 | ✅ `%LOCALAPPDATA%\Token Toll\`（`tokentoll.exe` ＋ `gw.exe` ＋ `uninstall.exe`） |
+| **使用者資料完好**（identifier 未變的關鍵驗證） | ✅ `providers=7`、`request_logs=6137`、`local_keys=2`、`schema_version=14` —— 與改名前完全一致 |
+| 沒有產生新 DB | ✅ `%APPDATA%` 底下仍只有 `com.tokencounter.gateway\app.db` 一個 |
+| **視窗標題** | ✅ `Token Toll` |
+| **側欄品牌** | ✅ 顯示 `Token Toll` ＋「本機 AI 用量收費站」；**舊名 `Token Gateway` 完全不剩** |
+| 六頁導航 | ✅ 用量／上游來源／本地 Key／診斷／試算／設定，無原始 i18n key |
+| 用量資料讀取 | ✅ 切「最近 7 天」得到 1,024 筆／30.9 億 tokens；「最近 30 天」得到 6,105 筆／47.5 億 tokens |
+
+> **一次虛驚，寫下來給下次的自己**：初次讀畫面時「總請求 0」讓我以為 DB 讀不到，
+> 追查後發現只是**預設時間範圍是「今天」**（今天還沒用量）。
+> 資料庫自始至終都正常，`identifier` 保持不變的決定完全奏效。
+> 教訓：驗證資料是否存在時，要指定足夠長的時間範圍。
+
+#### 舊版清理與系統整合修復
+
+| 項目 | 處置 |
+|---|---|
+| 舊版程式 `%LOCALAPPDATA%\token-gateway\` | ✅ 執行舊版自帶 `uninstall.exe /S`（exit 0）完整移除 |
+| 舊捷徑 `token-gateway.lnk`（開始功能表） | ✅ 隨卸載一併清除 |
+| 新捷徑 `Token Toll.lnk` | ✅ 指向 `…\Token Toll\tokentoll.exe` |
+| **開機自啟** `Startup\TokenGateway.lnk` | ✅ 原本指向已移除的舊 exe（失效），**已重新指向新 exe**並驗證目標存在 |
+
+> 登錄檔值名 `TokenGateway` 刻意保留（見 §0.9.41），使用者看不到它，
+> 改了只會讓既有自啟變成孤兒。
+
+### 9.40 前一次建置（2026-10-04 16:29，側邊欄「診斷」選中圖示修正，已被 9.41 取代）
 
 依 §0.9.39 修正診斷頁選中後圖示變成閃電的問題。改動只有兩處：
 `src/components/icons.tsx`（新增 `alert-fill`）、`src/App.tsx`（`iconFill` 改指向它）。

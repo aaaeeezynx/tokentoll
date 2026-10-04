@@ -1,10 +1,10 @@
 [package]
-name = "token-gateway"
+name = "tokentoll"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Local AI toll booth — meter, route, and account for every token your coding agents spend"
+authors = ["luluna"]
 edition = "2021"
-default-run = "token-gateway"
+default-run = "tokentoll"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,7 +12,7 @@ default-run = "token-gateway"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "token_gateway_lib"
+name = "tokentoll_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

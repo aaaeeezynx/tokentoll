@@ -1,7 +1,8 @@
 {
-  "name": "token-gateway",
+  "name": "tokentoll",
   "private": true,
   "version": "0.1.0",
+  "description": "Local AI toll booth — meter, route, and account for every token your coding agents spend",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -8,10 +8,32 @@
 pub const GATEWAY_HOST: &str = "127.0.0.1";
 
 /// 各工具引用本地 Key 的統一環境變量名。
-pub const GATEWAY_ENV_KEY: &str = "TOKEN_GATEWAY_KEY";
+///
+/// 2026-10-04 品牌由 Token Gateway 更名為 Token Toll，環境變數名從
+/// `TOKEN_GATEWAY_KEY` 改為 `TOKEN_TOLL_KEY`。使用者的系統環境變數與工具設定
+/// （Codex `env_key`、OpenCode `{env:}`）都已經寫入舊名，兩者必須並存：
+/// 讀取時兩個都認，寫入時用新名。見 [`GATEWAY_ENV_KEYS`]。
+pub const GATEWAY_ENV_KEY: &str = "TOKEN_TOLL_KEY";
+
+/// 品牌改名前的環境變數名（`TOKEN_GATEWAY_KEY`）。
+pub const GATEWAY_ENV_KEY_LEGACY: &str = "TOKEN_GATEWAY_KEY";
+
+/// 讀取時依序嘗試的環境變數名（新名優先，舊名相容）。
+pub const GATEWAY_ENV_KEYS: [&str; 2] = [GATEWAY_ENV_KEY, GATEWAY_ENV_KEY_LEGACY];
 
 /// 我們在各工具配置裡創建的渠道 ID。
-pub const GATEWAY_PROVIDER_ID: &str = "tokengateway";
+pub const GATEWAY_PROVIDER_ID: &str = "tokentoll";
+
+/// 品牌改名前的渠道 ID（`tokengateway`）。
+///
+/// 這個段名已經寫進使用者的 `~/.codex/config.toml`、`opencode.json` 等設定檔，
+/// 且**舊會話歷史按段名引用供應商**。所以改名時不能只是換掉：接管要繼續建立
+/// 舊段名並讓它指向網關，還原則要把新舊段名一起清掉，否則會留下孤兒段或讓
+/// 舊會話報「Model provider not found」。
+pub const GATEWAY_PROVIDER_ID_LEGACY: &str = "tokengateway";
+
+/// 支援的所有渠道 ID（新版優先，舊版殿後）。
+pub const GATEWAY_PROVIDER_IDS: [&str; 2] = [GATEWAY_PROVIDER_ID, GATEWAY_PROVIDER_ID_LEGACY];
 
 /// Codex 共享段名（cc-switch 同款）：會話歷史按段名引用供應商，段名必須
 /// 永遠存在且指向網關，舊會話才不會因段被刪而「Model provider not found」。

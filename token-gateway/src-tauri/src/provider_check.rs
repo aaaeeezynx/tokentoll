@@ -86,7 +86,7 @@ async fn check_with(client: &reqwest::Client, url: &str) -> CheckResult {
     match client
         .get(url)
         .header("accept", "*/*")
-        .header("user-agent", "token-gateway/connectivity-check")
+        .header("user-agent", "tokentoll/connectivity-check")
         .send()
         .await
     {

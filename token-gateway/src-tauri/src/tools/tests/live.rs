@@ -243,12 +243,12 @@ fn live_opencode_direct() {
     .expect("opencode.json");
     let v: serde_json::Value = serde_json::from_str(&text).expect("json");
     assert_eq!(
-        v["provider"]["tokengateway"]["options"]["baseURL"],
+        v["provider"]["tokentoll"]["options"]["baseURL"],
         "http://127.0.0.1:15722/v1",
         "直連模式 baseURL 仍是網關：{text}"
     );
     assert_eq!(
-        v["provider"]["tokengateway"]["options"]["apiKey"], up,
+        v["provider"]["tokentoll"]["options"]["apiKey"], up,
         "上游 Key 必須明文落盤（不得是 env 引用）：{text}"
     );
 }

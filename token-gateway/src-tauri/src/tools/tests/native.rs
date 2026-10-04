@@ -61,7 +61,7 @@ fn codex_native_removes_reserved_builtin_provider_sections() {
         out.text
     );
     assert!(
-        out.changes.iter().any(|c| c.contains("內建 provider 段")),
+        out.changes.iter().any(|c| c.contains("provider 段")),
         "要告訴使用者做了什麼：{:?}",
         out.changes
     );
@@ -221,7 +221,7 @@ const OPENCODE_MANAGED: &str = r#"{
       "name": "Token Gateway",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "apiKey": "{env:TOKEN_GATEWAY_KEY}",
+        "apiKey": "{env:TOKEN_TOLL_KEY}",
         "baseURL": "https://integrate.api.nvidia.com/v1"
       }
     }
@@ -239,8 +239,12 @@ fn opencode_native_drops_gateway_endpoint_and_local_key() {
         .expect("options 還在");
     assert!(!opts.contains_key("baseURL"), "網關端點必須移除");
     assert!(!opts.contains_key("apiKey"), "網關本地 key 必須移除");
-    // 舊對話要用的 provider 段整段保留。
-    assert_eq!(v["provider"]["tokengateway"]["name"].as_str(), Some("Token Gateway"));
+    // 使用者已把舊渠道段改成自己的直連設定（指向 NVIDIA，不是本網關）：
+    // 還原必須**整段保留**，不能因為段名是我們的舊名就順手刪掉。
+    assert_eq!(
+        v["provider"]["tokengateway"]["name"].as_str(),
+        Some("Token Gateway")
+    );
     assert_eq!(
         v["provider"]["tokengateway"]["options"]["baseURL"].as_str(),
         Some("https://integrate.api.nvidia.com/v1")

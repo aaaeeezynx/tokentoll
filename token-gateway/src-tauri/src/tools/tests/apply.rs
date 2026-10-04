@@ -122,22 +122,22 @@ fn opencode_merges_provider_and_models() {
     let out = opencode_apply(Some(old), "http://127.0.0.1:15721/v1", "deepseek-v4-flash", None, None).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(
-        v["provider"]["tokengateway"]["options"]["baseURL"],
+        v["provider"]["tokentoll"]["options"]["baseURL"],
         "http://127.0.0.1:15721/v1"
     );
     assert_eq!(
-        v["provider"]["tokengateway"]["options"]["apiKey"],
-        "{env:TOKEN_GATEWAY_KEY}"
+        v["provider"]["tokentoll"]["options"]["apiKey"],
+        "{env:TOKEN_TOLL_KEY}"
     );
     assert_eq!(
-        v["provider"]["tokengateway"]["npm"],
+        v["provider"]["tokentoll"]["npm"],
         "@ai-sdk/openai-compatible"
     );
-    assert!(v["provider"]["tokengateway"]["models"]["deepseek-v4-flash"].is_object());
+    assert!(v["provider"]["tokentoll"]["models"]["deepseek-v4-flash"].is_object());
     assert!(v["provider"]["anthropic"].is_object(), "原有渠道必須保留");
     // 接管時釘住模型：否則 `opencode run` 會用它自己的預設模型，請求不落到網關
     assert_eq!(
-        v["model"], "tokengateway/deepseek-v4-flash",
+        v["model"], "tokentoll/deepseek-v4-flash",
         "頂層 model 必須指向網關 provider"
     );
 }
@@ -149,8 +149,8 @@ fn opencode_pins_model_to_gateway_provider() {
     let old = r#"{"provider": {}, "model": "anthropic/claude-sonnet-4-6"}"#;
     let out = opencode_apply(Some(old), "http://127.0.0.1:15722/v1", "muse-spark-1.3", None, None).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(v["model"], "tokengateway/muse-spark-1.3");
-    // 空模型不得寫出 `tokengateway/`（否則會釘到一個不存在的模型）
+    assert_eq!(v["model"], "tokentoll/muse-spark-1.3");
+    // 空模型不得寫出 `tokentoll/`（否則會釘到一個不存在的模型）
     let out2 = opencode_apply(Some(old), "http://127.0.0.1:15722/v1", "   ", None, None).unwrap();
     let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
     assert_eq!(v2["model"], "anthropic/claude-sonnet-4-6", "無模型時不動原值");
@@ -163,7 +163,7 @@ fn opencode_writes_context_limit() {
     let out = opencode_apply(Some(old), "http://127.0.0.1:15722/v1", "m1", Some(128000), None).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(
-        v["provider"]["tokengateway"]["models"]["m1"]["limit"]["context"],
+        v["provider"]["tokentoll"]["models"]["m1"]["limit"]["context"],
         128000
     );
     let out2 = opencode_apply(Some(old), "http://x", "m1", None, None).unwrap();
@@ -179,15 +179,15 @@ fn opencode_direct_key_writes_plaintext() {
     let out = opencode_apply(Some(old), "http://127.0.0.1:15722/v1", "m1", None, Some("up-secret")).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(
-        v["provider"]["tokengateway"]["options"]["apiKey"],
+        v["provider"]["tokentoll"]["options"]["apiKey"],
         "up-secret"
     );
     // 空 Key 回退引用（不寫空字串，避免靜默斷連）
     let out2 = opencode_apply(Some(old), "http://127.0.0.1:15722/v1", "m1", None, Some("  ")).unwrap();
     let v2: serde_json::Value = serde_json::from_str(&out2).unwrap();
     assert_eq!(
-        v2["provider"]["tokengateway"]["options"]["apiKey"],
-        "{env:TOKEN_GATEWAY_KEY}"
+        v2["provider"]["tokentoll"]["options"]["apiKey"],
+        "{env:TOKEN_TOLL_KEY}"
     );
 }
 

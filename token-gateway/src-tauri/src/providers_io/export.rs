@@ -47,7 +47,7 @@ pub(crate) fn export_providers(
         out.push(p);
     }
     Ok(ExportFile {
-        kind: "token-gateway/providers".to_string(),
+        kind: EXPORT_KIND.to_string(),
         version: EXPORT_VERSION,
         exported_at: now_ms(),
         includes_keys: include_keys,

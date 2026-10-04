@@ -117,9 +117,25 @@ pub struct ExportProvider {
     pub periods: Vec<ExportPeriod>,
 }
 
+/// 匯出檔的類型標記：匯入時據此擋掉「丟錯檔案」。
+///
+/// 2026-10-04 品牌改名（Token Gateway → Token Toll），值由
+/// `token-gateway/providers` 改為 `tokentoll/providers`；**匯入端新舊都認**
+/// （見 [`EXPORT_KINDS`]），使用者先前匯出的檔案仍可匯入。
+pub const EXPORT_KIND: &str = "tokentoll/providers";
+
+/// 改名前的類型標記。
+pub const EXPORT_KIND_LEGACY: &str = "token-gateway/providers";
+
+/// 匯入時接受的類型標記（新名優先，舊名相容）。
+pub const EXPORT_KINDS: [&str; 2] = [EXPORT_KIND, EXPORT_KIND_LEGACY];
+
+/// 匯出檔的檔名前綴：`{stem}-{stamp}.json`。
+pub const EXPORT_FILE_STEM: &str = "tokentoll-providers";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportFile {
-    /// 固定為 `token-gateway/providers`：匯入時據此擋掉「丟錯檔案」。
+    /// 固定為 [`EXPORT_KIND`]：匯入時據此擋掉「丟錯檔案」。
     pub kind: String,
     pub version: i64,
     #[serde(default)]
@@ -235,13 +251,13 @@ pub(crate) fn write_export(
     json: &str,
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("建立目錄失敗（{}）：{e}", dir.display()))?;
-    let mut path = dir.join(format!("token-gateway-providers-{stamp}.json"));
+    let mut path = dir.join(format!("{EXPORT_FILE_STEM}-{stamp}.json"));
     // 同一秒內連續匯出也不覆蓋前一個
     for i in 2..1000 {
         if !path.exists() {
             break;
         }
-        path = dir.join(format!("token-gateway-providers-{stamp}-{i}.json"));
+        path = dir.join(format!("{EXPORT_FILE_STEM}-{stamp}-{i}.json"));
     }
     std::fs::write(&path, json).map_err(|e| format!("寫入失敗（{}）：{e}", path.display()))?;
     Ok(path)

@@ -58,7 +58,7 @@ pub(crate) fn query_opencode_go(provider_id: i64, name: &str, base_url: &str, ap
     let url = format!("{base}/usage");
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("token-gateway/0.1 quota")
+        .user_agent("tokentoll/0.1 quota")
         .build()
     {
         Ok(c) => c,

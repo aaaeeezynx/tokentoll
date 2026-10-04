@@ -1,8 +1,8 @@
-# Token Gateway · 本地 AI 網關
+# Token Toll · 本機 AI 用量收費站
 
-> Local-first AI gateway & usage monitor for Windows — aggregate upstream providers behind one OpenAI-compatible endpoint, issue local keys per tool, and see exactly what you burn.
+> Your local AI toll booth — meter, route, and account for every token your coding agents spend.
 >
-> 本地優先的 AI 網關與用量統計工具（Windows）：把多個上游聚合成一個 OpenAI 兼容入口、按工具簽發本地 Key、每一分錢燒在哪裡都看得見。
+> 本機 AI 用量收費站（Windows）：把多個上游聚合成一個 OpenAI 兼容入口、按工具簽發本地 Key、每一分錢燒在哪裡都看得見。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%20x64-0078D4.svg)](#下載--download)
@@ -15,7 +15,7 @@
 
 你在同一台機器上跑 Codex、Claude Code、OpenCode 等工具，每個都要自己填上游網址與金鑰，額度、限流、花了多少錢散在各處，沒有一個地方看得全。
 
-Token Gateway 在本機 (`127.0.0.1`) 開一個 OpenAI／Anthropic／Gemini 兼容的入口：把多個上游聚合成一個端點，替每個工具簽發獨立的本地 Key（各自配額、限流、模型白名單），攔下每一次請求做精確計量與計價，並把各工具的歷史會話用量一併補登進同一本帳。
+Token Toll 在本機 (`127.0.0.1`) 開一個 OpenAI／Anthropic／Gemini 兼容的入口：車輛過收費站要計費，token 過閘道要計量——把多個上游聚合成一個端點，替每個工具簽發獨立的本地 Key（各自配額、限流、模型白名單），攔下每一次請求做精確計量與計價，並把各工具的歷史會話用量一併補登進同一本帳。
 
 **全部資料留在本機 SQLite，不經過任何第三方伺服器。** 網關只監聽 `127.0.0.1`，不對外開放。
 
@@ -153,8 +153,8 @@ macOS 27 風格的介面：Liquid Glass、深／淺／跟隨系統三種主題�
 
 | 檔案 | 大小 | 說明 |
 |---|---|---|
-| `token-gateway_0.1.0_x64-setup.exe` | 3.8 MB | NSIS 安裝包（推薦） |
-| `token-gateway_0.1.0_x64_en-US.msi` | 7.2 MB | MSI 安裝包 |
+| `Token Toll_0.1.0_x64-setup.exe` | 3.9 MB | NSIS 安裝包（推薦） |
+| `Token Toll_0.1.0_x64_en-US.msi` | 7.3 MB | MSI 安裝包 |
 
 > 未簽名版本：SmartScreen 會提示「未知的發行者」，選「仍要執行」即可。需 WebView2 Runtime（Win10／11 一般自帶）。
 

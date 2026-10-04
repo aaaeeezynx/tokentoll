@@ -185,7 +185,7 @@ fn export_hides_keys_unless_explicitly_asked() {
     assert_eq!(safe.providers[0].models.len(), 1);
     assert_eq!(safe.providers[0].pricing.len(), 1);
     assert_eq!(safe.providers[0].periods.len(), 1);
-    assert_eq!(safe.kind, "token-gateway/providers");
+    assert_eq!(safe.kind, "tokentoll/providers");
     assert_eq!(safe.version, EXPORT_VERSION);
 
     let with = export_providers(&conn, true).unwrap();
@@ -300,7 +300,7 @@ fn import_rejects_foreign_or_future_files() {
 fn import_parses_minimal_json() {
     let (_d, conn) = empty_db();
     let json = r#"{
-      "kind": "token-gateway/providers",
+      "kind": "tokentoll/providers",
       "version": 1,
       "providers": [ { "name": "min", "base_url": "https://min.example.com/v1" } ]
     }"#;
@@ -349,7 +349,7 @@ fn export_file_writes_and_never_overwrites() {
     // 寫出來的檔案要能被「從路徑匯入」那條路讀回（內容可解析且 provider 對得上）
     let raw = std::fs::read_to_string(&p1).unwrap();
     let back: ExportFile = serde_json::from_str(&raw).unwrap();
-    assert_eq!(back.kind, "token-gateway/providers");
+    assert_eq!(back.kind, "tokentoll/providers");
     assert_eq!(back.providers.len(), 1);
     assert_eq!(back.providers[0].name, "src");
     assert_eq!(back.providers[0].models.len(), 1);

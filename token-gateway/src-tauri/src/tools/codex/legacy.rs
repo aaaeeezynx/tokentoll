@@ -115,7 +115,10 @@ pub(crate) fn read_legacy_providers_from(db: &Path) -> Result<Vec<String>, Strin
                 continue;
             }
         };
-        if id.is_empty() || id == CODEX_SHARED_PROVIDER_ID || id == GATEWAY_PROVIDER_ID {
+        if id.is_empty()
+            || id == CODEX_SHARED_PROVIDER_ID
+            || GATEWAY_PROVIDER_IDS.iter().any(|g| id == *g)
+        {
             continue;
         }
         // 僅保留合法 TOML 鍵字元
@@ -239,7 +242,7 @@ pub(crate) fn codex_alias_ids(existing: &str, from_db: &[String], gw_url: &str) 
         if id.is_empty()
             || is_reserved_codex_provider(id)
             || id == CODEX_SHARED_PROVIDER_ID
-            || id == GATEWAY_PROVIDER_ID
+            || GATEWAY_PROVIDER_IDS.contains(&id)
             || out.iter().any(|o| o == id)
         {
             continue;

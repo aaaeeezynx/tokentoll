@@ -116,7 +116,7 @@ pub fn opencode_apply(
     );
     emap.insert(
         "name".to_string(),
-        serde_json::Value::String("Token Gateway".to_string()),
+        serde_json::Value::String("Token Toll".to_string()),
     );
     let options = emap.entry("options").or_insert(serde_json::json!({}));
     if !options.is_object() {
