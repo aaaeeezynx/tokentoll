@@ -33,7 +33,11 @@ pub(crate) use crate::tools::codex::CODEX_WIRE_API;
 // ---- consts ----
 pub(crate) use crate::tools::consts::BACKUP_KEEP;
 pub(crate) use crate::tools::consts::CODEX_SHARED_PROVIDER_ID;
+pub(crate) use crate::tools::consts::GATEWAY_ENV_KEY;
+pub(crate) use crate::tools::consts::GATEWAY_ENV_KEY_LEGACY;
+pub(crate) use crate::tools::consts::GATEWAY_ENV_KEYS;
 pub(crate) use crate::tools::consts::GATEWAY_PROVIDER_ID;
+pub(crate) use crate::tools::consts::GATEWAY_PROVIDER_ID_LEGACY;
 
 // ---- detect ----
 pub(crate) use crate::tools::detect::detect_tools;
@@ -194,3 +198,4 @@ mod roundtrip;
 mod apply;
 mod live;
 mod misc;
+mod rebrand;

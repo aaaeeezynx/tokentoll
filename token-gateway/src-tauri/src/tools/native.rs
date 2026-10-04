@@ -39,6 +39,8 @@
 use super::*;
 use toml_edit::{value, DocumentMut};
 
+mod providers;
+
 /// Codex 的第一方 provider id（Codex 內建，不需要 `[model_providers]` 段）。
 pub const CODEX_NATIVE_PROVIDER: &str = "openai";
 
@@ -122,39 +124,10 @@ fn codex_native(text: &str) -> NativeOutcome {
         out.changes
             .push("移除 model_catalog_json（App 產生的模型目錄；移除後才看得到 GPT 模型）".into());
     }
-    // Codex 內建 id（`openai` 等）不可在設定檔裡定義，留著會讓整份 config.toml
-    // 載入失敗、表現成「無法登入」。還原是最適合清掉它的時機（回到官方時本來
-    // 就不需要任何 provider 段）。
-    if let Some(mp) = doc.get_mut("model_providers").and_then(|m| m.as_table_mut()) {
-        let mut removed: Vec<String> = vec![];
-        for id in super::codex::CODEX_RESERVED_PROVIDER_IDS {
-            if mp.remove(id).is_some() {
-                removed.push(id.to_string());
-            }
-        }
-        // 網關自己建立的渠道段（含改名前的舊名）也要清掉，否則回到原生來源後
-        // 會留下指向本網關的孤兒段。
-        //
-        // **只刪「還指向本網關」的段**：使用者可能已經把同名段改成自己的直連
-        // 設定（例如 `[model_providers.tokengateway]` 指向 NVIDIA），那是他的
-        // 東西，還原不該順手刪掉。判準與 `custom` 段一致 —— 看 base_url。
-        for id in super::consts::GATEWAY_PROVIDER_IDS {
-            let points_at_gateway = mp
-                .get(id)
-                .and_then(|s| s.get("base_url"))
-                .and_then(|u| u.as_str())
-                .is_some_and(|u| u.starts_with(&format!("http://{}:", GATEWAY_HOST)));
-            if points_at_gateway && mp.remove(id).is_some() {
-                removed.push(id.to_string());
-            }
-        }
-        if !removed.is_empty() {
-            out.changes.push(format!(
-                "移除 provider 段 {}（Codex 內建 id 不可覆寫；指向本網關的孤兒段也一併清掉）",
-                removed.join("、")
-            ));
-        }
-    }
+    // Codex 內建 id（`openai` 等）與「還指向本網關的渠道段」都不能留在使用者的
+    // 設定裡，詳見 native/providers.rs 的說明。
+    out.changes
+        .extend(providers::strip_managed_provider_sections(&mut doc));
     out.text = doc.to_string();
     out
 }
