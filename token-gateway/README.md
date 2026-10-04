@@ -201,16 +201,26 @@ macOS 27 風格的介面：Liquid Glass、深／淺／跟隨系統三種主題�
 
 ## 下載 · Download
 
-> ⚠️ **尚未公開發佈**：本專案目前完全在本機進行，**GitHub 上還沒有 repository，因此也沒有 Releases**。底下是 v0.1.0 的本機建置產物（規格已核對），發佈後路徑即為 Releases 頁。
+### 最新版本 · v1.0.0
+
+**[⬇ 前往 Releases 頁下載](https://github.com/aaaeeezynx/tokentoll/releases/latest)**
 
 | 檔案 | 大小 | 說明 |
 |---|---|---|
-| `Token Toll_0.1.0_x64-setup.exe` | 3.9 MB | NSIS 安裝包（推薦） |
-| `Token Toll_0.1.0_x64_en-US.msi` | 7.3 MB | MSI 安裝包 |
+| [`Token Toll_0.1.0_x64-setup.exe`](https://github.com/aaaeeezynx/tokentoll/releases/download/v1.0.0/Token.Toll_0.1.0_x64-setup.exe) | 3.9 MB | **NSIS 安裝包（推薦）**，雙擊安裝 |
+| [`Token Toll_0.1.0_x64_en-US.msi`](https://github.com/aaaeeezynx/tokentoll/releases/download/v1.0.0/Token.Toll_0.1.0_x64_en-US.msi) | 8.2 MB | MSI 安裝包，適合企業佈署 |
 
-> 未簽名版本：SmartScreen 會提示「未知的發行者」，選「仍要執行」即可。需 WebView2 Runtime（Win10／11 一般自帶）。
+> **版本號說明**：對外發布標籤是 `v1.0.0`，程式內部版本號仍是 `0.1.0`
+> （三個版本欄位一致），所以安裝檔檔名帶 `0.1.0`。兩者是同一份建置。
 
-> Not yet publicly released — there is no GitHub repository yet, hence no Releases. Sizes above are local v0.1.0 build artifacts. Unsigned build: SmartScreen will warn about an unknown publisher — choose "Run anyway". Requires WebView2 Runtime (bundled with Win10/11).
+**系統需求**：Windows 10 1809+ / Windows 11（x64）· WebView2 Runtime（Win10／11 一般自帶）
+
+> **未簽名版本**：SmartScreen 會提示「未知的發行者」，選「仍要執行」即可。
+> 想自行核對檔案完整性，SHA256 校驗碼寫在 Release 說明裡。
+
+> **Latest release: v1.0.0.** The public release tag is `v1.0.0` while the internal
+> version stays `0.1.0`, hence the filename. Unsigned build: SmartScreen will warn
+> about an unknown publisher — choose "Run anyway". Requires WebView2 Runtime.
 
 ---
 
