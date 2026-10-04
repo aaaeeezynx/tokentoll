@@ -201,26 +201,24 @@ macOS 27 風格的介面：Liquid Glass、深／淺／跟隨系統三種主題�
 
 ## 下載 · Download
 
-### 最新版本 · v1.0.0
+### 最新版本 · v0.1.0
 
 **[⬇ 前往 Releases 頁下載](https://github.com/aaaeeezynx/tokentoll/releases/latest)**
 
 | 檔案 | 大小 | 說明 |
 |---|---|---|
-| [`Token Toll_0.1.0_x64-setup.exe`](https://github.com/aaaeeezynx/tokentoll/releases/download/v1.0.0/Token.Toll_0.1.0_x64-setup.exe) | 3.9 MB | **NSIS 安裝包（推薦）**，雙擊安裝 |
-| [`Token Toll_0.1.0_x64_en-US.msi`](https://github.com/aaaeeezynx/tokentoll/releases/download/v1.0.0/Token.Toll_0.1.0_x64_en-US.msi) | 8.2 MB | MSI 安裝包，適合企業佈署 |
+| [`Token Toll_0.1.0_x64-setup.exe`](https://github.com/aaaeeezynx/tokentoll/releases/download/v0.1.0/Token.Toll_0.1.0_x64-setup.exe) | 3.9 MB | **NSIS 安裝包（推薦）**，雙擊安裝 |
+| [`Token Toll_0.1.0_x64_en-US.msi`](https://github.com/aaaeeezynx/tokentoll/releases/download/v0.1.0/Token.Toll_0.1.0_x64_en-US.msi) | 8.2 MB | MSI 安裝包，適合企業佈署 |
 
-> **版本號說明**：對外發布標籤是 `v1.0.0`，程式內部版本號仍是 `0.1.0`
-> （三個版本欄位一致），所以安裝檔檔名帶 `0.1.0`。兩者是同一份建置。
+> 版本號 `0.1.0` 在 `Cargo.toml`／`tauri.conf.json`／`package.json` 三者一致。
 
 **系統需求**：Windows 10 1809+ / Windows 11（x64）· WebView2 Runtime（Win10／11 一般自帶）
 
 > **未簽名版本**：SmartScreen 會提示「未知的發行者」，選「仍要執行」即可。
 > 想自行核對檔案完整性，SHA256 校驗碼寫在 Release 說明裡。
 
-> **Latest release: v1.0.0.** The public release tag is `v1.0.0` while the internal
-> version stays `0.1.0`, hence the filename. Unsigned build: SmartScreen will warn
-> about an unknown publisher — choose "Run anyway". Requires WebView2 Runtime.
+> **Latest release: v0.1.0.** Unsigned build: SmartScreen will warn about an
+> unknown publisher — choose "Run anyway". Requires WebView2 Runtime.
 
 ---
 
