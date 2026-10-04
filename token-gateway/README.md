@@ -7,7 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%20x64-0078D4.svg)](#下載--download)
 [![Built with Tauri 2](https://img.shields.io/badge/Built%20with-Tauri%202-ffc131.svg)](https://tauri.app)
-[![Tests: 318 passing](https://img.shields.io/badge/tests-318%20passing-brightgreen.svg)](#專案狀態--project-status)
+[![Tests: 325 passing](https://img.shields.io/badge/tests-325%20passing-brightgreen.svg)](#專案狀態--project-status)
+[![Local only: 127.0.0.1](https://img.shields.io/badge/network-localhost%20only-success.svg)](#資料與隱私--data--privacy)
 
 ---
 
@@ -18,6 +19,55 @@
 Token Toll 在本機 (`127.0.0.1`) 開一個 OpenAI／Anthropic／Gemini 兼容的入口：車輛過收費站要計費，token 過閘道要計量——把多個上游聚合成一個端點，替每個工具簽發獨立的本地 Key（各自配額、限流、模型白名單），攔下每一次請求做精確計量與計價，並把各工具的歷史會話用量一併補登進同一本帳。
 
 **全部資料留在本機 SQLite，不經過任何第三方伺服器。** 網關只監聽 `127.0.0.1`，不對外開放。
+
+---
+
+## 畫面 · Screenshots
+
+> 以下皆為實際執行畫面（Windows 11、深色模式、預設藍色 Accent）。
+> 為保護隱私，來源名稱與本地 Key 已置換為展示用名稱。
+
+### 用量總覽
+
+貢獻日曆、Token 趨勢、成本趨勢，7 張統計卡一眼看完。
+
+![用量總覽](docs/screenshots/01-usage-overview.png)
+
+### 用量 → 工具視角
+
+分工具的堆疊柱狀圖，滑過去看該時間桶的請求數、費用與各工具佔比。
+
+![工具視角](docs/screenshots/02-usage-by-tool.png)
+
+### 上游來源
+
+多個上游聚合成一個端點，各自獨立金鑰、協議、模型目錄與定價。
+
+![上游來源](docs/screenshots/03-providers.png)
+
+### 本地 Key
+
+按工具簽發 `sk-local-…`，各自配額、限流（QPM）、模型白名單。
+
+![本地 Key](docs/screenshots/04-local-keys.png)
+
+### 診斷中心
+
+來源健康、斷路器狀態、協議記憶、歷史回填，全部看得見。
+
+![診斷中心](docs/screenshots/05-diagnostics.png)
+
+### 試算比價
+
+按量 vs 訂閱，閒聊／程式／長文三種場景比價。
+
+![試算比價](docs/screenshots/06-calc.png)
+
+### 設定
+
+網關埠（預設 15722）、外觀 Accent、開機自啟、語言。
+
+![設定](docs/screenshots/07-settings.png)
 
 ---
 
@@ -97,6 +147,8 @@ Token Toll 在本機 (`127.0.0.1`) 開一個 OpenAI／Anthropic／Gemini 兼容�
 ### 介面 · UI
 
 macOS 27 風格的介面：Liquid Glass、深／淺／跟隨系統三種主題、4 種強調色、支援 600px 窄窗、**6 個主頁籤**（用量／上游來源／本地 Key／診斷／試算／設定）。
+
+應用程式圖示同樣是 macOS 級圓角（超橢圓 n=4，≈ Apple 22.4% 圓角率）的霧面 Liquid Glass 設計，四角透明。
 
 ---
 
@@ -230,10 +282,11 @@ pnpm tauri build    # 打包 · packaging
 |---|---|
 | 版本 | `0.1.0` |
 | Schema | **v15** |
-| 測試 | **318 passed / 0 failed / 8 ignored** |
+| 測試 | **325 passed / 0 failed / 8 ignored** |
 | Clippy | 0 warning（`-D warnings`） |
 | 程式碼規模 | Rust ≈ 25,000 行 ／ TypeScript ≈ 12,700 行 |
 | 授權 | MIT |
+| 對外網路 | **只監聽 `127.0.0.1`**；除你設定的上游端點外不對外連線 |
 
 **2026-10-02 移除的功能**（依使用者指示）：Deep Link 一鍵匯入、資料庫備份管理、更新檢查、雲端同步。移除時一併清掉只服務它們的設定列（含明文的 WebDAV 密碼）。
 
