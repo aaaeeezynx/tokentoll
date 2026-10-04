@@ -776,6 +776,83 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.40 冗餘檔案盤點與清理（2026-10-04）
+
+#### 使用者要求
+
+> 提交这个删除 并且检查整个项目中所有的冗余档案 先列出来，我决定哪些必须删除
+> 尤其是先前设计的icon廢案必须完全清理
+
+先盤點、列清單、由使用者逐項裁決，**沒有先刪任何東西**。
+
+#### 盤點方法
+
+掃描整個 workspace（含隱藏檔），分成六類：icon 廢案、暫存快取、建置產物、
+快照與證據、可能過時的文件、以及已追蹤檔案中的大檔。每一項都標明大小與 Git 狀態，
+並用 `git check-ignore`／`git ls-files` 逐一確認「刪了會不會影響版控」。
+
+#### 使用者裁決與執行結果
+
+| 項目 | 內容 | 大小 | Git 狀態 | 裁決 | 執行 |
+|---|---|---|---|---|---|
+| A1 | `logo-previews/`（7 輪提案、20 版設計稿＋對照圖） | 18.3 MB | 已 ignore | 刪除 | ✅ |
+| A2 | `icons/concepts/`（5 張早期概念稿） | 5.4 MB | 已 ignore | 刪除 | ✅ |
+| B1 | `.workbuddy/tmp/`（生成腳本與中間產物） | 659 KB | 已 ignore | 刪除 | ✅ |
+| B2 | 根目錄 `__pycache__/` | 1.1 KB | 已 ignore | 刪除 | ✅ |
+| B3 | `scripts/__pycache__/` | 9.3 KB | 已 ignore | 刪除 | ✅ |
+| C1 | `src-tauri/target/` | 12.98 GB | 已 ignore | **保留** | — |
+| C2 | `node_modules/` | 434 MB | 已 ignore | **保留** | — |
+| C3 | `dist/` | 669 KB | 已 ignore | **保留** | — |
+| E3 | `docs/CC-SWITCH-PARITY.md` | 20 KB | 已追蹤 | 刪除 | ✅ |
+| E4 | `tokengw-plan.md`（根目錄） | 4 KB | 已追蹤 | 刪除 | ✅ |
+| E1 | `docs/REFACTORING-PLAN.md` | 79 KB | 已追蹤 | **保留** | — |
+| E2 | `docs/SIMPLIFICATION-PLAN.md` | 47 KB | 已追蹤 | **保留** | — |
+
+**釋放 24.3 MB。** 建置產物依使用者指示保留在磁碟（不進 Git，本來就已 ignore）。
+
+#### E1／E2 的查核（使用者要求先確認是否已執行完畢）
+
+兩份**都不是待辦計畫，而是執行後的實況記錄**，所以保留：
+
+| 文件 | 自述狀態 | 抽驗證據 |
+|---|---|---|
+| `REFACTORING-PLAN.md` | 「v2 為執行後的實況記錄」，Phase 0～5 **全部 ✅** | `proxy.rs` 現為 **346 行**（<400）＋ `proxy/` 子模組；`tools.rs` ＋ `tools/` 子模組；計畫引用的 7 個代表 commit（`29f0db1`／`a98b577`／`27a73ba` 等）全部存在 |
+| `SIMPLIFICATION-PLAN.md` | 「第一階段 D-1／A／E／F 全部完成，已建置、已實機驗證」 | 計畫聲稱移除的 `hermes` 在原始碼仍有 18 處，但**不是清理不乾淨** |
+
+`hermes` 那 18 處的查核結論（`tools/detect.rs` 的註解寫得很明確）：
+
+> hermes **刻意保留**：那四處是**用量歸屬與顯示**用的，不是工具偵測用的。
+> 刪掉的話，用量頁的歷史資料會失去歸屬。
+
+`tools/apply.rs` 則明確拒絕寫入它的設定（回傳「Hermes 已於第一階段（F）移除支援」）。
+所以 F 階段的目標（不再接管、不再偵測）確實達成，保留的是**用量統計標籤**，兩者不衝突。
+
+#### 一個更正：`src-tauri/gen/schemas/` 本來就已正確忽略
+
+上一輪盤點時我把 `src-tauri/gen/` 列為「已追蹤，建議加 ignore」，**這是誤判**。
+實查結果：
+
+| 檢查 | 結果 |
+|---|---|
+| `git ls-files token-gateway/src-tauri/gen` | **空**（追蹤檔數 0） |
+| `git status --ignored` | `!! token-gateway/src-tauri/gen/schemas/` |
+| 規則來源 | `token-gateway/src-tauri/.gitignore:7` → `/gen/schemas` |
+
+社群慣例**早就已經套用**（Tauri 官方樣板本身就帶這條規則），不需要任何動作。
+誤判的原因是我當時只看了目錄存在與檔案大小，沒有對它跑 `git ls-files`。
+
+#### 提交內容
+
+| Commit | 內容 |
+|---|---|
+| `856f73d` | `chore: 移除已被取代的設計記憶檔` —— `.workbuddy/memory/2026-09-18.md`（Icon R3 路線的裁決記錄，內容已被 §0.9.38 取代） |
+| 本次 | 刪除 `docs/CC-SWITCH-PARITY.md` 與 `tokengw-plan.md` |
+
+> icon 廢案與暫存類（A1／A2／B1–B3）都在 `.gitignore` 內，刪除不會產生 commit ——
+> 這也是為什麼要先確認 Git 狀態：**已忽略的檔案刪掉不留痕跡，已追蹤的才會進版控**。
+
+---
+
 ### 0.9.39 側邊欄「診斷」選中後圖示變成閃電（2026-10-04）
 
 #### 使用者回報
