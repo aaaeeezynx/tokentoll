@@ -299,14 +299,14 @@ DBCS 前導位元組會吃掉後面的 `0x0A`，另有解碼成 U+0085 而合併
 ### 0.5.2 ⚠️ 我造成的意外：Codex 設定被改了兩次（已還原）
 
 **過程**：我用滑鼠座標導覽時，有兩次點擊落到了「上游來源」頁的**來源卡片**上
-（一次是 `xxy-DS` 卡片的「編輯」、一次直接落在 `NIM` 卡片）。
+（一次是 `自訂來源 A` 卡片的「編輯」、一次直接落在 `NIM` 卡片）。
 而**點選來源卡片依設計會立刻自動重接管 Codex**
 （`src/components/providers/useToolSwitch.ts:200-215`
 「來源切換自動重接管……永不彈框」），於是：
 
 | 時間 | `~/.codex/config.toml` 被寫成 |
 |---|---|
-| 16:19:35 | `model = deepseek-v4.1-flash`、`codex-18.json`（provider 18 = xxy-DS）← 我誤觸 |
+| 16:19:35 | `model = deepseek-v4.1-flash`、`codex-18.json`（provider 18 = 自訂來源 A）← 我誤觸 |
 | 16:23:37 | `model = moonshotai/kimi-k3`、reasoning `max`、`codex-15.json`（provider 15 = NIM）← 我誤觸 |
 | **16:28:56** | **`model = deepseek-v4.1-flash`、reasoning `medium`、`codex-22.json`（provider 22 = opencode-go）← 已還原，這是你原本的** |
 
@@ -369,7 +369,7 @@ Codex 的日誌（`~/.codex/logs_2.sqlite`，首次出現 **09-28 16:48:28**）�
 
 ```
 ERROR codex_app_server: Invalid configuration; using defaults.
-C:\Users\luluna\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
+C:\Users\<user>\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
 How to fix: set `wire_api = "responses"` in your provider config.
 ```
 
@@ -798,7 +798,7 @@ token 過閘道要計量，語意一次講完閘門＋計量＋收費；`Token`�
 | `tray.rs` tooltip | `Token Gateway · 本地網關` | `Token Toll · 本地網關` |
 | `App.tsx` 側欄品牌＋副標 | `Token Gateway`／`本地 AI 網關` | `Token Toll`／`本機 AI 用量收費站` |
 | `i18nDict.ts` 關於頁 ×2 | `Token Gateway v2 · Tauri 本地網關` | `Token Toll v2 · 本機 AI 用量收費站` |
-| `Cargo.toml` name／description／authors／default-run | `token-gateway`／`A Tauri App`／`you` | `tokentoll`／真實描述／`luluna` |
+| `Cargo.toml` name／description／authors／default-run | `token-gateway`／`A Tauri App`／`you` | `tokentoll`／真實描述／`aaaeeezynx` |
 | `Cargo.toml` `[lib] name` | `token_gateway_lib` | `tokentoll_lib` |
 | `package.json` name | `token-gateway` | `tokentoll` |
 | `tools/codex/wire.rs`、`tools/apply.rs` 的 provider 顯示名 | `Token Gateway` | `Token Toll` |
@@ -1833,7 +1833,7 @@ PROPFIND／MKCOL／PUT／GET ＋ Basic 認證，只用於驗證）。驗證流�
 | 切淺色 | ✅ `<html data-theme="light">`；body 文字 `rgba(28,28,30,0.95)`、底色 `rgb(236,236,240)`；`--app-fg-rgb: 28 28 30`；**玻璃邊框由 `rgba(255,255,255,0.09)` 反轉成 `rgba(28,28,30,0.09)`** |
 | 切深色 | ✅ 全部回到 `rgba(255,255,255,0.95)` / `rgb(11,11,15)` |
 | 跟隨系統 | ✅ 解析為 dark（本機系統為深色） |
-| **開機自啟開啟** | ✅ 設定頁開關 →「已開啟開機自啟」；`reg query …\Run /v TokenGateway` → `"C:\Users\luluna\AppData\Local\token-gateway\token-gateway.exe"` |
+| **開機自啟開啟** | ✅ 設定頁開關 →「已開啟開機自啟」；`reg query …\Run /v TokenGateway` → `"C:\Users\<user>\AppData\Local\token-gateway\token-gateway.exe"` |
 | 開機自啟關閉 | ✅ 再切一次 →「已關閉開機自啟」；登錄檔查詢變成「找不到」——**使用者的機器回到原狀** |
 
 ---
@@ -2697,7 +2697,7 @@ data: {"error":{"param":"","type":"server_error","message":"Streaming response f
 
 > 要讓 **Codex** 用 responses-only 的模型，得把那個來源宣告成 `openai-responses`
 > （網關支援；`mixed` 仍會翻成 chat）。這是**來源層級**的設定，做法是另開一個共用
-> base_url／Key 的來源項（先例：`xxy-DS`／`xxy-GLM`／`xxy-GPT 272k` 共用同一個 URL）。
+> base_url／Key 的來源項（先例：`自訂來源 A`／`自訂來源 B`／`自訂來源 C` 共用同一個 URL）。
 > 這一輪**沒有動**它，因為那會改到你既有來源的語意。
 
 #### `mimo-*` 的第二個症狀是另一件事（還沒收乾）
@@ -3161,7 +3161,7 @@ JSON 壞掉時也改成講對工具（`⚠️ 還原內容不是合法 JSON，Op
 
 ```
 pid  8252
-path C:\Users\luluna\AppData\Local\token-gateway\token-gateway.exe
+path C:\Users\<user>\AppData\Local\token-gateway\token-gateway.exe
 ```
 
 關掉它（存檔、關視窗，或）：
@@ -3413,7 +3413,7 @@ py -c "import sqlite3,os;h=os.path.join(os.environ['USERPROFILE'],'.codex');c=sq
 >
 > ```
 > ERROR codex_app_server: Invalid configuration; using defaults.
-> C:\Users\luluna\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
+> C:\Users\<user>\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
 > How to fix: set `wire_api = "responses"` in your provider config.
 > ```
 >
@@ -4749,7 +4749,7 @@ CC Switch 對齊計畫 P1 的後半（設計與取捨見 §0.9.21）。P1 到此
 |---|---|
 | **連線檢查** | ✅ 選中 `opencode-go` → 按「檢查連線」→ 回 **可達**、`GET https://opencode.ai/zen/go/v1`、說明文字「不送模型請求、不帶金鑰」都在畫面上 |
 | **故障轉移佇列** | ✅ 面板渲染、模型下拉 **25 個選項**（`deepseek-v4.1-flash（3 個來源）`…）；選了之後 **3 列**依序顯示，第 1 列掛「學到 openai-chat」徽章 |
-| 佇列順序的正確性 | ✅ 與資料庫**兩邊獨立對照**：UI 第 1／2／3 列的模型數是 9／6／1，而 DB 的 `priority` 順序是 `#22 opencode-go(9)`、`#21 aihubmix(6)`、`#18 xxy-DS(1)` —— 完全一致 |
+| 佇列順序的正確性 | ✅ 與資料庫**兩邊獨立對照**：UI 第 1／2／3 列的模型數是 9／6／1，而 DB 的 `priority` 順序是 `#22 opencode-go(9)`、`#21 中轉服務 A(6)`、`#18 自訂來源 A(1)` —— 完全一致 |
 | **共用的請求組裝（P1.6 的核心）** | ✅ 用真實 UI 把 Codex 關掉再開（先清掉 localStorage 的 lastSwitch，逼它走按來源組裝那條路）→ 畫面回「**已接管：deepseek-v4.1-flash @ opencode-go（直連上游 Key 已寫入配置文件，僅本機可讀）**」 |
 | 之後的 CLI 仍正常 | ✅ `codex exec -m grok-4.7` → `CX-OK`；`claude -p` → `CC-OK` |
 | 托盤啟動即建立選單 | ✅ 應用程式啟動成功（`setup` 裡的 `tray::rebuild(...)?` 若失敗會直接中斷啟動），代表 `menu_model` 對真實資料庫查詢、`Menu::with_items`、`tray.set_menu` 三件事都成功 |
@@ -5108,10 +5108,10 @@ note=上游 400：此模型不支援本協議（換協議／換來源重試中�
 **實機驗證（關閉 Claude Code，讀卡片訊息）**：
 
 ```
-C:\Users\luluna\.claude\settings.json｜還原自 settings.json.baseline-20260930-141556
+C:\Users\<user>\.claude\settings.json｜還原自 settings.json.baseline-20260930-141556
 ｜endpoint=api.anthropic.com（未覆寫，官方） model=claude-opus-5
 ｜設定裡沒有可原生化的地方，維持原樣
-｜⚠️ 這台機器找不到 Anthropic 官方登入憑證（C:\Users\luluna\.claude\.credentials.json
+｜⚠️ 這台機器找不到 Anthropic 官方登入憑證（C:\Users\<user>\.claude\.credentials.json
 不存在、也沒有 ANTHROPIC_API_KEY）：切回官方後請先執行 `claude` 完成 /login，
 否則它會回「Not logged in」
 ```

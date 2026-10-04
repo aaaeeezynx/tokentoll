@@ -513,7 +513,7 @@ cursor／antigravity —— 用量歸屬、篩選選項、歷史資料一個不�
 | 安裝 | NSIS `/S` exit 0；安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` 為 03:27:52、同一組資源 |
 | 舊字串已消失 | exe 內搜不到 `via_gateway`（D-1 真的進了產物） |
 | 工具清單 | 實機讀到「本機工具（2/5 接管中）」＝ **5 個**（A 生效） |
-| 切換對話框（方案路徑） | 點 Claude Code 卡片開出對話框，方案區讀到 `C:\Users\luluna\.claude\settings.json · 自動備份`、`8 項寫入`、以及「⚠ ANTHROPIC_AUTH_TOKEN 將明文寫入 settings.json…網關模式下請使用可吊銷的本地 sk Key」→ **新產物的 `switch_plan` 仍能生成方案**（這條警告在 D-1 後改為無條件出現；舊版因前端一律送 `true` 也會出現，所以本項證明的是「方案路徑在新產物上正常」，D-1 本身由上一列的 `via_gateway` 消失來證明） |
+| 切換對話框（方案路徑） | 點 Claude Code 卡片開出對話框，方案區讀到 `C:\Users\<user>\.claude\settings.json · 自動備份`、`8 項寫入`、以及「⚠ ANTHROPIC_AUTH_TOKEN 將明文寫入 settings.json…網關模式下請使用可吊銷的本地 sk Key」→ **新產物的 `switch_plan` 仍能生成方案**（這條警告在 D-1 後改為無條件出現；舊版因前端一律送 `true` 也會出現，所以本項證明的是「方案路徑在新產物上正常」，D-1 本身由上一列的 `via_gateway` 消失來證明） |
 | 未寫入任何設定 | 全程沒按「套用／接管」；驗證前後備份目錄完全相同（claude 10／codex 11＋baseline 1／hermes 6／opencode 10），`app.db` mtime 仍是 2026-09-27 17:09:05 |
 | **沒能 GUI 驗證的** | 用量頁那個自製「本機工具」下拉，我的滑鼠事件打不開它的彈出層；範圍切換也沒點動。改用**程式碼與 diff 證明**：三次 commit 都沒動 `APP_META`／`APP_ORDER`／用量頁任何一行，`Usage.tsx` 的選項來源就是 `APP_META`（含 cursor／antigravity），所以選項一個不少 |
 

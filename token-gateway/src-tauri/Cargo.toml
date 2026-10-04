@@ -2,7 +2,7 @@
 name = "tokentoll"
 version = "0.1.0"
 description = "Local AI toll booth — meter, route, and account for every token your coding agents spend"
-authors = ["luluna"]
+authors = ["aaaeeezynx"]
 edition = "2021"
 default-run = "tokentoll"
 

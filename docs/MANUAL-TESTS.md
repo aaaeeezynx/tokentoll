@@ -76,7 +76,7 @@ $inst = "$env:LOCALAPPDATA\token-gateway\token-gateway.exe"
    (Get-FileHash $cfg -Algorithm SHA256).Hash
    ```
 2. 到「**上游來源**」頁 → 點「**來源（7）**」分頁。
-3. 依序**點每一張來源卡片**（NIM、or、aihubmix、xxy-DS、xxy-GLM、xxy-GPT 272k…），
+3. 依序**點每一張來源卡片**（NIM、or、中轉服務 A、自訂來源 A、自訂來源 B、自訂來源 C…），
    每張都點一下就好，**不要**按任何「編輯」或「刪除」。
 4. 回到 PowerShell，**再算一次** hash。
 
@@ -103,7 +103,7 @@ $inst = "$env:LOCALAPPDATA\token-gateway\token-gateway.exe"
 
 1. 「上游來源」頁 →「**本機工具**」分頁。
 2. 點 **Codex** 那張卡（點卡片左側文字區域）→ 跳出「切換 Codex」對話框。
-3. 找到下方顯示路徑 `C:\Users\luluna\.codex\config.toml` 的區塊，
+3. 找到下方顯示路徑 `C:\Users\<user>\.codex\config.toml` 的區塊，
    旁邊有一個「**N 項寫入**」的可展開列 → **點它展開**。
 4. 找這一行：
 

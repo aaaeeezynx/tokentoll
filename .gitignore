@@ -32,5 +32,7 @@ __pycache__/
 .venv/
 venv/
 
-# ── Agent 工作區：保留設計記憶，忽略暫存產物 ────────────────────
-/.workbuddy/tmp/
+# ── Agent 工作區：整包忽略（含暫存與備份）──────────────────────
+# 這裡會放 agent 的暫存腳本與「動刀前的備份」，備份含使用者的
+# config.toml／auth.json／app.db（私密資料），絕不可進版控。
+/.workbuddy/

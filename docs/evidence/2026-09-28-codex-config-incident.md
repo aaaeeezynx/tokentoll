@@ -20,7 +20,7 @@
 | 時間 | 觸發 | 大小 | SHA-256 | `model` | catalog |
 |---|---|---|---|---|---|
 | 09-27 15:27:09 | （你原本的狀態） | — | — | — | — |
-| 09-28 16:19:35 | 我誤觸 `xxy-DS` 卡片的「編輯」 | 5640 | （未留存） | `deepseek-v4.1-flash` | `codex-18.json`（provider 18 = xxy-DS） |
+| 09-28 16:19:35 | 我誤觸 `自訂來源 A` 卡片的「編輯」 | 5640 | （未留存） | `deepseek-v4.1-flash` | `codex-18.json`（provider 18 = 自訂來源 A） |
 | 09-28 16:23:37 | 我誤觸 `NIM` 卡片 | 7588 | `5B40F3980EB2CB862796DBB88EA3F62668F2F45A2D0DBE3DE4F01D2DB5B4EA32` | `moonshotai/kimi-k3`（reasoning `max`） | `codex-15.json`（provider 15 = NIM） |
 | **09-28 16:28:56** | **還原：點 `opencode-go` 卡片** | **9720** | **`A9339B9517432D178F3325404D91E4EC57771ED1E7F5DB78F8FDF62C93489D3E`** | **`deepseek-v4.1-flash`（reasoning `medium`）** | **`codex-22.json`（provider 22 = opencode-go）** |
 
@@ -34,7 +34,7 @@
    → 你最後一次真正接管用的是 **provider 22 = opencode-go**。
 2. **`codex-22.json` 的檔名編碼了 provider id**：`codex-<provider_id>.json`。
    16:19 那份叫 `codex-18.json`、16:23 那份叫 `codex-15.json`，
-   正好對應我誤觸的 xxy-DS（18）與 NIM（15）。
+   正好對應我誤觸的 自訂來源 A（18）與 NIM（15）。
 3. **模型與 reasoning 完全吻合**：opencode-go 的第一個模型（`ord = 30`）是
    `deepseek-v4.1-flash`，其 `reasoning` 欄位為 `medium,high,xhigh,max`
    → 首位正是 `medium`。這與 App 內儲存的「上次接管參數」
@@ -96,7 +96,7 @@ config.toml.baseline-20260926-054716   6931 bytes  09-26 05:47:16
 
 ```
 ERROR codex_app_server: Invalid configuration; using defaults.
-C:\Users\luluna\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
+C:\Users\<user>\.codex\config.toml:16:12: `wire_api = "chat"` is no longer supported.
 How to fix: set `wire_api = "responses"` in your provider config.
 ```
 
