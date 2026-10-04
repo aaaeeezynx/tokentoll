@@ -54,7 +54,7 @@ const TABS: { id: Tab; label: string; icon: IconName; iconFill: IconName }[] = [
   { id: "usage", label: "nav.usage", icon: "chart-bar", iconFill: "chart-bar-fill" },
   { id: "providers", label: "nav.providers", icon: "server", iconFill: "server" },
   { id: "keys", label: "nav.keys", icon: "key", iconFill: "key-fill" },
-  { id: "diagnostics", label: "nav.diagnostics", icon: "alert", iconFill: "bolt-fill" },
+  { id: "diagnostics", label: "nav.diagnostics", icon: "alert", iconFill: "alert-fill" },
   { id: "calc", label: "nav.calc", icon: "calculator", iconFill: "calculator" },
   { id: "settings", label: "nav.settings", icon: "gear", iconFill: "gear-fill" },
 ];

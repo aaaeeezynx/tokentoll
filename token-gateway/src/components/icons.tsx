@@ -32,6 +32,7 @@ export type IconName =
   | "chevron-down"
   | "bolt-fill"
   | "alert"
+  | "alert-fill"
   | "sliders"
   | "info"
   | "calculator"
@@ -233,6 +234,21 @@ function Paths({ name }: { name: IconName }) {
           <path d="M12 4L21 19.5H3L12 4z" />
           <path d="M12 10v4" />
           <circle cx="12" cy="16.6" r="1" fill="currentColor" stroke="none" />
+        </>
+      );
+    // 與 alert 同形狀的填色版：選中時只切換填充，不會換成別的圖示。
+    // 驚嘆號用 evenodd 挖成真正的負空間，不依賴背景色（底色是半透明的）。
+    case "alert-fill":
+      return (
+        <>
+          <path
+            d="M12 4L21 19.5H3L12 4z
+               M12 9.4a1.15 1.15 0 0 1 1.15 1.15v3.2a1.15 1.15 0 0 1-2.3 0v-3.2A1.15 1.15 0 0 1 12 9.4z
+               M12 15.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5z"
+            fill="currentColor"
+            fillRule="evenodd"
+            stroke="none"
+          />
         </>
       );
     case "sliders":

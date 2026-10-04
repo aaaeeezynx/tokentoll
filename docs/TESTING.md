@@ -776,6 +776,83 @@ exit 0，exe 9,026,048 bytes、sha256 `1C9D27A7…`），然後**照你要做的
 
 ---
 
+### 0.9.39 側邊欄「診斷」選中後圖示變成閃電（2026-10-04）
+
+#### 使用者回報
+
+> 诊断的 icon 点击后会切换为另外一种，修正这个问题
+
+#### 真因：選中態配錯圖示
+
+`App.tsx` 的 `TABS` 用 `icon`／`iconFill` 兩欄位表現「選中」：
+
+```ts
+{ id: "usage",       icon: "chart-bar",  iconFill: "chart-bar-fill" },
+{ id: "providers",   icon: "server",     iconFill: "server" },     // 同形狀
+{ id: "keys",        icon: "key",        iconFill: "key-fill" },
+{ id: "diagnostics", icon: "alert",      iconFill: "bolt-fill" },  // ← 壞在這行
+{ id: "calc",        icon: "calculator", iconFill: "calculator" }, // 同形狀
+{ id: "settings",    icon: "gear",       iconFill: "gear-fill" },
+```
+
+其餘五頁的 `iconFill` 都是**同一個形狀**的填色版（或直接同一個圖示），只有診斷頁
+從「三角形警示」`alert` 變成「閃電」`bolt-fill`——兩個完全不同的圖形，
+所以點下去看起來像整個圖示被換掉。
+
+#### 修法：補一個與 alert 同形狀的 alert-fill
+
+新增 `icons.tsx` 的 `alert-fill`，外框沿用 `alert` 的三角形路徑
+（`M12 4L21 19.5H3L12 4z`），驚嘆號改用 **`fill-rule="evenodd"` 挖成真正的負空間**：
+
+```tsx
+case "alert-fill":
+  return (
+    <path
+      d="M12 4L21 19.5H3L12 4z
+         M12 9.4a1.15 1.15 0 0 1 1.15 1.15v3.2a1.15 1.15 0 0 1-2.3 0v-3.2A1.15 1.15 0 0 1 12 9.4z
+         M12 15.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5z"
+      fill="currentColor"
+      fillRule="evenodd"
+      stroke="none"
+    />
+  );
+```
+
+> 一度想用「填色三角 + 再用背景色描一次驚嘆號」的做法，但選中態的底是**半透明**的
+> `--mac-selected-bg`，用固定色描邊會出現色差。`evenodd` 是真正的洞，
+> 不依賴底色，任何背景都正確。
+
+`App.tsx` 則改為：
+
+```ts
+{ id: "diagnostics", label: "nav.diagnostics", icon: "alert", iconFill: "alert-fill" },
+```
+
+`bolt-fill` 本身沒有被移除——它在診斷頁的區塊標題（`SectionHead`）、連線檢查、
+用量查詢面板等 6 處仍是獨立語意，不受影響。
+
+#### 實機驗證（安裝後、CDP 讀真實 DOM 的 SVG 幾何）
+
+逐一比對側邊欄六項「未選中 vs 選中」的 path 幾何：
+
+| 頁籤 | 未選中 | 選中 | 判定 |
+|---|---|---|---|
+| 用量 | `chart-bar` 線稿 | `chart-bar-fill` 實心柱 | ✅ 同語意（線 → 實心） |
+| 上游來源 | `server` | `server` | ✅ 完全相同 |
+| 本地 Key | `key`（圓 r=4） | `key-fill`（圓 r=4.4） | ✅ 同形狀填色版 |
+| **診斷** | `alert`：`M12 4L21 19.5H3L12 4z` ＋ 驚嘆號線稿 | **同一個三角形路徑** ＋ `fill-rule=evenodd` 挖空 | ✅ **已修正**（原本會變成 `bolt-fill` 閃電） |
+| 試算 | `calculator` | `calculator` | ✅ 完全相同 |
+| 設定 | `gear`（線寬 1.8） | `gear`（線寬 2.6） | ✅ 同形狀加粗 |
+
+| 閘門 | 結果 |
+|---|---|
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `cargo test --offline --lib` | **318 passed / 0 failed / 8 ignored** ✅ |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tauri build` | exit 0 ✅ |
+
+---
+
 ### 0.9.38 App 主 Icon 換裝：v7「橫向等長列」（2026-10-02）
 
 #### 使用者要求
@@ -3511,7 +3588,46 @@ py scripts\dump_traces.py --problems -n 100
 
 ---
 
-### 9.39 建置（2026-10-03 17:26，App 主 Icon 換裝）—— **你目前安裝的就是這一個**
+### 9.40 建置（2026-10-04 16:29，側邊欄「診斷」選中圖示修正）—— **你目前安裝的就是這一個**
+
+依 §0.9.39 修正診斷頁選中後圖示變成閃電的問題。改動只有兩處：
+`src/components/icons.tsx`（新增 `alert-fill`）、`src/App.tsx`（`iconFill` 改指向它）。
+**沒有動 schema、沒有動任何後端程式碼。**
+
+| 項目 | 值 |
+|---|---|
+| 建置時間 | 2026-10-04 16:29:42 |
+| 安裝後 `%LOCALAPPDATA%\token-gateway\token-gateway.exe` | 9,513,984 bytes |
+| `target\release\token-gateway.exe` | 9,513,984 bytes |
+| 前端資源指紋 | `index-Bjce9vjq.js` |
+
+> 這次 exe 大小與 §9.39 相同是正常的：改動只在前端 JS，而前端是**內嵌**進 exe 的資源，
+> Rust 端一個位元組都沒動，所以體積不變（內容不同）。
+
+| 閘門 | 結果 |
+|---|---|
+| `pnpm exec tsc --noEmit` | exit 0 ✅ |
+| `cargo test --offline --lib` | **318 passed / 0 failed / 8 ignored** ✅ |
+| `cargo clippy --offline --all-targets` | 0 warning ✅ |
+| `pnpm exec tauri build` | exit 0 ✅ |
+
+#### 實機驗證（CDP 讀真實 DOM）
+
+側邊欄六項逐一點擊，比對「未選中 vs 選中」的 SVG path 幾何，
+並讀出選中態是否使用 `fill="currentColor"` 與 `fill-rule`：
+
+| 頁籤 | 選中態 path | 用 fill | fill-rule | 判定 |
+|---|---|---|---|---|
+| 用量 | `rect` × 3（實心柱） | ✅ | — | ✅ |
+| 上游來源 | 與未選中完全相同 | ✅ | — | ✅ |
+| 本地 Key | 同形狀填色版 | ✅ | — | ✅ |
+| **診斷** | `M12 4L21 19.5H3L12 4z`（與未選中**同一個三角形**） | ✅ | **evenodd** | ✅ **已修正** |
+| 試算 | 與未選中完全相同 | ✅ | — | ✅ |
+| 設定 | 同形狀（線寬加粗） | — | — | ✅ 原本設計 |
+
+NSIS 靜默安裝 exit code 0；安裝後啟動正常。
+
+### 9.39 前一次建置（2026-10-03 17:26，App 主 Icon 換裝，已被 9.40 取代）
 
 依 §0.9.38 的定案（R7「02 橫向等長列」）換裝全專案 icon。**沒有動 schema（仍 v15）、
 沒有動任何功能程式碼**，本輪改動只有：icon 資產、`index.html` 的 favicon 指向、
