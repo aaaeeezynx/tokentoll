@@ -26,6 +26,10 @@ import {
 import {
   ModelRowAcc,
 } from "./ModelRowAcc";
+import {
+  ContextWindowField,
+  DEFAULT_CONTEXT_WINDOW,
+} from "./ContextWindowField";
 
 export function ModelPanel(props: { provider: Provider; rowsClassName?: string; apiKeyOverride?: string; baseUrlOverride?: string }) {
   const qc = useQueryClient();
@@ -42,7 +46,8 @@ export function ModelPanel(props: { provider: Provider; rowsClassName?: string; 
   const [adding, setAdding] = useState(false);
   const [actual, setActual] = useState("");
   const [display, setDisplay] = useState("");
-  const [context, setContext] = useState("");
+  // 預設 256K：明確寫入，不讓「不指定」一路傳到目錄去繼承模板的 1M
+  const [context, setContext] = useState(String(DEFAULT_CONTEXT_WINDOW));
   const [reasoning, setReasoning] = useState<string>("");
   const [msg, setMsg] = useState("");
 
@@ -77,7 +82,7 @@ export function ModelPanel(props: { provider: Provider; rowsClassName?: string; 
       setAdding(false);
       setActual("");
       setDisplay("");
-      setContext("");
+      setContext(String(DEFAULT_CONTEXT_WINDOW));
       setReasoning("");
       setMsg("");
       refresh();
@@ -177,11 +182,10 @@ export function ModelPanel(props: { provider: Provider; rowsClassName?: string; 
           </div>
           <div className="mac-frow">
             <span className="mac-cap">上下文視窗</span>
-            <input
-              className={inputClsSm}
-              placeholder="空=不寫"
+            <ContextWindowField
               value={context}
-              onChange={(e) => setContext(e.target.value)}
+              onChange={setContext}
+              inputClassName={inputClsSm}
             />
           </div>
           <div className="mac-frow">

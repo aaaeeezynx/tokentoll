@@ -261,9 +261,22 @@
                 "medium".to_string()
             ]
         );
-        // unset = 模板並集；模板無檔位信息時退標準五檔，預設沿用模板值不覆寫
+        // unset = 模板並集；模板無檔位信息時退標準五檔。
+        // 上下文視窗則**不沿用模板值**：沒填就寫 256K（模板寫死 1M，繼承它會讓
+        // Codex 遲不壓縮而把請求堆爆上游 —— 見 DEFAULT_CONTEXT_WINDOW 註解）。
         let all_model = arr.iter().find(|m| m["slug"] == "all-model").unwrap();
         assert_eq!(all_model["default_reasoning_level"], "low");
+        assert_eq!(
+            all_model["context_window"],
+            crate::models::DEFAULT_CONTEXT_WINDOW,
+            "沒填 context_window 時應寫 256K，不可繼承模板的 1M"
+        );
+        assert_eq!(
+            all_model["max_context_window"],
+            crate::models::DEFAULT_CONTEXT_WINDOW
+        );
+        assert_ne!(all_model["context_window"], 1, "不得殘留模板的極小值");
+        assert_ne!(all_model["context_window"], 1000000, "不得繼承模板的 1M");
         assert_eq!(
             efforts(all_model),
             vec![
@@ -352,9 +365,125 @@
         assert!(p1.exists());
         // 刪除 legacy 後仍可用網關自持副本（不再依賴 cc-switch）
         std::fs::remove_file(home.join(".codex").join("cc-switch-model-catalog.json")).unwrap();
-        let p2 = ensure_template(&home, &data).unwrap();
+        let p2 = ensure_template_with(&home, &data, &|| {
+            panic!("已有自持副本，不該再去叫 Codex")
+        })
+        .unwrap();
         assert_eq!(p2, p1);
-        // 兩邊都沒有 → 明確報錯
-        std::fs::remove_file(&p1).unwrap();
-        assert!(ensure_template(&home, &data).is_err());
+    }
+
+    /// 兩邊都沒有時**自己跟 Codex 要**（2026-10-08 補的自癒路徑）。
+    ///
+    /// 這是「第一次安裝、從沒裝過 cc-switch」那台機器的情境：以前必定失敗，
+    /// 而錯誤訊息叫他跑的 `codex debug models --bundled` 只印到 stdout、不寫檔。
+    #[test]
+    fn template_falls_back_to_codex_export_when_nothing_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let data = dir.path().join("data");
+        let exported = br#"{"models":[{"slug":"gpt-x","display_name":"GPT-X",
+            "context_window":272000,"default_reasoning_level":"low",
+            "supported_reasoning_levels":[{"effort":"low","description":"d"}]}]}"#;
+
+        let p = ensure_template_with(&home, &data, &|| Ok(exported.to_vec())).unwrap();
+        assert_eq!(p, data.join("catalogs").join("codex-template.json"));
+        assert_eq!(
+            std::fs::read(&p).unwrap(),
+            exported.to_vec(),
+            "匯出的內容要原樣落地（不可加 BOM、不可改編碼）"
+        );
+        // 落地後第二次不該再叫 Codex
+        let p2 = ensure_template_with(&home, &data, &|| panic!("第二次不該再叫 Codex")).unwrap();
+        assert_eq!(p2, p);
+    }
+
+    /// Codex 拿不到時，錯誤訊息必須同時給出兩條可行解法（而不是叫使用者跑一個
+    /// 不會產生檔案的指令）。
+    #[test]
+    fn template_error_gives_actionable_alternatives() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let data = dir.path().join("data");
+        let err = ensure_template_with(&home, &data, &|| {
+            Err("PATH 上找不到 codex.exe／codex.cmd".to_string())
+        })
+        .unwrap_err();
+        assert!(err.contains("解法一"), "缺少解法一：{err}");
+        assert!(err.contains("解法二"), "缺少解法二：{err}");
+        assert!(err.contains("同時產生 Codex 模型目錄"), "缺少取消勾選的指示：{err}");
+        assert!(!p_of(&data).exists(), "失敗時不該留下半成品模板");
+    }
+
+    fn p_of(data: &std::path::Path) -> std::path::PathBuf {
+        data.join("catalogs").join("codex-template.json")
+    }
+
+    /// 模板內容驗證：擋掉「不是 JSON」「沒有 models」「models 是空的」。
+    #[test]
+    fn template_validation_rejects_junk() {
+        assert!(validate_template(r#"{"models":[{"slug":"a"}]}"#).is_ok());
+        assert!(validate_template("not json").is_err());
+        assert!(validate_template(r#"{"foo":1}"#).is_err());
+        assert!(validate_template(r#"{"models":[]}"#).is_err());
+        // 帶 BOM 會解析失敗 —— 所以 `export_template_from_codex` 必須**先**去 BOM
+        // 再驗證。真實踩過：PowerShell 的 `>` 會寫出 UTF-16，Set-Content 會寫 BOM。
+        assert!(
+            validate_template("\u{feff}{\"models\":[{\"slug\":\"a\"}]}").is_err(),
+            "serde_json 不接受 BOM，驗證前必須先 strip"
+        );
+    }
+
+    /// 真機驗證：本機的 Codex CLI 真的找得到、匯出內容也真的能當模板。
+    ///
+    /// 預設忽略（需要機器上裝了 Codex CLI／桌面版）：
+    /// `cargo test --offline --lib -- --ignored live_codex_template_export --nocapture`
+    #[test]
+    #[ignore = "live: 需要本機安裝 Codex CLI 或桌面版"]
+    fn live_codex_template_export() {
+        let bytes = export_template_from_codex().expect("應該找得到 Codex 並匯出成功");
+        let text = String::from_utf8(bytes).expect("匯出必須是合法 UTF-8");
+        assert!(
+            !text.starts_with('\u{feff}'),
+            "匯出內容不可帶 BOM（serde_json 不接受）"
+        );
+        validate_template(&text).expect("匯出內容必須是可用模板");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let n = v["models"].as_array().unwrap().len();
+        assert!(n > 0, "至少要有一個模型");
+        println!("✅ Codex 匯出 {n} 個模型、{} bytes，可當模板", text.len());
+    }
+
+    /// 真機驗證（本次修的核心情境）：**完全沒有模板**的乾淨機器能自癒。
+    ///
+    /// 模擬「第一次安裝 Codex 與本 App、從沒裝過 cc-switch」那台機器：
+    /// temp home 沒有 cc-switch 遺留檔、temp app_data 沒有自持副本
+    /// —— 舊版在這裡直接失敗，錯誤訊息還叫他跑一個不會產生檔案的指令。
+    ///
+    /// `cargo test --offline --lib -- --ignored live_ensure_template_self_heals --nocapture`
+    #[test]
+    #[ignore = "live: 需要本機安裝 Codex CLI 或桌面版"]
+    fn live_ensure_template_self_heals_on_a_clean_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let data = dir.path().join("data");
+        assert!(
+            !home.join(".codex").join("cc-switch-model-catalog.json").exists(),
+            "前置條件：這台機器沒有 cc-switch 遺留檔"
+        );
+        assert!(!p_of(&data).exists(), "前置條件：沒有自持副本");
+
+        let p = ensure_template(&home, &data).expect("乾淨機器上應該能自己跟 Codex 要到模板");
+        assert_eq!(p, p_of(&data));
+        assert!(p.exists());
+        let text = std::fs::read_to_string(&p).unwrap();
+        validate_template(&text).expect("自癒產生的模板必須可用");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        println!(
+            "✅ 乾淨機器自癒成功：{} 個模型、{} bytes",
+            v["models"].as_array().unwrap().len(),
+            text.len()
+        );
     }

@@ -25,6 +25,9 @@ import {
 import {
   useConfirm,
 } from "../../Confirm";
+import {
+  ContextWindowField,
+} from "./ContextWindowField";
 
 /** 模型行：唯讀摘要＋點選展開編輯（macOS inspector 手風琴）。 */
 export function ModelRowAcc(props: {
@@ -201,11 +204,10 @@ export function ModelRowAcc(props: {
           </div>
           <div className="mac-frow">
             <span className="mac-cap">上下文視窗</span>
-            <input
-              className={inputCls}
-              placeholder="例如 128000（空=不寫）"
+            <ContextWindowField
               value={context}
-              onChange={(e) => setContext(e.target.value)}
+              onChange={setContext}
+              inputClassName={inputCls}
             />
           </div>
           <div className="mac-frow">

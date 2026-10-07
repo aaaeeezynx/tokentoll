@@ -35,8 +35,38 @@ pub(crate) fn npm_global_root() -> Option<PathBuf> {
 }
 
 
-/// 帶超時執行（輪詢等待，超時殺進程；不經 shell，argv[0] 必須是真 exe 或 cmd）。
-pub(crate) fn run_with_timeout(argv: &[String], timeout_ms: u64) -> Result<String, String> {
+/// 把一條 pipe 交給執行緒讀到完（見 [`capture_with_timeout`] 的說明）。
+fn spawn_reader<R: std::io::Read + Send + 'static>(
+    r: Option<R>,
+) -> Option<std::thread::JoinHandle<Vec<u8>>> {
+    r.map(|mut s| {
+        std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut s, &mut b);
+            b
+        })
+    })
+}
+
+/// 一次捕獲的結果。
+pub(crate) struct Captured {
+    pub(crate) ok: bool,
+    pub(crate) code: Option<i32>,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+    pub(crate) timed_out: bool,
+}
+
+/// 跑一個外部命令並捕獲兩條輸出串流；超時就殺掉。
+///
+/// **為什麼要另開執行緒先讀 pipe**：OS 的 pipe 緩衝區只有 ~64 KB。舊寫法是等
+/// 行程結束才 `wait_with_output()`，於是輸出大於緩衝區的指令會**寫滿 pipe 而
+/// 阻塞**，永遠不結束 —— 每一輪都撞逾時。2026-10-08 由
+/// `codex debug models --bundled`（658 KB）踩到：直接跑 2 秒，經過這個函式
+/// 卻 30 秒逾時。
+///
+/// 逾時**不影響**已經讀到的內容：殺掉行程後仍會 join 兩條讀取執行緒。
+pub(crate) fn capture_with_timeout(argv: &[String], timeout_ms: u64) -> Result<Captured, String> {
     if argv.is_empty() {
         return Err("空命令".to_string());
     }
@@ -49,82 +79,72 @@ pub(crate) fn run_with_timeout(argv: &[String], timeout_ms: u64) -> Result<Strin
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW：避免彈黑框
     }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("啟動失敗：{e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("啟動失敗：{e}"))?;
+
+    let h_out = spawn_reader(child.stdout.take());
+    let h_err = spawn_reader(child.stderr.take());
+
     let step = 200u64;
     let mut waited = 0u64;
-    loop {
+    let mut timed_out = false;
+    let status = loop {
         match child.try_wait().map_err(|e| format!("等待失敗：{e}"))? {
-            Some(status) => {
-                if !status.success() {
-                    return Err(format!("退出碼非零：{}", status.code().unwrap_or(-1)));
-                }
-                let out = child
-                    .wait_with_output()
-                    .map_err(|e| format!("讀輸出失敗：{e}"))?;
-                let mut text = String::from_utf8_lossy(&out.stdout).to_string();
-                if text.trim().is_empty() {
-                    text = String::from_utf8_lossy(&out.stderr).to_string();
-                }
-                return Ok(text);
-            }
+            Some(s) => break s,
             None => {
                 if waited >= timeout_ms {
                     let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("超時（>{timeout_ms}ms），已終止"));
+                    timed_out = true;
+                    break child.wait().map_err(|e| format!("等待失敗：{e}"))?;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(step));
                 waited += step;
             }
         }
+    };
+    let join = |h: Option<std::thread::JoinHandle<Vec<u8>>>| {
+        h.map(|h| h.join().unwrap_or_default()).unwrap_or_default()
+    };
+    Ok(Captured {
+        ok: status.success(),
+        code: status.code(),
+        stdout: join(h_out),
+        stderr: join(h_err),
+        timed_out,
+    })
+}
+
+/// 帶超時執行（輪詢等待，超時殺進程；不經 shell，argv[0] 必須是真 exe 或 cmd）。
+pub(crate) fn run_with_timeout(argv: &[String], timeout_ms: u64) -> Result<String, String> {
+    let c = capture_with_timeout(argv, timeout_ms)?;
+    if c.timed_out {
+        return Err(format!("超時（>{timeout_ms}ms），已終止"));
     }
+    if !c.ok {
+        return Err(format!("退出碼非零：{}", c.code.unwrap_or(-1)));
+    }
+    let mut text = String::from_utf8_lossy(&c.stdout).to_string();
+    if text.trim().is_empty() {
+        text = String::from_utf8_lossy(&c.stderr).to_string();
+    }
+    Ok(text)
 }
 
 
 /// 寬鬆捕獲（版本探測用）：不要求退出碼為零，只要有輸出就算數
 ///（部分 CLI 在有更新可用時 `--version` 非零退出）。
 pub(crate) fn run_capture_lenient(argv: &[String], timeout_ms: u64) -> Option<String> {
-    if argv.is_empty() {
+    let c = capture_with_timeout(argv, timeout_ms).ok()?;
+    if c.timed_out {
         return None;
     }
-    let mut cmd = std::process::Command::new(&argv[0]);
-    cmd.args(&argv[1..])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW：避免彈黑框
+    let mut text = String::from_utf8_lossy(&c.stdout).to_string();
+    if text.trim().is_empty() {
+        text = String::from_utf8_lossy(&c.stderr).to_string();
     }
-    let mut child = cmd.spawn().ok()?;
-    let step = 200u64;
-    let mut waited = 0u64;
-    loop {
-        match child.try_wait().ok()? {
-            Some(_) => {
-                let out = child.wait_with_output().ok()?;
-                let mut text = String::from_utf8_lossy(&out.stdout).to_string();
-                if text.trim().is_empty() {
-                    text = String::from_utf8_lossy(&out.stderr).to_string();
-                }
-                return if text.trim().is_empty() {
-                    None
-                } else {
-                    Some(text)
-                };
-            }
-            None => {
-                if waited >= timeout_ms {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(step));
-                waited += step;
-            }
-        }
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
     }
 }
 

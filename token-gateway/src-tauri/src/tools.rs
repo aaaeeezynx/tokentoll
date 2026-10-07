@@ -59,9 +59,11 @@ pub(crate) use {
     // ---- versions ----
     versions::ToolLatest,
     versions::ToolVersion,
+    versions::run_with_timeout,
     versions::tool_latest,
     versions::tool_update_run,
     versions::tool_versions,
+    versions::which_bin,
 
     // ---- apply ----
     apply::ClaudeModelMap,
