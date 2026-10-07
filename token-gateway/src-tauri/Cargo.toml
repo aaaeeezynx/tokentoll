@@ -1,6 +1,6 @@
 [package]
 name = "tokentoll"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local AI toll booth — meter, route, and account for every token your coding agents spend"
 authors = ["aaaeeezynx"]
 edition = "2021"

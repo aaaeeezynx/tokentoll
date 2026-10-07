@@ -230,24 +230,72 @@ macOS 27 風格的介面：Liquid Glass、深／淺／跟隨系統三種主題�
 
 ## 下載 · Download
 
-### 最新版本 · v0.1.0
+### 最新版本 · v0.1.1
 
 **[⬇ 前往 Releases 頁下載](https://github.com/aaaeeezynx/tokentoll/releases/latest)**
 
 | 檔案 | 大小 | 說明 |
 |---|---|---|
-| [`Token Toll_0.1.0_x64-setup.exe`](https://github.com/aaaeeezynx/tokentoll/releases/download/v0.1.0/Token.Toll_0.1.0_x64-setup.exe) | 3.9 MB | **NSIS 安裝包（推薦）**，雙擊安裝 |
-| [`Token Toll_0.1.0_x64_en-US.msi`](https://github.com/aaaeeezynx/tokentoll/releases/download/v0.1.0/Token.Toll_0.1.0_x64_en-US.msi) | 8.2 MB | MSI 安裝包，適合企業佈署 |
+| [`Token Toll_0.1.1_x64-setup.exe`](https://github.com/aaaeeezynx/tokentoll/releases/download/v0.1.1/Token.Toll_0.1.1_x64-setup.exe) | 3.9 MB | **NSIS 安裝包（推薦）**，雙擊安裝 |
+| [`Token Toll_0.1.1_x64_en-US.msi`](https://github.com/aaaeeezynx/tokentoll/releases/download/v0.1.1/Token.Toll_0.1.1_x64_en-US.msi) | 8.2 MB | MSI 安裝包，適合企業佈署 |
 
-> 版本號 `0.1.0` 在 `Cargo.toml`／`tauri.conf.json`／`package.json` 三者一致。
+> 版本號 `0.1.1` 在 `Cargo.toml`／`tauri.conf.json`／`package.json` 三者一致。
 
 **系統需求**：Windows 10 1809+ / Windows 11（x64）· WebView2 Runtime（Win10／11 一般自帶）
 
 > **未簽名版本**：SmartScreen 會提示「未知的發行者」，選「仍要執行」即可。
 > 想自行核對檔案完整性，SHA256 校驗碼寫在 Release 說明裡。
 
-> **Latest release: v0.1.0.** Unsigned build: SmartScreen will warn about an
+> **Latest release: v0.1.1.** Unsigned build: SmartScreen will warn about an
 > unknown publisher — choose "Run anyway". Requires WebView2 Runtime.
+
+---
+
+## v0.1.1 修復 · What's fixed
+
+### 1. 換協議撞到 404 被誤學成「協議會通」→ 永久 404
+
+**症狀**：某些模型（實測 NIM 的 `moonshotai/kimi-k3`、`z-ai/glm-5.3`）一直回
+`404 page not found`，重試也一樣。
+
+**原因**：上游跑太久自己回 504 之後，網關會換到另一個協議重試；若那個端點上游
+根本沒有就是 404。舊版把**任何非 400 的回應**都當成成功，於是那個 404 被寫進
+「協議記憶」並在下一輪被排到第一位 —— 永久 404，而且每次失敗都再學一次同樣的錯誤。
+
+**修正**：只有真正 2xx 才寫入協議記憶；404／405 視為「端點不存在」，換手且不學。
+逾時／上游故障的訊息會優先呈現（你看到的是 504，不再是沒有訊息量的 404）。
+換手功能本身不變：模型真的在另一邊時照樣成功並記住。
+
+### 2. Codex 模型目錄模板自癒（不再依賴 cc-switch）
+
+**症狀**：在**第一次安裝**、從沒裝過 cc-switch 的機器上，接管 Codex 時失敗：
+「找不到模型目錄模板…請先跑一次 `codex debug models --bundled` 導出」。
+
+**原因**：模板原本只能靠「收編 cc-switch 的遺留檔」產生；而那句錯誤訊息叫你跑的
+指令**只印到 stdout、不寫任何檔案**，照著做也生不出網關要找的那個檔。
+
+**修正**：找不到模板時，網關**自己**呼叫 `codex debug models --bundled` 取得內建
+目錄當模板（依序找 PATH 上的 `codex.exe`、Codex **桌面版**的 `codex.exe`、npm shim
+`codex.cmd`）。錯誤訊息也改成兩條真的可行的解法。
+
+### 3. 修掉外部指令的 pipe 死結
+
+**症狀**：輸出量大的外部指令會「永遠逾時」。
+
+**原因**：舊版等到行程結束才讀 pipe，而 pipe 緩衝區只有 ~64 KB —— 輸出超過就會
+把它寫滿而阻塞。
+
+**修正**：先開執行緒把兩條 pipe 讀完再等行程。Codex 的 658 KB 匯出從
+**30 秒逾時**變成 **0.25 秒**。
+
+### 4. 上下文視窗改成下拉選單，預設 256K
+
+模型的上下文視窗未填時，原本會繼承模板寫死的 **1,000,000**，讓 Codex 以為有
+100 萬 token 可用而遲不壓縮，把請求堆到上游直接 400（實測出現過 937 KB／2.3 MB／
+25 MB 的請求體）。
+
+現在它是下拉選單：**32K / 64K / 128K / 200K / 256K（預設）/ 512K / 1M / 2M**，
+另備「自訂…」與「不指定」；未填時寫 **256K**，不再繼承 1M。
 
 ---
 
@@ -317,9 +365,9 @@ pnpm tauri build    # 打包 · packaging
 
 | 指標 | 值 |
 |---|---|
-| 版本 | `0.1.0` |
+| 版本 | `0.1.1` |
 | Schema | **v15** |
-| 測試 | **325 passed / 0 failed / 8 ignored** |
+| 測試 | **329 passed / 0 failed / 10 ignored** |
 | Clippy | 0 warning（`-D warnings`） |
 | 程式碼規模 | Rust ≈ 25,000 行 ／ TypeScript ≈ 12,700 行 |
 | 授權 | MIT |
