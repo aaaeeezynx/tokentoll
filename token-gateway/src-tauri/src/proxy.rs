@@ -86,8 +86,8 @@ use {
         strip_encrypted_content, strip_json_field, strip_unsupported_tools, upstream_err_text,
     },
     util::{
-        bearer, infer_app, is_hop_header, join_upstream, model_from_path, open_conn,
-        should_inject_usage, strip_key_param,
+        bearer, infer_app, is_hop_header, is_missing_endpoint, join_upstream, model_from_path,
+        open_conn, should_inject_usage, strip_key_param,
     },
 };
 
@@ -225,6 +225,10 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
     let total = attempts.len();
     let mut last_reject: Option<Box<Response>> = None;
     let mut success: Option<(reqwest::Response, Prepared, bool)> = None;
+    // 候選全部失敗時的退路：留**第一個**有意義的上游回應。
+    // 5xx（逾時／上游故障）比「換協議之後撞到的 404」有訊息量得多 ——
+    // 舊版把後者當成功回給客戶端，使用者只看到 `404 page not found`。
+    let mut fallback: Option<(reqwest::Response, Prepared, bool)> = None;
     for (i, at) in attempts.iter().enumerate() {
         if at.provider_id != authed.provider_id {
             match others.iter().find(|p| p.id == at.provider_id) {
@@ -301,22 +305,48 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
                         }
                         .warn(),
                     );
+                    // 逾時／上游故障比「換協議之後的 404」有意義得多，
+                    // 留著當最後的退路（後面遇到的 404 不會覆蓋它）。
+                    fallback.get_or_insert((r, prep, translated));
                 } else {
                     success = Some((r, prep, translated));
                     break;
                 }
             }
             SendOutcome::Ok(r) => {
-                // 來源活著（含上游自己的 4xx）：斷路器歸零。
+                // 來源活著：斷路器歸零。
                 ctx.health.record_success(at.provider_id);
-                // 記住「這個來源的這個模型用這個協議會通」，下次第一個就試它。
-                learn_format(
-                    ctx.db_path.as_path(),
-                    at.provider_id,
-                    &model_raw,
-                    &authed.provider_api_format,
-                    &at.api_format,
-                );
+                // **只有真正 2xx 才算「這個來源的這個模型用這個協議會通」。**
+                //
+                // 舊版沒有這個守衛：`retry.rs` 把任何非 400 的回應都回成
+                // `SendOutcome::Ok`，於是 404／403／429 全部被寫進
+                // `provider_model_protocol`。而換手路徑一定會去試上游不一定
+                // 存在的另一個端點，那個 404 就被記成「這個協議會通」，
+                // 下一輪被 `plan_attempts` 排到第一位 —— 永久 404 迴圈，
+                // 而且每次失敗都再學一次同樣的錯誤。
+                // 2026-10-07 實例：NIM（chat 渠道）的 moonshotai/kimi-k3 與
+                // z-ai/glm-5.3，起因只是上游慢到回 504 而觸發了換手。
+                if r.status().is_success() {
+                    learn_format(
+                        ctx.db_path.as_path(),
+                        at.provider_id,
+                        &model_raw,
+                        &authed.provider_api_format,
+                        &at.api_format,
+                    );
+                    success = Some((r, prep, translated));
+                    break;
+                }
+                // 404／405 = 這個路徑在上游不存在。這條候選沒意義：
+                // 還有下一個就換手；都沒了就留著（但別蓋掉先前的逾時訊息）。
+                if is_missing_endpoint(r.status()) {
+                    fallback.get_or_insert((r, prep, translated));
+                    if i + 1 < total {
+                        continue;
+                    }
+                    break;
+                }
+                // 其餘 4xx（401／403／429…）是上游的真實答覆，照原樣回給客戶端。
                 success = Some((r, prep, translated));
                 break;
             }
@@ -337,7 +367,7 @@ async fn proxy_handler(State(ctx): State<ProxyCtx>, req: axum::http::Request<Bod
             }
         }
     }
-    let (upstream, prep, translated) = match success {
+    let (upstream, prep, translated) = match success.or(fallback) {
         Some(v) => v,
         None => {
             return match last_reject {

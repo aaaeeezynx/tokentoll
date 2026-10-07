@@ -209,6 +209,22 @@ pub(super) fn is_hop_header(name: &str) -> bool {
             | "proxy-authorization" | "te" | "trailer" | "upgrade"
     )
 }
+/// 404／405：這個路徑在該上游**不存在**。
+///
+/// 換協議換手時最容易踩到：provider 宣告的是 chat 渠道，卻被換到
+/// `openai-responses` 去打 `/responses`，而上游根本沒這個端點，回一句
+/// go 風格的 `404 page not found`。
+///
+/// 這種回應**不代表**那個協議「會通」，所以兩件事都不能做：
+/// 不能拿去學習（見 `proxy.rs` 的 `learn_format` 守衛），也不能當成這條
+/// 候選的成功結果。2026-10-07 的實例：NIM 的 `moonshotai/kimi-k3` 與
+/// `z-ai/glm-5.3` 因為這條路徑被永久 404。
+pub(super) fn is_missing_endpoint(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+    )
+}
 /// 是否注入 stream_options 索取用量：僅 OpenAI chat（含翻譯後）。
 /// Responses / Anthropic / Gemini 會因未知欄位被上游 400。
 pub(super) fn should_inject_usage(translated: bool, incoming_path: &str) -> bool {

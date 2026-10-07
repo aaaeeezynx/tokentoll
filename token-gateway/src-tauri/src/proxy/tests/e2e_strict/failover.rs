@@ -316,3 +316,112 @@
         );
         gw.abort();
     }
+
+    /// 回歸：換協議撞到 404 **不可以**被學成「這個協議會通」。
+    ///
+    /// 2026-10-07 的真實故障：NIM（宣告 openai-chat）的 `moonshotai/kimi-k3`
+    /// 與 `z-ai/glm-5.3` 跑超過 300 秒、NIM 自己回 504 → 網關換手到
+    /// `openai-responses` 去打 NIM 根本沒有的 `/responses` → 404。
+    ///
+    /// 舊版把任何非 400 的回應都當 `SendOutcome::Ok`，於是那個 404 被寫進
+    /// `provider_model_protocol`，下一輪被 `plan_attempts` 排到第一位 ——
+    /// **永久 404 迴圈**，而且每次失敗都再學一次同樣的錯誤。
+    ///
+    /// 這裡同時釘住兩件事：
+    /// ① 404 不進學習表；
+    /// ② 使用者看到的是有意義的 504，而不是 `404 page not found`。
+    #[tokio::test]
+    async fn e2e_missing_endpoint_is_not_learned_and_504_wins() {
+        use axum::response::IntoResponse;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("fo-nx.db");
+        let (pid, secret) = {
+            let conn = crate::db::open_and_ensure(&db_path).unwrap();
+            let pid = insert_provider(&conn, "fo-nx-src", "openai-chat", "PLACEHOLDER");
+            add_model(&conn, pid, "kimi-test");
+            let secret = make_key(&conn, pid, "fo-nx");
+            (pid, secret)
+        };
+        // 假上游：chat 端點像 NIM 一樣「跑太久自己回 504」；responses 端點不存在。
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_fake = seen.clone();
+        let fake = axum::Router::new().fallback(
+            move |uri: axum::http::Uri| {
+                let seen = seen_fake.clone();
+                async move {
+                    seen.lock().unwrap().push(uri.path().to_string());
+                    if uri.path().ends_with("/responses") {
+                        // go 風格的不存在端點
+                        (
+                            axum::http::StatusCode::NOT_FOUND,
+                            "404 page not found".to_string(),
+                        )
+                            .into_response()
+                    } else {
+                        (
+                            axum::http::StatusCode::GATEWAY_TIMEOUT,
+                            "upstream timeout".to_string(),
+                        )
+                            .into_response()
+                    }
+                }
+            },
+        );
+        let fake_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let fake_port = fake_l.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(fake_l, fake).await.unwrap() });
+        {
+            let conn = crate::db::open_and_ensure(&db_path).unwrap();
+            conn.execute(
+                "UPDATE providers SET base_url=?1 WHERE name='fo-nx-src'",
+                [format!("http://127.0.0.1:{fake_port}")],
+            )
+            .unwrap();
+        }
+        let gw_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let gw_port = gw_l.local_addr().unwrap().port();
+        let gw = tokio::spawn(serve(db_path.clone(), gw_l));
+        let http = Client::new();
+
+        let r = http
+            .post(format!("http://127.0.0.1:{gw_port}/v1/responses"))
+            .bearer_auth(&secret)
+            .json(&serde_json::json!({"model": "kimi-test", "input": "hi", "stream": false}))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            r.status(),
+            504,
+            "應該把有意義的 504 回給使用者，而不是換協議撞到的 404"
+        );
+
+        // 兩個候選都試過了（chat 逾時 → responses 不存在）
+        let seq = seen.lock().unwrap().clone();
+        assert!(
+            seq.iter().any(|p| p.ends_with("/chat/completions")),
+            "應試過 chat：{seq:?}"
+        );
+        assert!(
+            seq.iter().any(|p| p.ends_with("/responses")),
+            "應試過 responses：{seq:?}"
+        );
+
+        // ★ 核心斷言：404 絕對不可以被學成「這個協議會通」
+        let conn = open_conn(&db_path).unwrap();
+        let learned: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM provider_model_protocol WHERE provider_id=?1",
+                [pid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            learned, 0,
+            "上游 404（端點不存在）不該進學習表 —— 否則會變成永久 404 迴圈"
+        );
+        gw.abort();
+    }
